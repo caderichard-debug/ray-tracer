@@ -57,6 +57,8 @@ uniform float time;
 uniform vec3 sphere_centers[10];
 uniform float sphere_radii[10];
 uniform vec3 sphere_colors[10];
+uniform int sphere_types[10];  // 0 = Lambertian (diffuse), 1 = Metal (reflective)
+uniform float sphere_fuzz[10]; // Roughness for metal materials
 uniform int sphere_count;
 uniform int samples_per_pixel;
 uniform int max_depth;
@@ -150,6 +152,22 @@ bool scene_hit(Ray r, float t_min, float t_max, inout HitRecord rec) {
     return hit_anything;
 }
 
+// Random number generation (must be declared before ray_color)
+float rand_seed = 0.0;
+
+float random_float() {
+    rand_seed = fract(sin(dot(vec2(rand_seed, rand_seed * 0.1), vec2(12.9898, 78.233))) * 43758.5453);
+    return rand_seed;
+}
+
+vec3 random_in_unit_sphere() {
+    vec3 p;
+    do {
+        p = 2.0 * vec3(random_float(), random_float(), random_float()) - 1.0;
+    } while (dot(p, p) >= 1.0);
+    return p;
+}
+
 vec3 ray_color(Ray r, int depth) {
     HitRecord rec;
     vec3 color = vec3(1.0, 1.0, 1.0);  // Start with white
@@ -179,32 +197,43 @@ vec3 ray_color(Ray r, int depth) {
         vec3 reflect_dir = reflect(-light_dir, rec.normal);
         float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
 
-        // Get material color
+        // Get material properties
         vec3 albedo = sphere_colors[rec.material_id];
+        int mat_type = sphere_types[rec.material_id];
+        float fuzz = sphere_fuzz[rec.material_id];
 
         // Combine lighting
         color = ambient * albedo + diff * light_color * albedo + spec * light_color * 0.5;
         accum_color += throughput * color;
 
-        // Reflection (only for reflective materials)
-        if (bounce < depth - 1 && albedo.r > 0.5) {
-            vec3 reflected = reflect(normalize(-r.direction), rec.normal);
-            r.origin = rec.p + 0.001 * rec.normal;
-            r.direction = normalize(reflected);
-            throughput *= 0.5 * albedo;  // Attenuate
+        // Handle material scatter
+        if (bounce < depth - 1) {
+            if (mat_type == 1) {
+                // Metal: Reflective
+                vec3 reflected = reflect(normalize(-r.direction), rec.normal);
+
+                // Add fuzz for rough metals
+                if (fuzz > 0.0) {
+                    reflected = normalize(reflected + fuzz * vec3(
+                        random_float() * 2.0 - 1.0,
+                        random_float() * 2.0 - 1.0,
+                        random_float() * 2.0 - 1.0
+                    ));
+                }
+
+                r.origin = rec.p + 0.001 * rec.normal;
+                r.direction = normalize(reflected);
+                throughput *= albedo;  // Attenuate by albedo
+            } else {
+                // Lambertian (diffuse): Stop bouncing - use direct lighting only
+                break;
+            }
         } else {
             break;
         }
     }
 
     return accum_color;
-}
-
-// Pseudo-random number generator
-float rand_seed = 0.0;
-float random_float() {
-    rand_seed = fract(sin(dot(vec2(rand_seed, rand_seed * 0.1), vec2(12.9898, 78.233))) * 43758.5453);
-    return rand_seed;
 }
 
 void main() {
@@ -683,6 +712,8 @@ int main(int argc, char* argv[]) {
     Vec3 gpu_sphere_centers[10];
     float gpu_sphere_radii[10];
     Vec3 gpu_sphere_colors[10];
+    int gpu_sphere_types[10];  // 0 = Lambertian, 1 = Metal
+    float gpu_sphere_fuzz[10]; // Roughness for metals
 
     // Force window to front and make sure it's visible
     SDL_RaiseWindow(window);
@@ -774,10 +805,19 @@ int main(int argc, char* argv[]) {
                 }
             } else if (event.type == SDL_MOUSEMOTION) {
                 if (SDL_GetRelativeMouseMode()) {
+#ifdef USE_GPU_RENDERER
+                    // GPU: Inverted vertical look
                     camera_controller.rotate(
                         event.motion.xrel * 0.1f,
-                        event.motion.yrel * 0.1f  // Inverted vertical look
+                        event.motion.yrel * 0.1f
                     );
+#else
+                    // CPU: Standard vertical look
+                    camera_controller.rotate(
+                        event.motion.xrel * 0.1f,
+                        -event.motion.yrel * 0.1f
+                    );
+#endif
                     need_render = true;
                 }
             }
@@ -804,11 +844,19 @@ int main(int argc, char* argv[]) {
             need_render = true;
         }
         if (keystates[SDL_SCANCODE_UP]) {
+#ifdef USE_GPU_RENDERER
+            camera_controller.move_up(-move_speed);  // Inverted for GPU
+#else
             camera_controller.move_up(move_speed);
+#endif
             need_render = true;
         }
         if (keystates[SDL_SCANCODE_DOWN]) {
+#ifdef USE_GPU_RENDERER
+            camera_controller.move_up(move_speed);  // Inverted for GPU
+#else
             camera_controller.move_up(-move_speed);
+#endif
             need_render = true;
         }
 
@@ -830,6 +878,8 @@ int main(int argc, char* argv[]) {
                 std::vector<Vec3> sphere_centers_vec;
                 std::vector<float> sphere_radii_vec;
                 std::vector<Vec3> sphere_colors_vec;
+                std::vector<int> sphere_types_vec;  // 0 = Lambertian, 1 = Metal
+                std::vector<float> sphere_fuzz_vec; // Roughness for metals
 
                 for (const auto& obj : scene.objects) {
                     // Try to cast to sphere
@@ -838,6 +888,18 @@ int main(int argc, char* argv[]) {
                         sphere_centers_vec.push_back(sphere->center);
                         sphere_radii_vec.push_back(sphere->radius);
                         sphere_colors_vec.push_back(sphere->mat->albedo);
+
+                        // Extract material type
+                        auto lambertian = std::dynamic_pointer_cast<Lambertian>(sphere->mat);
+                        auto metal = std::dynamic_pointer_cast<Metal>(sphere->mat);
+
+                        if (metal) {
+                            sphere_types_vec.push_back(1);  // Metal
+                            sphere_fuzz_vec.push_back(metal->fuzz);
+                        } else {
+                            sphere_types_vec.push_back(0);  // Lambertian (default)
+                            sphere_fuzz_vec.push_back(0.0f);
+                        }
                     }
                 }
 
@@ -849,6 +911,8 @@ int main(int argc, char* argv[]) {
                     gpu_sphere_centers[i] = sphere_centers_vec[i];
                     gpu_sphere_radii[i] = sphere_radii_vec[i];
                     gpu_sphere_colors[i] = sphere_colors_vec[i];
+                    gpu_sphere_types[i] = sphere_types_vec[i];
+                    gpu_sphere_fuzz[i] = sphere_fuzz_vec[i];
                 }
 
                 // Load OpenGL functions using SDL
@@ -1044,6 +1108,19 @@ int main(int argc, char* argv[]) {
                 if (loc_id >= 0) {
                     glUniform3f(loc_id,
                                gpu_sphere_colors[i].x, gpu_sphere_colors[i].y, gpu_sphere_colors[i].z);
+                }
+
+                // Set material type and fuzz
+                loc = "sphere_types[" + std::to_string(i) + "]";
+                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
+                if (loc_id >= 0) {
+                    glUniform1i(loc_id, gpu_sphere_types[i]);
+                }
+
+                loc = "sphere_fuzz[" + std::to_string(i) + "]";
+                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
+                if (loc_id >= 0) {
+                    glUniform1f(loc_id, gpu_sphere_fuzz[i]);
                 }
             }
 
