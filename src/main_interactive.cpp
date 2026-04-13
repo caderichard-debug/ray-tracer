@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <omp.h>
 #include <fstream>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 #include "math/vec3.h"
 #include "math/ray.h"
 
@@ -252,6 +254,33 @@ QualityPreset quality_levels[] = {
 };
 
 const int NUM_QUALITY_LEVELS = 6;
+
+#ifdef USE_GPU_RENDERER
+// Save GPU framebuffer to PNG file
+void save_gpu_framebuffer(int width, int height, const char* filename) {
+    // Allocate buffer for pixel data
+    std::vector<unsigned char> pixels(width * height * 3);
+
+    // Read pixels from framebuffer (bottom-left origin)
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+
+    // Flip vertically (OpenGL has bottom-left origin, PNG has top-left)
+    std::vector<unsigned char> flipped_pixels(width * height * 3);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int src_idx = ((height - 1 - y) * width + x) * 3;
+            int dst_idx = (y * width + x) * 3;
+            flipped_pixels[dst_idx + 0] = pixels[src_idx + 0]; // R
+            flipped_pixels[dst_idx + 1] = pixels[src_idx + 1]; // G
+            flipped_pixels[dst_idx + 2] = pixels[src_idx + 2]; // B
+        }
+    }
+
+    // Save as PNG
+    stbi_write_png(filename, width, height, 3, flipped_pixels.data(), width * 3);
+    std::cout << "Saved framebuffer to " << filename << std::endl;
+}
+#endif
 
 // Camera controller
 class CameraController {
@@ -671,6 +700,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  1-6           - Change quality level\n";
     std::cout << "  H             - Toggle help overlay\n";
     std::cout << "  Space         - Pause rendering\n";
+    std::cout << "  S             - Save screenshot (PNG)\n";
     std::cout << "  ESC           - Quit\n";
     std::cout << "\n";
     std::cout << "Quality Levels (affects rendering samples, not window size):\n";
@@ -701,6 +731,19 @@ int main(int argc, char* argv[]) {
                         paused = !paused;
                         std::cout << (paused ? "Paused" : "Resumed") << std::endl;
                         break;
+                    case SDLK_s: {  // Save screenshot
+                        // Generate filename with timestamp
+                        auto now = std::chrono::system_clock::now();
+                        auto time = std::chrono::system_clock::to_time_t(now);
+                        std::stringstream ss;
+                        ss << "gpu_render_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
+#ifdef USE_GPU_RENDERER
+                        save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
+#else
+                        std::cout << "Save only available in GPU mode" << std::endl;
+#endif
+                        break;
+                    }
                     case SDLK_1: case SDLK_2: case SDLK_3:
                     case SDLK_4: case SDLK_5: case SDLK_6: {
                         int new_quality = event.key.keysym.sym - SDLK_1;
