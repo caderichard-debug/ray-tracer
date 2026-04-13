@@ -1,0 +1,22 @@
+# Build artifacts
+raytracer
+build/
+*.o
+*.exe
+*.out
+
+# Generated images
+*.ppm
+*.png
+*.jpg
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
