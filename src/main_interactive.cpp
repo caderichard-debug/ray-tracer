@@ -700,9 +700,8 @@ int main(int argc, char* argv[]) {
     std::cout << "  1-6           - Change quality level\n";
     std::cout << "  H             - Toggle help overlay\n";
     std::cout << "  Space         - Pause rendering\n";
-    std::cout << "  S             - Save screenshot (gpu_render_*.png in current dir)\n";
-    std::cout << "  O             - Save output (renders/cornell_box_*.png, like CPU mode)\n";
-    std::cout << "  ESC           - Quit (auto-saves to renders/)\n";
+    std::cout << "  S             - Save screenshot (screenshots/screenshot_*.png)\n";
+    std::cout << "  ESC           - Quit\n";
     std::cout << "\n";
     std::cout << "Quality Levels (affects rendering samples, not window size):\n";
     for (int i = 0; i < NUM_QUALITY_LEVELS; i++) {
@@ -733,29 +732,16 @@ int main(int argc, char* argv[]) {
                         std::cout << (paused ? "Paused" : "Resumed") << std::endl;
                         break;
                     case SDLK_s: {  // Save screenshot
-                        // Generate filename with timestamp
+                        system("mkdir -p screenshots");
                         auto now = std::chrono::system_clock::now();
                         auto time = std::chrono::system_clock::to_time_t(now);
                         std::stringstream ss;
-                        ss << "gpu_render_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
+                        ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
 #ifdef USE_GPU_RENDERER
                         save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
+                        std::cout << "Screenshot saved: " << ss.str() << std::endl;
 #else
-                        std::cout << "Save only available in GPU mode" << std::endl;
-#endif
-                        break;
-                    }
-                    case SDLK_o: {  // Save output like CPU batch mode
-                        system("mkdir -p renders");
-                        auto now = std::chrono::system_clock::now();
-                        auto time = std::chrono::system_clock::to_time_t(now);
-                        std::stringstream ss;
-                        ss << "renders/cornell_box_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
-#ifdef USE_GPU_RENDERER
-                        save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
-                        std::cout << "Output saved: " << ss.str() << std::endl;
-#else
-                        std::cout << "Save only available in GPU mode" << std::endl;
+                        std::cout << "Screenshot only available in GPU mode" << std::endl;
 #endif
                         break;
                     }
@@ -1191,17 +1177,6 @@ int main(int argc, char* argv[]) {
 #endif
     SDL_DestroyWindow(window);
     SDL_Quit();
-
-#ifdef USE_GPU_RENDERER
-    // Auto-save final render to renders/ directory (like CPU batch mode)
-    system("mkdir -p renders");
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << "renders/cornell_box_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
-    save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
-    std::cout << "Auto-saved final render: " << ss.str() << std::endl;
-#endif
 
     std::cout << "\n\n=== Exiting ===\n";
     std::cout << "Final Stats:\n";
