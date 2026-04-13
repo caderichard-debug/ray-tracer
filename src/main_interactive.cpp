@@ -9,8 +9,14 @@
 #include <sstream>
 #include <algorithm>
 #include <omp.h>
+#include <fstream>
 #include "math/vec3.h"
 #include "math/ray.h"
+
+// Simple file logger
+#ifdef USE_GPU_RENDERER
+std::ofstream gpu_log;
+#endif
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "primitives/primitive.h"
@@ -45,20 +51,183 @@ out vec4 frag_color;
 uniform vec2 resolution;
 uniform float time;
 
+// Scene data
+uniform vec3 sphere_centers[10];
+uniform float sphere_radii[10];
+uniform vec3 sphere_colors[10];
+uniform int sphere_count;
+uniform int samples_per_pixel;
+uniform int max_depth;
+
+uniform vec3 camera_pos;
+uniform vec3 camera_target;
+uniform vec3 camera_up;
+uniform float vfov;
+uniform float aspect_ratio;
+
+// Ray structure
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
+
+// Hit record
+struct HitRecord {
+    vec3 p;
+    vec3 normal;
+    float t;
+    int material_id;
+    bool front_face;
+};
+
+Ray get_ray(vec2 uv) {
+    vec3 w = normalize(camera_target - camera_pos);
+    vec3 u = normalize(cross(w, camera_up));
+    vec3 v = cross(u, w);
+
+    float half_height = tan(radians(vfov) / 2.0);
+    float half_width = aspect_ratio * half_height;
+
+    vec3 ray_origin = camera_pos;
+    vec3 ray_direction = normalize(
+        half_width * 2.0 * (uv.x - 0.5) * u +
+        half_height * 2.0 * (uv.y - 0.5) * v + w
+    );
+
+    Ray r;
+    r.origin = ray_origin;
+    r.direction = ray_direction;
+    return r;
+}
+
+bool hit_sphere(vec3 center, float radius, Ray r, float t_min, float t_max, inout HitRecord rec) {
+    vec3 oc = r.origin - center;
+    float a = dot(r.direction, r.direction);
+    float half_b = dot(oc, r.direction);
+    float c = dot(oc, oc) - radius * radius;
+
+    float discriminant = half_b * half_b - a * c;
+    if (discriminant < 0.0) {
+        return false;
+    }
+
+    float sqrt_d = sqrt(discriminant);
+    float root = (-half_b - sqrt_d) / a;
+
+    if (root < t_min || root > t_max) {
+        root = (-half_b + sqrt_d) / a;
+        if (root < t_min || root > t_max) {
+            return false;
+        }
+    }
+
+    rec.t = root;
+    rec.p = r.origin + root * r.direction;
+    vec3 outward_normal = (rec.p - center) / radius;
+    rec.front_face = dot(r.direction, outward_normal) < 0.0;
+    rec.normal = rec.front_face ? outward_normal : -outward_normal;
+    rec.material_id = 0;
+
+    return true;
+}
+
+bool scene_hit(Ray r, float t_min, float t_max, inout HitRecord rec) {
+    HitRecord temp_rec;
+    bool hit_anything = false;
+    float closest_so_far = t_max;
+
+    for (int i = 0; i < sphere_count; i++) {
+        if (hit_sphere(sphere_centers[i], sphere_radii[i], r, t_min, closest_so_far, temp_rec)) {
+            hit_anything = true;
+            closest_so_far = temp_rec.t;
+            rec = temp_rec;
+            rec.material_id = i;
+        }
+    }
+
+    return hit_anything;
+}
+
+vec3 ray_color(Ray r, int depth) {
+    HitRecord rec;
+    vec3 color = vec3(1.0, 1.0, 1.0);  // Start with white
+    vec3 accum_color = vec3(0.0, 0.0, 0.0);
+    vec3 throughput = vec3(1.0, 1.0, 1.0);
+
+    for (int bounce = 0; bounce < depth; bounce++) {
+        // Background gradient
+        if (!scene_hit(r, 0.001, 1000.0, rec)) {
+            vec3 unit_direction = normalize(r.direction);
+            float t = 0.5 * (unit_direction.y + 1.0);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
+            accum_color += throughput * color;
+            break;
+        }
+
+        // Simple lighting
+        vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
+        vec3 light_color = vec3(1.0, 1.0, 1.0);
+        vec3 ambient = vec3(0.1, 0.1, 0.1);
+
+        // Diffuse
+        float diff = max(dot(rec.normal, light_dir), 0.0);
+
+        // Specular
+        vec3 view_dir = normalize(-r.direction);
+        vec3 reflect_dir = reflect(-light_dir, rec.normal);
+        float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+
+        // Get material color
+        vec3 albedo = sphere_colors[rec.material_id];
+
+        // Combine lighting
+        color = ambient * albedo + diff * light_color * albedo + spec * light_color * 0.5;
+        accum_color += throughput * color;
+
+        // Reflection (only for reflective materials)
+        if (bounce < depth - 1 && albedo.r > 0.5) {
+            vec3 reflected = reflect(normalize(-r.direction), rec.normal);
+            r.origin = rec.p + 0.001 * rec.normal;
+            r.direction = normalize(reflected);
+            throughput *= 0.5 * albedo;  // Attenuate
+        } else {
+            break;
+        }
+    }
+
+    return accum_color;
+}
+
+// Pseudo-random number generator
+float rand_seed = 0.0;
+float random_float() {
+    rand_seed = fract(sin(dot(vec2(rand_seed, rand_seed * 0.1), vec2(12.9898, 78.233))) * 43758.5453);
+    return rand_seed;
+}
+
 void main() {
-    // Simple test pattern to verify GPU works
-    vec2 uv = v_uv;
-    vec3 color;
+    // Initialize random seed based on pixel position
+    rand_seed = fract(sin(dot(v_uv, vec2(12.9898, 78.233))) * 43758.5453);
 
-    // Create a colorful gradient
-    color.r = uv.x;
-    color.g = uv.y;
-    color.b = 0.5 + 0.5 * sin(uv.x * 10.0 + time);
+    vec3 color = vec3(0.0);
 
-    // Add some circles for visual interest
-    float d = length(uv - 0.5);
-    float circle = smoothstep(0.3, 0.29, d);
-    color = mix(color, vec3(1.0, 0.5, 0.0), circle);
+    // Multi-sample anti-aliasing
+    for (int s = 0; s < samples_per_pixel; s++) {
+        // Add random jitter for anti-aliasing
+        vec2 jitter = vec2(random_float() - 0.5, random_float() - 0.5) / resolution;
+
+        // Generate ray for this sample
+        Ray r = get_ray(v_uv + jitter);
+
+        // Ray trace with configured max depth
+        color += ray_color(r, max_depth);
+    }
+
+    // Average samples
+    color = color / float(samples_per_pixel);
+
+    // Gamma correction
+    color = sqrt(color);
 
     frag_color = vec4(color, 1.0);
 }
@@ -76,14 +245,17 @@ struct QualityPreset {
 QualityPreset quality_levels[] = {
     {320, 1, 1, "Preview (Ultra Fast)"},
     {640, 1, 3, "Low (Fast)"},
-    {800, 4, 3, "Medium"}
+    {800, 4, 3, "Medium"},
+    {1280, 16, 5, "High"},
+    {1600, 64, 8, "Ultra"},
+    {1920, 128, 10, "Maximum Quality"}
 };
 
-const int NUM_QUALITY_LEVELS = 3;
+const int NUM_QUALITY_LEVELS = 6;
 
 // Camera controller
 class CameraController {
-private:
+public:
     Point3 position;
     Point3 lookat;
     Vec3 vup;
@@ -349,6 +521,12 @@ int main(int argc, char* argv[]) {
 
     std::cout << "OpenGL 3.3 context created successfully" << std::endl;
     std::cout << "GPU mode: Showing animated test pattern" << std::endl;
+
+#ifdef USE_GPU_RENDERER
+    gpu_log.open("gpu_rendering.log");
+    gpu_log << "GPU Ray Tracer Logging Started" << std::endl;
+    gpu_log << "OpenGL 3.3 context created" << std::endl;
+#endif
 #endif
 
     // Create renderer and texture (CPU mode only)
@@ -471,6 +649,12 @@ int main(int argc, char* argv[]) {
     float fps = 0.0f;
 
 #ifdef USE_GPU_RENDERER
+    // GPU scene data (will be populated during initialization)
+    int gpu_sphere_count = 0;
+    Vec3 gpu_sphere_centers[10];
+    float gpu_sphere_radii[10];
+    Vec3 gpu_sphere_colors[10];
+
     // Force window to front and make sure it's visible
     SDL_RaiseWindow(window);
     SDL_SetWindowInputFocus(window);
@@ -484,7 +668,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  Arrow Keys    - Move up/down\n";
     std::cout << "  Mouse         - Look around (when captured)\n";
     std::cout << "  Left Click    - Capture/release mouse\n";
-    std::cout << "  1-3           - Change quality (capped for real-time performance)\n";
+    std::cout << "  1-6           - Change quality level\n";
     std::cout << "  H             - Toggle help overlay\n";
     std::cout << "  Space         - Pause rendering\n";
     std::cout << "  ESC           - Quit\n";
@@ -517,7 +701,8 @@ int main(int argc, char* argv[]) {
                         paused = !paused;
                         std::cout << (paused ? "Paused" : "Resumed") << std::endl;
                         break;
-                    case SDLK_1: case SDLK_2: case SDLK_3: {
+                    case SDLK_1: case SDLK_2: case SDLK_3:
+                    case SDLK_4: case SDLK_5: case SDLK_6: {
                         int new_quality = event.key.keysym.sym - SDLK_1;
                         if (new_quality != current_quality) {
                             current_quality = new_quality;
@@ -547,7 +732,7 @@ int main(int argc, char* argv[]) {
                 if (SDL_GetRelativeMouseMode()) {
                     camera_controller.rotate(
                         event.motion.xrel * 0.1f,
-                        -event.motion.yrel * 0.1f
+                        event.motion.yrel * 0.1f  // Inverted vertical look
                     );
                     need_render = true;
                 }
@@ -587,9 +772,6 @@ int main(int argc, char* argv[]) {
         if (need_render && !paused) {
             auto render_start = std::chrono::high_resolution_clock::now();
 
-            // Get camera from controller
-            Camera cam = camera_controller.get_camera();
-
 #ifdef USE_GPU_RENDERER
             // Simple GPU rendering - just show test pattern for now
             static bool gpu_initialized = false;
@@ -597,6 +779,31 @@ int main(int argc, char* argv[]) {
             static GLuint gpu_vao = 0, gpu_vbo = 0;
 
             if (!gpu_initialized) {
+                // Extract scene data for GPU
+                std::vector<Vec3> sphere_centers_vec;
+                std::vector<float> sphere_radii_vec;
+                std::vector<Vec3> sphere_colors_vec;
+
+                for (const auto& obj : scene.objects) {
+                    // Try to cast to sphere
+                    auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
+                    if (sphere) {
+                        sphere_centers_vec.push_back(sphere->center);
+                        sphere_radii_vec.push_back(sphere->radius);
+                        sphere_colors_vec.push_back(sphere->mat->albedo);
+                    }
+                }
+
+                gpu_sphere_count = sphere_centers_vec.size();
+                std::cout << "Uploaded " << gpu_sphere_count << " spheres to GPU" << std::endl;
+
+                // Copy vector data to arrays (THIS WAS MISSING!)
+                for (size_t i = 0; i < sphere_centers_vec.size() && i < 10; i++) {
+                    gpu_sphere_centers[i] = sphere_centers_vec[i];
+                    gpu_sphere_radii[i] = sphere_radii_vec[i];
+                    gpu_sphere_colors[i] = sphere_colors_vec[i];
+                }
+
                 // Load OpenGL functions using SDL
                 auto glCreateShader = (GLuint (*)(GLenum))SDL_GL_GetProcAddress("glCreateShader");
                 auto glShaderSource = (void (*)(GLuint, GLsizei, const GLchar *const *, const GLint *))SDL_GL_GetProcAddress("glShaderSource");
@@ -609,6 +816,10 @@ int main(int argc, char* argv[]) {
                 auto glGetUniformLocation = (GLint (*)(GLuint, const GLchar *))SDL_GL_GetProcAddress("glGetUniformLocation");
                 auto glUniform1f = (void (*)(GLint, GLfloat))SDL_GL_GetProcAddress("glUniform1f");
                 auto glUniform2f = (void (*)(GLint, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform2f");
+                auto glUniform3f = (void (*)(GLint, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform3f");
+                auto glUniform3fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform3fv");
+                auto glUniform1fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform1fv");
+                auto glUniform1i = (void (*)(GLint, GLint))SDL_GL_GetProcAddress("glUniform1i");
                 auto glDrawArrays = (void (*)(GLenum, GLint, GLsizei))SDL_GL_GetProcAddress("glDrawArrays");
                 auto glViewport = (void (*)(GLint, GLint, GLsizei, GLsizei))SDL_GL_GetProcAddress("glViewport");
                 auto glClearColor = (void (*)(GLfloat, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glClearColor");
@@ -620,25 +831,71 @@ int main(int argc, char* argv[]) {
                 auto glBufferData = (void (*)(GLenum, GLsizei, const void *, GLenum))SDL_GL_GetProcAddress("glBufferData");
                 auto glVertexAttribPointer = (void (*)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void *))SDL_GL_GetProcAddress("glVertexAttribPointer");
                 auto glEnableVertexAttribArray = (void (*)(GLuint))SDL_GL_GetProcAddress("glEnableVertexAttribArray");
+                auto glGetShaderiv = (void (*)(GLuint, GLenum, GLint *))SDL_GL_GetProcAddress("glGetShaderiv");
+                auto glGetShaderInfoLog = (void (*)(GLuint, GLsizei, GLsizei *, char *))SDL_GL_GetProcAddress("glGetShaderInfoLog");
+                auto glGetProgramiv = (void (*)(GLuint, GLenum, GLint *))SDL_GL_GetProcAddress("glGetProgramiv");
+                auto glGetProgramInfoLog = (void (*)(GLuint, GLsizei, GLsizei *, char *))SDL_GL_GetProcAddress("glGetProgramInfoLog");
 
                 if (!glCreateShader || !glCreateProgram || !glUseProgram) {
                     std::cerr << "Failed to load OpenGL functions" << std::endl;
                     continue;
                 }
 
-                // Compile shaders
+                // Compile vertex shader
                 GLuint vs = glCreateShader(GL_VERTEX_SHADER);
                 glShaderSource(vs, 1, &gpu_vertex_shader, nullptr);
                 glCompileShader(vs);
 
+                // Check vertex shader compilation
+                GLint vs_success;
+                glGetShaderiv(vs, GL_COMPILE_STATUS, &vs_success);
+                if (!vs_success) {
+                    char info_log[512];
+                    glGetShaderInfoLog(vs, 512, nullptr, info_log);
+                    std::cerr << "Vertex shader compilation failed: " << info_log << std::endl;
+                    continue;
+                }
+
+                // Compile fragment shader
                 GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
                 glShaderSource(fs, 1, &gpu_fragment_shader, nullptr);
                 glCompileShader(fs);
+
+                // Check fragment shader compilation
+                GLint fs_success;
+                glGetShaderiv(fs, GL_COMPILE_STATUS, &fs_success);
+                if (!fs_success) {
+                    char info_log[512];
+                    glGetShaderInfoLog(fs, 512, nullptr, info_log);
+                    std::cerr << "Fragment shader compilation failed: " << info_log << std::endl;
+                    continue;
+                }
 
                 gpu_program = glCreateProgram();
                 glAttachShader(gpu_program, vs);
                 glAttachShader(gpu_program, fs);
                 glLinkProgram(gpu_program);
+
+#ifdef USE_GPU_RENDERER
+                gpu_log << "Shader program created, id=" << gpu_program << std::endl;
+#endif
+
+                // Check link status
+                GLint link_success;
+                glGetProgramiv(gpu_program, GL_LINK_STATUS, &link_success);
+                if (!link_success) {
+                    char info_log[512];
+                    glGetProgramInfoLog(gpu_program, 512, nullptr, info_log);
+                    std::cerr << "Shader program linking failed: " << info_log << std::endl;
+#ifdef USE_GPU_RENDERER
+                    gpu_log << "Shader program linking failed: " << info_log << std::endl;
+#endif
+                    continue;
+                }
+
+#ifdef USE_GPU_RENDERER
+                gpu_log << "Shader program linked successfully" << std::endl;
+#endif
 
                 glDeleteShader(vs);
                 glDeleteShader(fs);
@@ -663,6 +920,10 @@ int main(int argc, char* argv[]) {
             auto glGetUniformLocation = (GLint (*)(GLuint, const GLchar *))SDL_GL_GetProcAddress("glGetUniformLocation");
             auto glUniform2f = (void (*)(GLint, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform2f");
             auto glUniform1f = (void (*)(GLint, GLfloat))SDL_GL_GetProcAddress("glUniform1f");
+            auto glUniform1i = (void (*)(GLint, GLint))SDL_GL_GetProcAddress("glUniform1i");
+            auto glUniform3f = (void (*)(GLint, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform3f");
+            auto glUniform3fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform3fv");
+            auto glUniform1fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform1fv");
             auto glDrawArrays = (void (*)(GLenum, GLint, GLsizei))SDL_GL_GetProcAddress("glDrawArrays");
             auto glViewport = (void (*)(GLint, GLint, GLsizei, GLsizei))SDL_GL_GetProcAddress("glViewport");
             auto glClearColor = (void (*)(GLfloat, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glClearColor");
@@ -675,8 +936,77 @@ int main(int argc, char* argv[]) {
             glClear(GL_COLOR_BUFFER_BIT);
 
             glUseProgram(gpu_program);
-            glUniform2f(glGetUniformLocation(gpu_program, "resolution"), image_width, image_height);
-            glUniform1f(glGetUniformLocation(gpu_program, "time"), SDL_GetTicks() / 1000.0f);
+
+            // Get camera from controller
+            Camera cam = camera_controller.get_camera();
+
+#ifdef USE_GPU_RENDERER
+            gpu_log << "Setting camera uniforms" << std::endl;
+#endif
+
+            // Set camera uniforms
+            GLint cam_pos_loc = glGetUniformLocation(gpu_program, "camera_pos");
+            GLint cam_target_loc = glGetUniformLocation(gpu_program, "camera_target");
+            GLint cam_up_loc = glGetUniformLocation(gpu_program, "camera_up");
+            GLint vfov_loc = glGetUniformLocation(gpu_program, "vfov");
+            GLint aspect_loc = glGetUniformLocation(gpu_program, "aspect_ratio");
+
+#ifdef USE_GPU_RENDERER
+            gpu_log << "  camera_pos loc: " << cam_pos_loc << std::endl;
+            gpu_log << "  camera_target loc: " << cam_target_loc << std::endl;
+            gpu_log << "  camera_up loc: " << cam_up_loc << std::endl;
+            gpu_log << "  vfov loc: " << vfov_loc << std::endl;
+            gpu_log << "  aspect_ratio loc: " << aspect_loc << std::endl;
+#endif
+
+            glUniform3f(cam_pos_loc, cam.lookfrom.x, cam.lookfrom.y, cam.lookfrom.z);
+            glUniform3f(cam_target_loc, cam.lookat.x, cam.lookat.y, cam.lookat.z);
+            glUniform3f(cam_up_loc, cam.vup.x, cam.vup.y, cam.vup.z);
+            glUniform1f(vfov_loc, cam.vfov);
+            glUniform1f(aspect_loc, cam.aspect_ratio);
+            glUniform2f(glGetUniformLocation(gpu_program, "resolution"), (float)image_width, (float)image_height);
+
+            // Set sphere uniforms
+            glUniform1i(glGetUniformLocation(gpu_program, "sphere_count"), gpu_sphere_count);
+            glUniform1i(glGetUniformLocation(gpu_program, "samples_per_pixel"), preset.samples);
+            glUniform1i(glGetUniformLocation(gpu_program, "max_depth"), preset.max_depth);
+
+#ifdef USE_GPU_RENDERER
+            gpu_log << "Quality: " << preset.name << " (samples=" << preset.samples
+                     << ", depth=" << preset.max_depth << ")" << std::endl;
+            gpu_log << "Setting " << gpu_sphere_count << " spheres" << std::endl;
+            gpu_log << "Camera: " << cam.lookfrom.x << ", " << cam.lookfrom.y << ", " << cam.lookfrom.z << std::endl;
+
+            // Upload sphere data (this is inefficient but works for demo)
+            for (int i = 0; i < gpu_sphere_count; i++) {
+                std::string loc = "sphere_centers[" + std::to_string(i) + "]";
+                GLint loc_id = glGetUniformLocation(gpu_program, loc.c_str());
+                gpu_log << "Sphere " << i << " center: (" << gpu_sphere_centers[i].x << ", " << gpu_sphere_centers[i].y << ", " << gpu_sphere_centers[i].z << ") radius: " << gpu_sphere_radii[i] << std::endl;
+                if (loc_id >= 0) {
+                    glUniform3f(loc_id,
+                               gpu_sphere_centers[i].x, gpu_sphere_centers[i].y, gpu_sphere_centers[i].z);
+                } else {
+                    gpu_log << "  Warning: uniform " << loc << " not found (id=" << loc_id << ")" << std::endl;
+                }
+
+                loc = "sphere_radii[" + std::to_string(i) + "]";
+                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
+                if (loc_id >= 0) {
+                    glUniform1f(loc_id, gpu_sphere_radii[i]);
+                }
+
+                loc = "sphere_colors[" + std::to_string(i) + "]";
+                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
+                if (loc_id >= 0) {
+                    glUniform3f(loc_id,
+                               gpu_sphere_colors[i].x, gpu_sphere_colors[i].y, gpu_sphere_colors[i].z);
+                }
+            }
+
+            gpu_log << "Drawing..." << std::endl;
+            gpu_log.flush();
+#endif
+
             glBindVertexArray(gpu_vao);
             glDrawArrays(GL_TRIANGLES, 0, 3);
             glBindVertexArray(0);

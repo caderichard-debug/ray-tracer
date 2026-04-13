@@ -1,24 +1,22 @@
 #version 330 core
 
 // Fragment shader for GPU ray tracing
-// This approach is compatible with older GPUs that don't support compute shaders
+// Uses array uniforms for scene data (compatible with OpenGL 3.3)
 
 // Camera uniforms
-layout(std140) uniform CameraBlock {
-    vec4 position;
-    vec4 lookat;
-    vec4 vup;
-    float vfov;
-    float aspect_ratio;
-} camera;
+uniform vec3 camera_pos;
+uniform vec3 camera_target;
+uniform vec3 camera_up;
+uniform float vfov;
+uniform float aspect_ratio;
 
-// Scene data (simplified for compatibility)
-uniform samplerBuffer sphere_data;
-uniform samplerBuffer material_data;
+// Scene data as arrays (OpenGL 3.3 compatible)
+uniform vec3 sphere_centers[10];
+uniform float sphere_radii[10];
+uniform vec3 sphere_colors[10];
 uniform int num_spheres;
 uniform int max_depth;
 uniform vec2 resolution;
-uniform int frame_count;
 
 // Output color
 out vec4 frag_color;
@@ -58,11 +56,8 @@ vec3 ray_at(Ray r, float t) {
     return r.origin + t * r.direction;
 }
 
-// Simple sphere intersection (simplified for demo)
-bool hit_sphere(vec4 sphere, int material_id, Ray r, float t_min, float t_max, inout HitRecord rec) {
-    vec3 center = sphere.xyz;
-    float radius = sphere.w;
-
+// Sphere intersection
+bool hit_sphere(vec3 center, float radius, int material_id, Ray r, float t_min, float t_max, inout HitRecord rec) {
     vec3 oc = r.origin - center;
     float a = dot(r.direction, r.direction);
     float half_b = dot(oc, r.direction);
@@ -98,10 +93,9 @@ bool scene_hit(Ray r, float t_min, float t_max, inout HitRecord rec) {
     bool hit_anything = false;
     float closest_so_far = t_max;
 
-    // Check spheres (simplified - just use first few as demo)
-    for (int i = 0; i < min(5, num_spheres); i++) {
-        vec4 sphere = texelFetch(sphere_data, i);
-        if (hit_sphere(sphere, i % 3, r, t_min, closest_so_far, temp_rec)) {
+    // Check spheres
+    for (int i = 0; i < num_spheres; i++) {
+        if (hit_sphere(sphere_centers[i], sphere_radii[i], i, r, t_min, closest_so_far, temp_rec)) {
             hit_anything = true;
             closest_so_far = temp_rec.t;
             rec = temp_rec;
@@ -125,29 +119,40 @@ vec3 ray_color(Ray r, int depth) {
         return mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
     }
 
-    // Simple coloring based on normal
-    vec3 normal_color = 0.5 * (rec.normal + vec3(1.0));
+    // Return color based on material
+    return sphere_colors[rec.material_id] * (0.5 + 0.5 * rec.normal.y);
+}
 
-    // Add some simple lighting
-    vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
-    float diff = max(dot(rec.normal, light_dir), 0.0);
+Ray get_camera_ray(vec2 uv) {
+    vec3 w = normalize(camera_pos - camera_target);
+    vec3 u = normalize(cross(camera_up, w));
+    vec3 v = cross(w, u);
 
-    return normal_color * (0.2 + 0.8 * diff);
+    float half_height = tan(vfov * 0.01745329252 * 0.5);
+    float half_width = aspect_ratio * half_height;
+
+    vec3 lower_left = camera_pos - half_width * u - half_height * v - w;
+    vec3 horizontal = 2.0 * half_width * u;
+    vec3 vertical = 2.0 * half_height * v;
+
+    return Ray(camera_pos, lower_left + uv.x * horizontal + uv.y * vertical - camera_pos);
 }
 
 void main() {
-    // Simple test pattern to verify OpenGL is working
+    // Initialize random seed based on pixel position
+    rand_seed = gl_FragCoord.x * 123.456 + gl_FragCoord.y * 789.012;
+
+    // Normalized pixel coordinates (0 to 1)
     vec2 uv = gl_FragCoord.xy / resolution;
 
-    // Create a colorful test pattern
-    vec3 color;
-    color.r = uv.x;
-    color.g = uv.y;
-    color.b = 0.5 + 0.5 * sin(gl_FragCoord.x * 0.01 + gl_FragCoord.y * 0.01);
+    // Get camera ray for this pixel
+    Ray r = get_camera_ray(uv);
 
-    // Add some bands
-    float bands = sin(gl_FragCoord.y * 0.05) * 0.5 + 0.5;
-    color *= (0.5 + 0.5 * bands);
+    // Simple ray color (no multi-sampling for now)
+    vec3 color = ray_color(r, max_depth);
+
+    // Simple gamma correction
+    color = sqrt(color);
 
     frag_color = vec4(color, 1.0);
 }
