@@ -107,31 +107,33 @@ test: phase2
 benchmark:
 	@echo "=== Ray Tracer Benchmark ==="
 	@echo ""
-	@if [ -f $(BUILD_DIR)/raytracer_phase1 ]; then \
-		echo "Phase 1 (Scalar Foundation):"; \
-		time $(BUILD_DIR)/raytracer_phase1 > /dev/null; \
-		echo ""; \
-	fi
-	@if [ -f $(BUILD_DIR)/raytracer_phase2 ]; then \
-		echo "Phase 2 (Basic Rendering):"; \
-		time $(BUILD_DIR)/raytracer_phase2 > /dev/null; \
-		echo ""; \
-	fi
-	@echo "Benchmark complete"
+	@echo "Testing Phase 2 (current)..."
+	@$(MAKE) --no-print-directory phase2
+	@./$(BINARY) > benchmark_output.ppm
+	@echo ""
+	@echo "Benchmark complete. View benchmark_output.ppm for results"
 
-# Compare outputs (for verification)
+# Quick benchmark (just timing, no output)
+.PHONY: bench
+bench:
+	@echo "=== Quick Benchmark ==="
+	@$(MAKE) --no-print-directory phase2
+	@echo ""
+	@echo "Running benchmark..."
+	@time ./$(BINARY) > /dev/null
+	@echo ""
+	@echo "For detailed stats, run: make benchmark"
+
+# Performance comparison (if multiple phases built)
 .PHONY: compare
 compare:
-	@echo "Comparing Phase 1 vs Phase 2 outputs..."
-	@if [ -f $(BUILD_DIR)/raytracer_phase1 ] && [ -f $(BUILD_DIR)/raytracer_phase2 ]; then \
-		$(BUILD_DIR)/raytracer_phase1 > phase1_output.ppm; \
-		$(BUILD_DIR)/raytracer_phase2 > phase2_output.ppm; \
-		echo "Outputs generated: phase1_output.ppm, phase2_output.ppm"; \
-		echo "Phase 1: Basic red sphere"; \
-		echo "Phase 2: Cornell box with lighting"; \
-	else \
-		echo "⚠️  Build both phases first: make phase1 phase2"; \
+	@echo "=== Performance Comparison ==="
+	@echo ""
+	@if [ -f $(BUILD_DIR)/raytracer_phase2 ]; then \
+		echo "Phase 2 Performance:"; \
+		./$(BUILD_DIR)/raytracer_phase2 > /dev/null; \
 	fi
+
 
 # Clean build artifacts
 .PHONY: clean

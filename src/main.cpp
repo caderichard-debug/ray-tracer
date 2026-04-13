@@ -11,6 +11,7 @@
 #include "scene/scene.h"
 #include "scene/light.h"
 #include "renderer/renderer.h"
+#include "renderer/performance.h"
 
 // Infinity constant for ray tracing
 const float infinity = std::numeric_limits<float>::infinity();
@@ -26,6 +27,11 @@ int main() {
     const int image_width = 800;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 1; // No anti-aliasing yet
+    const int max_depth = 5; // Max reflection bounces
+
+    // Performance tracking
+    PerformanceTracker perf("Phase 2: Scalar Ray Tracer", image_width, image_height,
+                           samples_per_pixel, max_depth);
 
     // Camera setup
     Point3 lookfrom(0, 1, 3);
@@ -37,7 +43,7 @@ int main() {
     Camera cam(lookfrom, lookat, vup, vfov, aspect_ratio, aperture, dist_to_focus);
 
     // Renderer setup
-    Renderer renderer(5); // Max 5 bounces
+    Renderer renderer(max_depth);
 
     // Scene setup - Cornell box style
     Scene scene;
@@ -114,5 +120,10 @@ int main() {
     }
 
     std::cerr << "\nDone.\n";
+
+    // Calculate and print performance statistics
+    perf.calculate_ray_count();
+    perf.print_report();
+
     return 0;
 }
