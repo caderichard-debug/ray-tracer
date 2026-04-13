@@ -2,8 +2,8 @@
 #include <iostream>
 #include <limits>
 
-// Infinity constant for ray tracing
-const float infinity = std::numeric_limits<float>::infinity();
+// Large number constant for ray tracing (instead of infinity to avoid -ffast-math issues)
+const float infinity = 1.0e30f;
 
 Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) const {
     // Start with ambient component

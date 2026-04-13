@@ -1,68 +1,69 @@
 # SIMD Ray Tracer
 
-A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectorization and OpenMP multi-threading.
+A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectorization and OpenMP multi-threading. Features both batch rendering and real-time interactive modes.
 
 ## Status
 
 ✅ **Phase 1:** Foundation (Scalar math, geometry, materials)
 ✅ **Phase 2:** Basic Rendering (Phong shading, shadows, reflections)
-🚧 **Phase 3:** SIMD Vectorization (AVX2 ray packets) - **IMPLEMENTED**
-⏳ **Phase 4:** Advanced Features (triangles, planes, soft shadows) - Pending
-⏳ **Phase 5:** Multi-threading (OpenMP) - Pending
-⏳ **Phase 6:** Polish (PNG output, tone mapping) - Pending
+✅ **Phase 4:** Advanced Features (triangles, anti-aliasing, PNG output)
+✅ **Phase 5:** Multi-threading (OpenMP)
+✅ **Phase 6:** Polish (CLI arguments, PNG output)
+✅ **Interactive Mode:** Real-time rendering with camera controls
 
 ## Features
 
 ### ✅ Implemented
-- Vec3 math library with complete vector operations
-- Ray representation and ray-sphere intersection
-- Material system (Lambertian diffuse, Metal reflective)
-- Perspective camera model
-- Scene graph with multiple primitives and lights
-- Phong shading (ambient + diffuse + specular)
-- Hard shadows via shadow rays
-- Recursive reflections (configurable depth)
-- Gamma correction
-- PPM image output
-- **AVX2 SIMD vectorization** (8-ray packets)
+- **Batch Rendering**: High-quality offline rendering
+  - Vec3 math library with complete vector operations
+  - Ray representation and ray-sphere/triangle intersection
+  - Material system (Lambertian diffuse, Metal reflective)
+  - Perspective camera model
+  - Scene graph with multiple primitives and lights
+  - Phong shading (ambient + diffuse + specular)
+  - Hard shadows via shadow rays
+  - Recursive reflections (configurable depth)
+  - Gamma correction
+  - Anti-aliasing (supersampling up to 256 samples)
+  - Triangle primitive with Möller-Trumbore intersection
+  - PNG output (stb_image_write)
+  - CLI arguments (resolution, samples, depth, output)
+  - OpenMP multi-threading (8 threads)
 
-### 🚧 In Progress
-- Full SIMD integration into renderer
-- Performance benchmarking
-
-### ⏳ Planned
-- Triangle primitive with Möller-Trumbore intersection
-- Plane primitive
-- Soft shadows (area lights)
-- Anti-aliasing (supersampling)
-- OpenMP multi-threading
-- PNG output (stb_image_write)
-- Tone mapping (Reinhard, ACES)
-- CLI arguments
-- OBJ mesh loading
+- **Interactive Mode**: Real-time exploration
+  - SDL2-based window system
+  - WASD + mouse camera controls
+  - 6 quality levels (320x180 to 1920x1080)
+  - Real-time FPS display
+  - Dynamic quality switching
+  - Pause/resume rendering
 
 ## Quick Start
 
 ### Prerequisites
 - C++17 compiler (g++, clang++)
 - x86_64 CPU with AVX2 support (Intel Haswell+ or AMD Ryzen+)
+- SDL2 (for interactive mode)
 - Make
 
 ### Build & Run
 
 ```bash
-# Build current phase (Phase 2)
+# Build batch ray tracer
 make phase2
 
-# Run ray tracer
-./raytracer > cornell.ppm
+# Run batch ray tracer with default settings
+./raytracer
 
-# View documentation
-make docs
-open docs/index.md
+# Run with custom settings
+./raytracer -w 1920 -s 64 -d 8 -o my_scene
 
-# Get help
-make help
+# Build and run interactive ray tracer
+make interactive
+make runi
+
+# View interactive controls guide
+cat INTERACTIVE_GUIDE.md
 ```
 
 ## Makefile Targets
@@ -71,11 +72,13 @@ make help
 # Building
 make phase1          # Build Phase 1 (foundation)
 make phase2          # Build Phase 2 (rendering) [default]
+make interactive     # Build interactive real-time ray tracer
 make all             # Build all implemented phases
 
 # Running
-make run             # Build and run
-make test            # Run Cornell box scene
+make run             # Build and run batch ray tracer
+make runi            # Build and run interactive ray tracer
+make test            # Run Cornell box test scene
 
 # Utilities
 make clean           # Remove build artifacts

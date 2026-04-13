@@ -102,17 +102,17 @@ public:
     // Static utility functions
     static Vec3 random() {
         return Vec3(
-            static_cast<float>(rand()) / RAND_MAX,
-            static_cast<float>(rand()) / RAND_MAX,
-            static_cast<float>(rand()) / RAND_MAX
+            static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
+            static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
+            static_cast<float>(rand()) / static_cast<float>(RAND_MAX)
         );
     }
 
     static Vec3 random(float min, float max) {
         return Vec3(
-            min + (max - min) * (static_cast<float>(rand()) / RAND_MAX),
-            min + (max - min) * (static_cast<float>(rand()) / RAND_MAX),
-            min + (max - min) * (static_cast<float>(rand()) / RAND_MAX)
+            min + (max - min) * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            min + (max - min) * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            min + (max - min) * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX))
         );
     }
 };

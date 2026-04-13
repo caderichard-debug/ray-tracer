@@ -28,6 +28,7 @@ public:
     Lambertian(const Color& a) : Material(a) {}
 
     bool scatter(const Ray& r_in, const HitRecord& rec, Color& attenuation, Ray& scattered) const override {
+        (void)r_in; // Unused parameter
         // Scatter randomly in the hemisphere around the normal
         auto scatter_direction = rec.normal + Vec3::random();
 
