@@ -830,6 +830,9 @@ int main(int argc, char* argv[]) {
         if (need_render && !paused) {
             auto render_start = std::chrono::high_resolution_clock::now();
 
+            // Get camera from controller (needed by both GPU and CPU paths)
+            Camera cam = camera_controller.get_camera();
+
 #ifdef USE_GPU_RENDERER
             // Simple GPU rendering - just show test pattern for now
             static bool gpu_initialized = false;
@@ -994,9 +997,6 @@ int main(int argc, char* argv[]) {
             glClear(GL_COLOR_BUFFER_BIT);
 
             glUseProgram(gpu_program);
-
-            // Get camera from controller
-            Camera cam = camera_controller.get_camera();
 
 #ifdef USE_GPU_RENDERER
             gpu_log << "Setting camera uniforms" << std::endl;
