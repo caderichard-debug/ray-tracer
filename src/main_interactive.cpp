@@ -536,6 +536,158 @@ public:
     }
 };
 
+class ControlsPanel {
+private:
+    TTF_Font* font;
+    TTF_Font* title_font;
+    SDL_Color text_color;
+    SDL_Color background_color;
+    SDL_Color title_color;
+    SDL_Color value_color;
+    bool initialized;
+
+public:
+    ControlsPanel() : font(nullptr), title_font(nullptr), initialized(false) {
+        text_color = {20, 20, 20, 255};
+        background_color = {50, 50, 60, 230};  // Dark blue-gray
+        title_color = {100, 200, 255, 255};     // Light blue
+        value_color = {255, 200, 100, 255};     // Orange
+    }
+
+    bool init() {
+        if (initialized) return true;
+
+        if (TTF_Init() == -1) {
+            std::cerr << "TTF_Init failed: " << TTF_GetError() << std::endl;
+            return false;
+        }
+
+        // Try to load a system font
+        const char* font_paths[] = {
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+            "/System/Library/Fonts/Menlo.ttc",
+            "/System/Library/Fonts/Courier.dfont",
+            "C:\\Windows\\Fonts\\consola.ttf",
+            nullptr
+        };
+
+        for (int i = 0; font_paths[i] != nullptr; ++i) {
+            font = TTF_OpenFont(font_paths[i], 14);
+            if (font) break;
+        }
+
+        for (int i = 0; font_paths[i] != nullptr; ++i) {
+            title_font = TTF_OpenFont(font_paths[i], 16);
+            if (title_font) break;
+        }
+
+        if (!font || !title_font) {
+            std::cerr << "Failed to load fonts, controls panel unavailable" << std::endl;
+            return false;
+        }
+
+        initialized = true;
+        return true;
+    }
+
+    void render(SDL_Renderer* renderer, int window_width, int window_height,
+                int quality_idx, const QualityPreset& preset, double fps, double render_time) {
+        if (!initialized || !font || !title_font) return;
+
+        // Panel positioned in top-right corner
+        int panel_width = 320;
+        int panel_height = 260;
+        SDL_Rect overlay_rect = {
+            window_width - panel_width - 10,
+            10,
+            panel_width,
+            panel_height
+        };
+
+        SDL_Surface* surface = SDL_CreateRGBSurface(0, overlay_rect.w, overlay_rect.h, 32, 0, 0, 0, 0);
+        if (!surface) return;
+
+        // Fill background with rounded appearance
+        SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 50, 50, 60, 230));
+
+        // Render title
+        const char* title_text = "⚙️ QUALITY SETTINGS";
+        SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
+        if (title_surface) {
+            SDL_Rect title_rect = {15, 10, title_surface->w, title_surface->h};
+            SDL_BlitSurface(title_surface, nullptr, surface, &title_rect);
+            SDL_FreeSurface(title_surface);
+        }
+
+        // Draw separator line
+        SDL_Rect separator = {10, 35, panel_width - 20, 1};
+        SDL_FillRect(surface, &separator, SDL_MapRGBA(surface->format, 100, 100, 120, 255));
+
+        int y_offset = 50;
+        const int line_height = 32;
+
+        // Helper lambda to render label-value pairs
+        auto render_setting = [&](const char* label, const char* value) {
+            // Label
+            SDL_Surface* label_surface = TTF_RenderText_Blended(font, label, text_color);
+            if (label_surface) {
+                SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+                SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+                SDL_FreeSurface(label_surface);
+            }
+
+            // Value
+            SDL_Surface* value_surface = TTF_RenderText_Blended(font, value, value_color);
+            if (value_surface) {
+                SDL_Rect value_rect = {panel_width - value_surface->w - 15, y_offset, value_surface->w, value_surface->h};
+                SDL_BlitSurface(value_surface, nullptr, surface, &value_rect);
+                SDL_FreeSurface(value_surface);
+            }
+
+            y_offset += line_height;
+        };
+
+        // Render current settings
+        char fps_str[32], time_str[32];
+        snprintf(fps_str, sizeof(fps_str), "%.1f FPS", fps);
+        snprintf(time_str, sizeof(time_str), "%.3f s", render_time);
+
+        render_setting("Quality Level:", std::to_string(quality_idx + 1).c_str());
+        render_setting("Preset Name:", preset.name);
+        render_setting("Resolution:", (std::to_string(preset.width) + "x" + std::to_string(preset.width * 9 / 16)).c_str());
+        render_setting("Samples/Pixel:", std::to_string(preset.samples).c_str());
+        render_setting("Max Depth:", std::to_string(preset.max_depth).c_str());
+        render_setting("Performance:", fps_str);
+        render_setting("Render Time:", time_str);
+
+        // Add controls hint
+        y_offset += 10;
+        const char* hint = "Press 1-6 to change quality";
+        SDL_Surface* hint_surface = TTF_RenderText_Blended(font, hint, title_color);
+        if (hint_surface) {
+            SDL_Rect hint_rect = {(panel_width - hint_surface->w) / 2, y_offset, hint_surface->w, hint_surface->h};
+            SDL_BlitSurface(hint_surface, nullptr, surface, &hint_rect);
+            SDL_FreeSurface(hint_surface);
+        }
+
+        // Convert surface to texture
+        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+        if (texture) {
+            SDL_RenderCopy(renderer, texture, nullptr, &overlay_rect);
+            SDL_DestroyTexture(texture);
+        }
+
+        SDL_FreeSurface(surface);
+    }
+
+    ~ControlsPanel() {
+        if (font) TTF_CloseFont(font);
+        if (title_font) TTF_CloseFont(title_font);
+        if (initialized) TTF_Quit();
+    }
+};
+
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
@@ -683,6 +835,16 @@ int main(int argc, char* argv[]) {
         std::cout << "Note: Help overlay unavailable (SDL_ttf not found)\n";
     }
 
+    // Initialize controls panel
+    ControlsPanel controls_panel;
+    bool show_controls = true;  // Show controls by default
+    if (controls_panel.init()) {
+        std::cout << "Controls panel initialized (press C to toggle)\n";
+    } else {
+        std::cout << "Note: Controls panel unavailable (SDL_ttf not found)\n";
+        show_controls = false;
+    }
+
     // Mouse capture
     SDL_SetRelativeMouseMode(SDL_FALSE);
 
@@ -742,6 +904,9 @@ int main(int argc, char* argv[]) {
                         break;
                     case SDLK_h:
                         show_help = !show_help;
+                        break;
+                    case SDLK_c:
+                        show_controls = !show_controls;
                         break;
                     case SDLK_SPACE:
                         paused = !paused;
@@ -846,6 +1011,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Render frame if needed and not paused
+        double render_time = 0.0;  // Declare outside the if block for controls panel
         if (need_render && !paused) {
             auto render_start = std::chrono::high_resolution_clock::now();
 
@@ -1202,10 +1368,17 @@ int main(int argc, char* argv[]) {
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, NULL, NULL);
 
+        int window_width, window_height;
+        SDL_GetWindowSize(window, &window_width, &window_height);
+
+        // Render controls panel if active
+        if (show_controls) {
+            controls_panel.render(renderer, window_width, window_height,
+                                 current_quality, preset, fps, render_time);
+        }
+
         // Render help overlay if active
         if (show_help) {
-            int window_width, window_height;
-            SDL_GetWindowSize(window, &window_width, &window_height);
             help_overlay.render(renderer, window_width, window_height);
         }
 

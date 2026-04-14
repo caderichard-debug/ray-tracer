@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
     // Default settings
     const float aspect_ratio = 16.0f / 9.0f;
     int image_width = 800;
-    int samples_per_pixel = 16; // Anti-aliasing (16 samples per pixel)
+    int samples_per_pixel = 64; // Anti-aliasing (64 samples per pixel for better quality)
     int max_depth = 5; // Max reflection bounces
     std::string output_prefix = "cornell_box";
 
