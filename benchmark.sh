@@ -1,70 +1,54 @@
 #!/bin/bash
-set -e
+# Benchmark script for CPU ray tracer
 
-echo "=========================================="
-echo "  COMPREHENSIVE RAY TRACER BENCHMARK"
-echo "=========================================="
+echo "=== CPU Ray Tracer Benchmark ==="
+echo "Scene: Cornell Box"
+echo "Resolution: 800x450"
+echo "Samples: 16"
+echo "Max Depth: 5"
 echo ""
 
-mkdir -p benchmark_results
-rm -f benchmark_results/performance.log
+# Clean build to ensure fresh compile
+echo "Building..."
+make clean > /dev/null 2>&1
+make 2>&1 | grep -E "(warning|error)" | head -5
 
-echo "# Ray Tracer Performance Benchmark" > benchmark_results/performance.log
-echo "========================================" >> benchmark_results/performance.log
-echo ""
-
-# Build and run Phase 1
-echo "Building Phase 1..."
-if $(MAKE) phase1 > /dev/null 2>&1; then
-    echo "✓ Phase 1 built"
-    echo ""
-    echo "## Phase 1: Scalar Foundation" >> benchmark_results/performance.log
-    echo "Running Phase 1 benchmark..."
-    $(BUILD_DIR)//raytracer_phase1 > benchmark_results/phase1_output.ppm 2>&1
-    echo "✓ Phase 1 complete: benchmark_results/phase1_output.ppm"
-    echo ""
-else
-    echo "⚠️  Phase 1 build failed"
-    echo "Phase 1: Not available" >> benchmark_results/performance.log
-    echo ""
+BINARY="build/raytracer_phase2"
+if [ ! -f ./$BINARY ]; then
+    echo "ERROR: Build failed - $BINARY not found"
+    exit 1
 fi
 
-# Build and run Phase 2
-echo "Building Phase 2..."
-if $(MAKE) phase2 > /dev/null 2>&1; then
-    echo "✓ Phase 2 built"
-    echo ""
-    echo "## Phase 2: Basic Rendering" >> benchmark_results/performance.log
-    echo "Running Phase 2 benchmark..."
-    $(BUILD_DIR)//raytracer_phase2 > benchmark_results/phase2_output.ppm 2>&1
-    echo "✓ Phase 2 complete: benchmark_results/phase2_output.ppm"
-    echo ""
-else
-    echo "⚠️  Phase 2 build failed"
-    echo ""
-fi
-
-echo "=========================================="
-echo "  BENCHMARK COMPLETE"
-echo "=========================================="
 echo ""
-echo "Results:"
-echo "  📊 Performance log:  benchmark_results/performance.log"
-echo "  🖼️  Phase 1 output:   benchmark_results/phase1_output.ppm"
-echo "  🖼️  Phase 2 output:   benchmark_results/phase2_output.ppm"
+echo "Running benchmark (3 iterations)..."
 echo ""
 
-# Show performance summary
-echo "Performance Summary:"
-echo ""
-if [ -f benchmark_results/phase1_output.ppm ]; then
-    echo "Phase 1:"
-    grep -A 10 "PERFORMANCE REPORT" benchmark_results/phase1_output.ppm | tail -n 7 | sed 's/^/  /'
-    echo ""
-fi
+# Run 3 times and take average
+total_time=0
+iterations=3
 
-if [ -f benchmark_results/phase2_output.ppm ]; then
-    echo "Phase 2:"
-    grep -A 10 "PERFORMANCE REPORT" benchmark_results/phase2_output.ppm | tail -n 7 | sed 's/^/  /'
-    echo ""
-fi
+for i in 1 2 3; do
+    echo "Iteration $i..."
+    start=$(gdate +%s.%N)
+    ./$BINARY > /dev/null 2>&1
+    end=$(gdate +%s.%N)
+
+    elapsed=$(echo "$end - $start" | bc)
+    total_time=$(echo "$total_time + $elapsed" | bc)
+
+    echo "  Time: ${elapsed}s"
+done
+
+# Calculate average
+avg_time=$(echo "scale=3; $total_time / $iterations" | bc)
+
+echo ""
+echo "=== Results ==="
+echo "Average time: ${avg_time}s"
+echo ""
+
+# Calculate MRays/sec (approximate)
+# 800 * 450 * 16 samples = 5,760,000 rays
+rays=5760000
+mray_sec=$(echo "scale=2; $rays / ($avg_time * 1000000)" | bc)
+echo "Throughput: ${mray_sec} MRays/sec"

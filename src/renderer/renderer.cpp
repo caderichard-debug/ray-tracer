@@ -16,13 +16,20 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
         float light_distance = light_dir.length();
         Vec3 light_dir_normalized = light_dir.normalized();
 
+        // Early culling: if surface faces away from light, skip shadow ray
+        float dot_product = dot(rec.normal, light_dir_normalized);
+        if (dot_product <= 0.0f) {
+            // Surface faces away from light - no contribution, just ambient
+            continue;
+        }
+
         // Shadow ray
         Ray shadow_ray(rec.p, light_dir_normalized);
         bool in_shadow = scene.is_shadowed(shadow_ray, light_distance);
 
         if (!in_shadow) {
             // Diffuse component (Lambertian)
-            float diffuse_intensity = std::max(0.0f, dot(rec.normal, light_dir_normalized));
+            float diffuse_intensity = dot_product; // Use precomputed dot
             Color diffuse = diffuse_intensity * light.intensity * rec.mat->albedo;
 
             // Specular component (Phong)

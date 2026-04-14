@@ -1,0 +1,27 @@
+OpenGL 3.3 context created successfully
+GPU mode: Showing animated test pattern
+GPU Renderer initialized (OpenGL 3.3)
+Starting main loop with GPU rendering...
+Window should be visible now
+Help overlay initialized (press H to toggle)
+
+=== REAL-TIME RAY TRACER ===
+Controls:
+  WASD          - Move camera
+  Arrow Keys    - Move up/down
+  Mouse         - Look around (when captured)
+  Left Click    - Capture/release mouse
+  1-3           - Change quality (capped for real-time performance)
+  H             - Toggle help overlay
+  Space         - Pause rendering
+  ESC           - Quit
+
+Quality Levels (affects rendering samples, not window size):
+  1. Preview (Ultra Fast)
+  2. Low (Fast)
+  3. Medium
+
+Uploaded 10 spheres to GPU
+GPU renderer initialized
+Rendering first frame to ensure window is visible...
+FPS: 0.6 | Render: 0.003s | Quality: Medium | GPU TEST MODE     
