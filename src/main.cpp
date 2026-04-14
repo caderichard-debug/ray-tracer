@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <atomic>
 #include <omp.h>
 #include "math/vec3.h"
 #include "math/ray.h"
@@ -25,9 +26,19 @@
 // Infinity constant for ray tracing
 const float infinity = std::numeric_limits<float>::infinity();
 
-// Helper function for random float in [0, 1)
+// Fast XOR-shift random number generator with atomic counter
 inline float random_float() {
-    return static_cast<float>(rand()) / (RAND_MAX + 1.0f);
+    // Atomic counter for seed progression (thread-safe)
+    static std::atomic<uint32_t> counter{0};
+    uint32_t seed = counter.fetch_add(1, std::memory_order_relaxed);
+
+    // XOR-shift algorithm (fast and good quality)
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+
+    // Return float in [0, 1)
+    return (seed & 0xFFFFFF) / 16777216.0f;
 }
 
 // Generate unique output filename with timestamp
