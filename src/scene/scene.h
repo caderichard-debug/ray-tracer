@@ -26,15 +26,15 @@ public:
     // Check if ray hits any object in the scene
     // Returns the closest hit (smallest t)
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const {
-        HitRecord temp_rec;
         bool hit_anything = false;
         float closest_so_far = t_max;
 
         for (const auto& object : objects) {
+            HitRecord temp_rec;
             if (object->hit(r, t_min, closest_so_far, temp_rec)) {
                 hit_anything = true;
                 closest_so_far = temp_rec.t;
-                rec = temp_rec;
+                rec = temp_rec;  // Copy only when we have a closer hit
             }
         }
 
@@ -44,11 +44,13 @@ public:
     // Check if any object blocks the shadow ray
     // Returns true if shadow ray is blocked
     bool is_shadowed(const Ray& shadow_ray, float t_max) const {
+        // Use local HitRecord to avoid allocations
         HitRecord shadow_rec;
+        const float t_min = 0.001f;  // Avoid self-intersection
+
         for (const auto& object : objects) {
-            // Use small epsilon for t_min to avoid self-intersection
-            if (object->hit(shadow_ray, 0.001f, t_max, shadow_rec)) {
-                return true;
+            if (object->hit(shadow_ray, t_min, t_max, shadow_rec)) {
+                return true;  // Early exit on first hit
             }
         }
         return false;

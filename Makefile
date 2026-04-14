@@ -3,10 +3,10 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -Xpreprocessor -fopenmp
+CXXFLAGS = -std=c++17 -Wall -Wextra -Xpreprocessor -fopenmp -flto
 OPTFLAGS = -O3 -march=native -mavx2 -mfma -ffast-math
 INCLUDES = -Isrc -Iexternal -I/usr/local/opt/libomp/include
-LDFLAGS = -L/usr/local/opt/libomp/lib -lomp
+LDFLAGS = -L/usr/local/opt/libomp/lib -lomp -flto
 SDL_LDFLAGS = -L/usr/local/opt/sdl2/lib -lSDL2 -lSDL2_ttf
 SDL_INCLUDES = -I/usr/local/opt/sdl2/include
 OPENGL_LDFLAGS = -L/usr/local/opt/glew/lib -lGLEW -framework OpenGL
