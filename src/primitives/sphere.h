@@ -45,8 +45,8 @@ public:
         rec.p = r.at(rec.t);
         rec.mat = mat;
 
-        // Calculate outward normal and set face normal
-        Vec3 outward_normal = (rec.p - center) / radius;
+        // Calculate outward normal and set face normal (optimized division)
+        Vec3 outward_normal = (rec.p - center) * (1.0f / radius);
         rec.set_face_normal(r, outward_normal);
 
         return true;

@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "../math/vec3_avx2.h"
 #include <iostream>
 #include <limits>
 
@@ -14,10 +15,10 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
         // Vector from hit point to light
         Vec3 light_dir = light.position - rec.p;
         float light_distance = light_dir.length();
-        Vec3 light_dir_normalized = light_dir.normalized();
+        Vec3 light_dir_normalized = AVX2::normalize_avx2(light_dir);
 
         // Early culling: if surface faces away from light, skip shadow ray
-        float dot_product = dot(rec.normal, light_dir_normalized);
+        float dot_product = AVX2::dot_product_avx2(rec.normal, light_dir_normalized);
         if (dot_product <= 0.0f) {
             // Surface faces away from light - no contribution, just ambient
             continue;
@@ -33,9 +34,9 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
             Color diffuse = diffuse_intensity * light.intensity * rec.mat->albedo;
 
             // Specular component (Phong)
-            Vec3 view_dir = (-light_dir_normalized).normalized(); // Simplified
-            Vec3 reflect_dir = reflect(-light_dir_normalized, rec.normal);
-            float spec = std::pow(std::max(0.0f, dot(view_dir, reflect_dir)), 32);
+            Vec3 view_dir = AVX2::normalize_avx2(-light_dir_normalized);
+            Vec3 reflect_dir = AVX2::reflect_avx2(-light_dir_normalized, rec.normal);
+            float spec = std::pow(std::max(0.0f, AVX2::dot_product_avx2(view_dir, reflect_dir)), 32);
             Color specular = spec * light.intensity;
 
             color = color + diffuse + specular;
@@ -51,7 +52,7 @@ Color Renderer::ray_color(const Ray& r, const Scene& scene, int depth) const {
     // Check if we hit anything
     if (!scene.hit(r, 0.001f, infinity, rec)) {
         // Background gradient (sky)
-        Vec3 unit_direction = unit_vector(r.direction());
+        Vec3 unit_direction = AVX2::normalize_avx2(r.direction());
         float t = 0.5f * (unit_direction.y + 1.0f);
         return (1.0f - t) * Color(1.0f, 1.0f, 1.0f) + t * Color(0.5f, 0.7f, 1.0f);
     }
