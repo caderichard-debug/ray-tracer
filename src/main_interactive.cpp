@@ -170,70 +170,65 @@ vec3 random_in_unit_sphere() {
 
 vec3 ray_color(Ray r, int depth) {
     HitRecord rec;
-    vec3 color = vec3(1.0, 1.0, 1.0);  // Start with white
-    vec3 accum_color = vec3(0.0, 0.0, 0.0);
-    vec3 throughput = vec3(1.0, 1.0, 1.0);
 
-    for (int bounce = 0; bounce < depth; bounce++) {
-        // Background gradient
-        if (!scene_hit(r, 0.001, 1000.0, rec)) {
-            vec3 unit_direction = normalize(r.direction);
-            float t = 0.5 * (unit_direction.y + 1.0);
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
-            accum_color += throughput * color;
-            break;
+    // Background gradient
+    if (!scene_hit(r, 0.001, 1000.0, rec)) {
+        vec3 unit_direction = normalize(r.direction);
+        float t = 0.5 * (unit_direction.y + 1.0);
+        return mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
+    }
+
+    // Get material properties
+    vec3 albedo = sphere_colors[rec.material_id];
+    int mat_type = sphere_types[rec.material_id];
+    float fuzz = sphere_fuzz[rec.material_id];
+
+    // Phong shading
+    vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
+    vec3 light_color = vec3(1.0, 1.0, 1.0);
+    vec3 ambient = vec3(0.1, 0.1, 0.1);
+    float diff = max(dot(rec.normal, light_dir), 0.0);
+    vec3 view_dir = normalize(-r.direction);
+    vec3 reflect_dir = reflect(-light_dir, rec.normal);
+    float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+
+    vec3 color = ambient * albedo + diff * light_color * albedo + spec * light_color * 0.5;
+
+    // For metal, add reflections (iterative, not recursive)
+    if (depth > 1 && mat_type == 1) {
+        // Trace one reflection
+        vec3 reflected_dir = reflect(normalize(-r.direction), rec.normal);
+        if (fuzz > 0.0) {
+            reflected_dir = normalize(reflected_dir + fuzz * vec3(
+                random_float() * 2.0 - 1.0,
+                random_float() * 2.0 - 1.0,
+                random_float() * 2.0 - 1.0
+            ));
         }
 
-        // Simple lighting
-        vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
-        vec3 light_color = vec3(1.0, 1.0, 1.0);
-        vec3 ambient = vec3(0.1, 0.1, 0.1);
+        Ray reflected_ray;
+        reflected_ray.origin = rec.p + 0.001 * rec.normal;
+        reflected_ray.direction = normalize(reflected_dir);
 
-        // Diffuse
-        float diff = max(dot(rec.normal, light_dir), 0.0);
+        // Check what the reflected ray hits
+        HitRecord ref_rec;
+        if (scene_hit(reflected_ray, 0.001, 1000.0, ref_rec)) {
+            vec3 ref_albedo = sphere_colors[ref_rec.material_id];
+            vec3 ref_light_dir = normalize(vec3(1.0, 1.0, 1.0));
+            float ref_diff = max(dot(ref_rec.normal, ref_light_dir), 0.0);
+            vec3 ref_view_dir = normalize(-reflected_ray.direction);
+            vec3 ref_reflect_dir = reflect(-ref_light_dir, ref_rec.normal);
+            float ref_spec = pow(max(dot(ref_view_dir, ref_reflect_dir), 0.0), 32.0);
 
-        // Specular
-        vec3 view_dir = normalize(-r.direction);
-        vec3 reflect_dir = reflect(-light_dir, rec.normal);
-        float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+            vec3 ref_color = vec3(0.1, 0.1, 0.1) * ref_albedo +
+                           ref_diff * light_color * ref_albedo +
+                           ref_spec * light_color * 0.5;
 
-        // Get material properties
-        vec3 albedo = sphere_colors[rec.material_id];
-        int mat_type = sphere_types[rec.material_id];
-        float fuzz = sphere_fuzz[rec.material_id];
-
-        // Combine lighting
-        color = ambient * albedo + diff * light_color * albedo + spec * light_color * 0.5;
-        accum_color += throughput * color;
-
-        // Handle material scatter
-        if (bounce < depth - 1) {
-            if (mat_type == 1) {
-                // Metal: Reflective
-                vec3 reflected = reflect(normalize(-r.direction), rec.normal);
-
-                // Add fuzz for rough metals
-                if (fuzz > 0.0) {
-                    reflected = normalize(reflected + fuzz * vec3(
-                        random_float() * 2.0 - 1.0,
-                        random_float() * 2.0 - 1.0,
-                        random_float() * 2.0 - 1.0
-                    ));
-                }
-
-                r.origin = rec.p + 0.001 * rec.normal;
-                r.direction = normalize(reflected);
-                throughput *= albedo;  // Attenuate by albedo
-            } else {
-                // Lambertian (diffuse): Stop bouncing - use direct lighting only
-                break;
-            }
-        } else {
-            break;
+            color = color + albedo * ref_color;
         }
     }
 
-    return accum_color;
+    return color;
 }
 
 void main() {
@@ -845,7 +840,7 @@ int main(int argc, char* argv[]) {
         }
         if (keystates[SDL_SCANCODE_UP]) {
 #ifdef USE_GPU_RENDERER
-            camera_controller.move_up(-move_speed);  // Inverted for GPU
+            camera_controller.move_up(-move_speed * 0.5f);  // Inverted and slower for GPU
 #else
             camera_controller.move_up(move_speed);
 #endif
@@ -853,7 +848,7 @@ int main(int argc, char* argv[]) {
         }
         if (keystates[SDL_SCANCODE_DOWN]) {
 #ifdef USE_GPU_RENDERER
-            camera_controller.move_up(move_speed);  // Inverted for GPU
+            camera_controller.move_up(move_speed * 0.5f);  // Inverted and slower for GPU
 #else
             camera_controller.move_up(-move_speed);
 #endif
@@ -924,13 +919,6 @@ int main(int argc, char* argv[]) {
                 auto glLinkProgram = (void (*)(GLuint))SDL_GL_GetProcAddress("glLinkProgram");
                 auto glDeleteShader = (void (*)(GLuint))SDL_GL_GetProcAddress("glDeleteShader");
                 auto glUseProgram = (void (*)(GLuint))SDL_GL_GetProcAddress("glUseProgram");
-                auto glGetUniformLocation = (GLint (*)(GLuint, const GLchar *))SDL_GL_GetProcAddress("glGetUniformLocation");
-                auto glUniform1f = (void (*)(GLint, GLfloat))SDL_GL_GetProcAddress("glUniform1f");
-                auto glUniform2f = (void (*)(GLint, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform2f");
-                auto glUniform3f = (void (*)(GLint, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform3f");
-                auto glUniform3fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform3fv");
-                auto glUniform1fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform1fv");
-                auto glUniform1i = (void (*)(GLint, GLint))SDL_GL_GetProcAddress("glUniform1i");
                 auto glDrawArrays = (void (*)(GLenum, GLint, GLsizei))SDL_GL_GetProcAddress("glDrawArrays");
                 auto glViewport = (void (*)(GLint, GLint, GLsizei, GLsizei))SDL_GL_GetProcAddress("glViewport");
                 auto glClearColor = (void (*)(GLfloat, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glClearColor");
