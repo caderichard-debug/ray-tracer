@@ -20,6 +20,7 @@ public:
     SolidColor(Color c) : color_value(c) {}
 
     Color value(float u, float v, const Point3& p) const override {
+        (void)u; (void)v; (void)p;
         return color_value;
     }
 };
@@ -56,6 +57,7 @@ public:
         : color1(c1), color2(c2), direction(dir.normalized()) {}
 
     Color value(float u, float v, const Point3& p) const override {
+        (void)u; (void)v;
         float t = 0.5f * (dot(p.normalized(), direction) + 1.0f);
         return (1.0f - t) * color1 + t * color2;
     }
@@ -118,6 +120,7 @@ public:
         : color1(c1), color2(c2), scale(s), angle(a) {}
 
     Color value(float u, float v, const Point3& p) const override {
+        (void)u; (void)v;
         // Rotate point for angled stripes
         float x = p.x * std::cos(angle) - p.y * std::sin(angle);
         float stripe = std::sin(x * scale);

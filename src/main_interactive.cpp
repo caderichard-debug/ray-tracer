@@ -302,8 +302,8 @@ QualityPreset quality_levels[] = {
     {640, 1, 3, "Low (Fast)"},
     {800, 4, 3, "Medium"},
     {1280, 16, 5, "High"},
-    {1600, 32, 5, "Ultra"},      // Reduced from 64 samples
-    {1920, 64, 5}                 // Reduced from 128 samples, depth 5
+    {1600, 32, 5, "Ultra"},
+    {1920, 64, 5, "Maximum Quality"}
 };
 
 const int NUM_QUALITY_LEVELS = 6;
