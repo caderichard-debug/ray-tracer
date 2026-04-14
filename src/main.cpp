@@ -135,6 +135,7 @@ int main(int argc, char* argv[]) {
     auto material_metal = std::make_shared<Metal>(Color(0.8f, 0.8f, 0.8f), 0.0); // Perfect mirror
     auto material_metal_fuzz = std::make_shared<Metal>(Color(0.7f, 0.6f, 0.5f), 0.3); // Fuzzy metal
     auto material_gold = std::make_shared<Metal>(Color(1.0f, 0.77f, 0.35f), 0.1); // Gold-like
+    auto material_glass = std::make_shared<Dielectric>(1.5f); // Glass (IOR 1.5)
 
     // Cornell box walls (using large spheres as approximation)
     // Back wall (green)
@@ -161,6 +162,9 @@ int main(int argc, char* argv[]) {
     scene.add_object(std::make_shared<Sphere>(Point3(1.2, -0.1, -0.8), 0.4, material_blue));
     scene.add_object(std::make_shared<Sphere>(Point3(0, -0.5, 0.5), 0.25, material_red));
     scene.add_object(std::make_shared<Sphere>(Point3(-0.6, -0.4, 0.8), 0.2, material_yellow));
+
+    // Glass sphere (demonstrates refraction)
+    scene.add_object(std::make_shared<Sphere>(Point3(0.7, 0.0, 0.3), 0.3, material_glass));
 
     // Triangles - forming a pyramid
     Point3 pyramid_top(0.0f, 0.9f, -1.8f);
