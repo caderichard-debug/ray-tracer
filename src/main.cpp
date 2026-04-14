@@ -22,9 +22,7 @@
 #include "scene/light.h"
 #include "renderer/renderer.h"
 #include "renderer/performance.h"
-
-// Infinity constant for ray tracing
-const float infinity = std::numeric_limits<float>::infinity();
+#include "scene/cornell_box.h"
 
 // Fast XOR-shift random number generator with atomic counter
 inline float random_float() {
@@ -110,8 +108,8 @@ int main(int argc, char* argv[]) {
                            samples_per_pixel, max_depth);
 
     // Camera setup
-    Point3 lookfrom(0, 1, 12);  // Moved back to see larger room
-    Point3 lookat(0, 0, 0);      // Looking at center
+    Point3 lookfrom(0, 2, 15);  // Further back, not too deep inside
+    Point3 lookat(0, 2, 0);     // Looking at center height
     Vec3 vup(0, 1, 0);
     float vfov = 60;
     float dist_to_focus = (lookfrom - lookat).length();
@@ -121,69 +119,9 @@ int main(int argc, char* argv[]) {
     // Renderer setup
     Renderer renderer(max_depth);
 
-    // Scene setup - Cornell box style
+    // Scene setup - use shared Cornell Box scene
     Scene scene;
-    scene.ambient_light = Color(0.1f, 0.1f, 0.1f);
-
-    // Materials - diverse palette
-    auto material_red = std::make_shared<Lambertian>(Color(0.65f, 0.05f, 0.05f));
-    auto material_green = std::make_shared<Lambertian>(Color(0.12f, 0.45f, 0.15f));
-    auto material_gray = std::make_shared<Lambertian>(Color(0.73f, 0.73f, 0.73f));
-    auto material_blue = std::make_shared<Lambertian>(Color(0.1f, 0.2f, 0.7f));
-    auto material_yellow = std::make_shared<Lambertian>(Color(0.8f, 0.7f, 0.1f));
-    auto material_light = std::make_shared<Lambertian>(Color(15.0f, 15.0f, 15.0f));
-    auto material_metal = std::make_shared<Metal>(Color(0.8f, 0.8f, 0.8f), 0.0); // Perfect mirror
-    auto material_metal_fuzz = std::make_shared<Metal>(Color(0.7f, 0.6f, 0.5f), 0.3); // Fuzzy metal
-    auto material_gold = std::make_shared<Metal>(Color(1.0f, 0.77f, 0.35f), 0.1); // Gold-like
-    auto material_glass = std::make_shared<Dielectric>(1.5f); // Glass (IOR 1.5)
-
-    // Cornell box walls (using large spheres as approximation)
-    // Back wall (green) - moved further back
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 0, -8.0), 8.0, material_green));
-
-    // Floor (gray) - moved down
-    scene.add_object(std::make_shared<Sphere>(Point3(0, -8.0, 0), 8.0, material_gray));
-
-    // Ceiling (gray) - moved up
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 8.0, 0), 8.0, material_gray));
-
-    // Left wall (red) - moved further left
-    scene.add_object(std::make_shared<Sphere>(Point3(-8.0, 0, 0), 8.0, material_red));
-
-    // Right wall (green) - moved further right
-    scene.add_object(std::make_shared<Sphere>(Point3(8.0, 0, 0), 8.0, material_green));
-
-    // Objects in scene - diverse geometry and materials
-    // Center sphere (gold - reflective)
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 0, 0), 0.5, material_gold));
-
-    // Orbiting spheres (raised to avoid floor intersection)
-    scene.add_object(std::make_shared<Sphere>(Point3(-1.5, 0.5, -0.5), 0.4, material_metal_fuzz));
-    scene.add_object(std::make_shared<Sphere>(Point3(1.5, 0.3, -0.8), 0.45, material_blue));
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 0.2, 0.5), 0.3, material_red));
-    scene.add_object(std::make_shared<Sphere>(Point3(-0.8, 0.1, 0.8), 0.25, material_yellow));
-
-    // Glass sphere (demonstrates refraction)
-    scene.add_object(std::make_shared<Sphere>(Point3(1.0, 0.5, 0.5), 0.4, material_glass));
-
-    // Triangles - forming a pyramid (raised up)
-    Point3 pyramid_top(0.0f, 1.2f, -2.0f);
-    Point3 pyramid_base1(-0.8f, 0.0f, -2.5f);
-    Point3 pyramid_base2(0.8f, 0.0f, -2.5f);
-    Point3 pyramid_base3(0.0f, 0.0f, -1.5f);
-
-    // 4 triangles forming a pyramid
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base1, pyramid_base2, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base2, pyramid_base3, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base3, pyramid_base1, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_base1, pyramid_base3, pyramid_base2, material_gray));
-
-    // Small spheres in the back (raised and moved forward)
-    scene.add_object(std::make_shared<Sphere>(Point3(-0.5, 0.2, -2.0), 0.2, material_metal));
-    scene.add_object(std::make_shared<Sphere>(Point3(0.5, 0.2, -2.0), 0.2, material_metal));
-
-    // Lighting
-    scene.add_light(Light(Point3(0, 7.5, 0), Color(1.0f, 1.0f, 1.0f)));
+    setup_cornell_box_scene(scene);
 
     // Create renders directory and generate unique output filename
     system("mkdir -p renders");

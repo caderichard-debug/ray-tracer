@@ -1,0 +1,48 @@
+Building Phase 2: Basic Rendering + AA + PNG + OpenMP
+Features: Scene, Lights, Phong shading, Shadows, Reflections, AA, PNG, Multi-threading
+g++ -std=c++17 -Wall -Wextra -Xpreprocessor -fopenmp -O3 -march=native -mavx2 -mfma -ffast-math -Isrc -Iexternal -I/usr/local/opt/libomp/include \
+		src/main.cpp src/renderer/renderer.cpp \
+		-o build/raytracer_phase2 -L/usr/local/opt/libomp/lib -lomp
+In file included from src/main.cpp:2:
+src/../external/stb_image_write.h:514:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+  514 |    stbi__write_context s = { 0 };
+      |                                ^
+src/../external/stb_image_write.h:522:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+  522 |    stbi__write_context s = { 0 };
+      |                                ^
+src/../external/stb_image_write.h:613:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+  613 |    stbi__write_context s = { 0 };
+      |                                ^
+src/../external/stb_image_write.h:621:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+  621 |    stbi__write_context s = { 0 };
+      |                                ^
+src/../external/stb_image_write.h:776:13: warning: 'sprintf' is deprecated: This function is provided for compatibility reasons only.  Due to security concerns inherent in the design of sprintf(3), it is highly recommended that you use snprintf(3) instead. [-Wdeprecated-declarations]
+  776 |       len = sprintf(buffer, "EXPOSURE=          1.0000000000000\n\n-Y %d +X %d\n", y, x);
+      |             ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/_stdio.h:278:1: note: 'sprintf' has been explicitly marked deprecated here
+  278 | __deprecated_msg("This function is provided for compatibility reasons only.  Due to security concerns inherent in the design of sprintf(3), it is highly recommended that you use snprintf(3) instead.")
+      | ^
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/cdefs.h:227:48: note: expanded from macro '__deprecated_msg'
+  227 |         #define __deprecated_msg(_msg) __attribute__((__deprecated__(_msg)))
+      |                                                       ^
+In file included from src/main.cpp:2:
+src/../external/stb_image_write.h:789:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+  789 |    stbi__write_context s = { 0 };
+      |                                ^
+src/../external/stb_image_write.h:796:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+  796 |    stbi__write_context s = { 0 };
+      |                                ^
+src/../external/stb_image_write.h:1609:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+ 1609 |    stbi__write_context s = { 0 };
+      |                                ^
+src/../external/stb_image_write.h:1618:32: warning: missing field 'context' initializer [-Wmissing-field-initializers]
+ 1618 |    stbi__write_context s = { 0 };
+      |                                ^
+src/main.cpp:27:24: warning: use of infinity is undefined behavior due to the currently enabled floating-point options [-Wnan-infinity-disabled]
+   27 | const float infinity = std::numeric_limits<float>::infinity();
+      |                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/main.cpp:27:13: warning: unused variable 'infinity' [-Wunused-const-variable]
+   27 | const float infinity = std::numeric_limits<float>::infinity();
+      |             ^~~~~~~~
+11 warnings generated.
+✓ Phase 2 built: build/raytracer_phase2

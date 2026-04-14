@@ -26,6 +26,7 @@ std::ofstream gpu_log;
 #include "camera/camera.h"
 #include "scene/scene.h"
 #include "scene/light.h"
+#include "scene/cornell_box.h"
 #include "renderer/renderer.h"
 
 #ifdef USE_GPU_RENDERER
@@ -349,7 +350,7 @@ public:
 
 public:
     CameraController()
-        : position(0, 1, 3), lookat(0, 0, -1), vup(0, 1, 0),
+        : position(0, 2, 15), lookat(0, 2, 0), vup(0, 1, 0),
           vfov(60), aspect_ratio(16.0f / 9.0f), aperture(0.0f),
           dist_to_focus(3.0f), yaw(-180.0f), pitch(0.0f) {
         update_from_angles();
@@ -546,7 +547,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Initial quality level
-    int current_quality = 2; // Start at "Low" quality
+    int current_quality = 0; // Start at "Preview (Ultra Fast)" quality
     QualityPreset preset = quality_levels[current_quality];
 
     // Setup OpenGL for GPU rendering
@@ -645,47 +646,9 @@ int main(int argc, char* argv[]) {
     (void)texture;  // Unused in GPU mode
 #endif
 
-    // Setup scene
+    // Setup scene - use shared Cornell Box scene
     Scene scene;
-    scene.ambient_light = Color(0.1f, 0.1f, 0.1f);
-
-    // Materials
-    auto material_red = std::make_shared<Lambertian>(Color(0.65f, 0.05f, 0.05f));
-    auto material_green = std::make_shared<Lambertian>(Color(0.12f, 0.45f, 0.15f));
-    auto material_gray = std::make_shared<Lambertian>(Color(0.73f, 0.73f, 0.73f));
-    auto material_blue = std::make_shared<Lambertian>(Color(0.1f, 0.2f, 0.7f));
-    auto material_yellow = std::make_shared<Lambertian>(Color(0.8f, 0.7f, 0.1f));
-    auto material_metal = std::make_shared<Metal>(Color(0.8f, 0.8f, 0.8f), 0.0);
-    auto material_metal_fuzz = std::make_shared<Metal>(Color(0.7f, 0.6f, 0.5f), 0.3);
-    auto material_gold = std::make_shared<Metal>(Color(1.0f, 0.77f, 0.35f), 0.1);
-
-    // Cornell box walls
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 0, -5.5), 5.0, material_green));
-    scene.add_object(std::make_shared<Sphere>(Point3(0, -5.5, 0), 5.0, material_gray));
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 5.5, 0), 5.0, material_gray));
-    scene.add_object(std::make_shared<Sphere>(Point3(-5.5, 0, 0), 5.0, material_red));
-    scene.add_object(std::make_shared<Sphere>(Point3(5.5, 0, 0), 5.0, material_green));
-
-    // Objects
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 0, 0), 0.5, material_gold));
-    scene.add_object(std::make_shared<Sphere>(Point3(-1.2, 0.2, -0.5), 0.35, material_metal_fuzz));
-    scene.add_object(std::make_shared<Sphere>(Point3(1.2, -0.1, -0.8), 0.4, material_blue));
-    scene.add_object(std::make_shared<Sphere>(Point3(0, -0.5, 0.5), 0.25, material_red));
-    scene.add_object(std::make_shared<Sphere>(Point3(-0.6, -0.4, 0.8), 0.2, material_yellow));
-
-    // Triangles - pyramid
-    Point3 pyramid_top(0.0f, 0.9f, -1.8f);
-    Point3 pyramid_base1(-0.6f, -0.3f, -2.3f);
-    Point3 pyramid_base2(0.6f, -0.3f, -2.3f);
-    Point3 pyramid_base3(0.0f, -0.3f, -1.3f);
-
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base1, pyramid_base2, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base2, pyramid_base3, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base3, pyramid_base1, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_base1, pyramid_base3, pyramid_base2, material_gray));
-
-    // Lighting
-    scene.add_light(Light(Point3(0, 4.9, 0), Color(1.0f, 1.0f, 1.0f)));
+    setup_cornell_box_scene(scene);
 
     // Camera controller
     CameraController camera_controller;
@@ -847,7 +810,7 @@ int main(int argc, char* argv[]) {
 
         // Handle continuous keyboard input
         const Uint8* keystates = SDL_GetKeyboardState(NULL);
-        float move_speed = 0.04f;  // Slower movement for better control
+        float move_speed = 0.15f;  // Faster movement for larger room
 
         if (keystates[SDL_SCANCODE_W]) {
             camera_controller.move_forward(move_speed);
