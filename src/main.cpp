@@ -10,6 +10,7 @@
 #include <sstream>
 #include <algorithm>
 #include <atomic>
+#include <thread>
 #include <omp.h>
 #include "math/vec3.h"
 #include "math/ray.h"
@@ -102,6 +103,19 @@ int main(int argc, char* argv[]) {
     }
 
     const int image_height = static_cast<int>(image_width / aspect_ratio);
+
+    // Safety check: calculate total rays and warn if too high
+    int total_pixels = image_width * image_height;
+    int total_rays = total_pixels * samples_per_pixel * (max_depth + 1);  // Approximate
+    if (total_rays > 100000000) {  // More than 100 million rays
+        std::cerr << "⚠️  WARNING: High ray count detected!\n";
+        std::cerr << "  Resolution: " << image_width << "x" << image_height << "\n";
+        std::cerr << "  Total rays: ~" << (total_rays / 1000000) << " MRays\n";
+        std::cerr << "  Estimated render time: " << (total_rays / 15000000.0) << " seconds\n";
+        std::cerr << "  Press Ctrl+C to cancel, or wait for render to complete.\n";
+        std::cerr.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(2));  // Give time to read warning
+    }
 
     // Performance tracking
     PerformanceTracker perf("Phase 2++: Multi-threaded Renderer (AA + PNG + OpenMP)", image_width, image_height,

@@ -301,11 +301,44 @@ QualityPreset quality_levels[] = {
     {640, 1, 3, "Low (Fast)"},
     {800, 4, 3, "Medium"},
     {1280, 16, 5, "High"},
-    {1600, 64, 8, "Ultra"},
-    {1920, 128, 10, "Maximum Quality"}
+    {1600, 32, 5, "Ultra"},      // Reduced from 64 samples
+    {1920, 64, 5}                 // Reduced from 128 samples, depth 5
 };
 
 const int NUM_QUALITY_LEVELS = 6;
+
+// Safety limits
+const int MAX_WIDTH = 1920;
+const int MAX_SAMPLES = 64;
+const int MAX_DEPTH = 5;
+
+// Estimate memory usage for a render
+int estimate_memory_mb(int width, int height, int samples) {
+    int pixels = width * height;
+    int rays = pixels * samples;
+    // Rough estimate: ~100 bytes per ray (framebuffer + overhead)
+    return (rays * 100) / (1024 * 1024);
+}
+
+// Check if quality setting is safe
+bool is_quality_safe(const QualityPreset& preset) {
+    int height = preset.width * 9 / 16;
+    int pixels = preset.width * height;
+    int rays = pixels * preset.samples;
+
+    // Warn if more than 50 million rays
+    if (rays > 50000000) {
+        return false;
+    }
+
+    // Warn if estimated memory > 500MB
+    int memory_mb = estimate_memory_mb(preset.width, height, preset.samples);
+    if (memory_mb > 500) {
+        return false;
+    }
+
+    return true;
+}
 
 #ifdef USE_GPU_RENDERER
 // Save GPU framebuffer to PNG file
@@ -930,6 +963,49 @@ int main(int argc, char* argv[]) {
                     case SDLK_4: case SDLK_5: case SDLK_6: {
                         int new_quality = event.key.keysym.sym - SDLK_1;
                         if (new_quality != current_quality) {
+                            // Safety check for high quality levels
+                            QualityPreset new_preset = quality_levels[new_quality];
+                            if (!is_quality_safe(new_preset)) {
+                                int height = new_preset.width * 9 / 16;
+                                int pixels = new_preset.width * height;
+                                int rays = pixels * new_preset.samples;
+                                int memory_mb = estimate_memory_mb(new_preset.width, height, new_preset.samples);
+
+                                std::cout << "\n⚠️  WARNING: High quality setting!\n";
+                                std::cout << "  Resolution: " << new_preset.width << "x" << height << "\n";
+                                std::cout << "  Total rays: " << rays << " (" << (rays / 1000000) << " MRays)\n";
+                                std::cout << "  Est. memory: " << memory_mb << " MB\n";
+                                std::cout << "  This may take 10-20 seconds per frame.\n";
+                                std::cout << "  Press " << (new_quality + 1) << " again to confirm, or other key to cancel.\n";
+
+                                // Wait for confirmation (simple debounce)
+                                SDL_Event confirm_event;
+                                bool confirmed = false;
+                                auto start_time = std::chrono::steady_clock::now();
+                                while (std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - start_time).count() < 3000) {
+                                    if (SDL_PollEvent(&confirm_event)) {
+                                        if (confirm_event.type == SDL_KEYDOWN) {
+                                            int confirm_key = confirm_event.key.keysym.sym - SDLK_1;
+                                            if (confirm_key == new_quality) {
+                                                confirmed = true;
+                                                break;
+                                            } else {
+                                                std::cout << "Cancelled.\n";
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    SDL_Delay(10);
+                                }
+
+                                if (!confirmed) {
+                                    std::cout << "Quality change cancelled.\n";
+                                    break;
+                                }
+                                std::cout << "Confirmed! Applying high quality setting...\n";
+                            }
+
                             current_quality = new_quality;
                             preset = quality_levels[current_quality];
 
