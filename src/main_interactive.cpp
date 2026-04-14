@@ -40,7 +40,6 @@ layout(location = 0) in vec2 a_position;
 out vec2 v_uv;
 void main() {
     v_uv = a_position * 0.5 + 0.5;
-    v_uv.y = 1.0 - v_uv.y;
     gl_Position = vec4(a_position, 0.0, 1.0);
 }
 )";
@@ -178,54 +177,82 @@ vec3 ray_color(Ray r, int depth) {
         return mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
     }
 
-    // Get material properties
     vec3 albedo = sphere_colors[rec.material_id];
     int mat_type = sphere_types[rec.material_id];
     float fuzz = sphere_fuzz[rec.material_id];
 
-    // Phong shading
-    vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
-    vec3 light_color = vec3(1.0, 1.0, 1.0);
-    vec3 ambient = vec3(0.1, 0.1, 0.1);
-    float diff = max(dot(rec.normal, light_dir), 0.0);
-    vec3 view_dir = normalize(-r.direction);
-    vec3 reflect_dir = reflect(-light_dir, rec.normal);
-    float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+    vec3 color;
 
-    vec3 color = ambient * albedo + diff * light_color * albedo + spec * light_color * 0.5;
+    if (mat_type == 1) {
+        // Metal: Strong diffuse component for visible fuzz
+        vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
+        vec3 ambient = vec3(0.15, 0.15, 0.15);
+        float diff = max(dot(rec.normal, light_dir), 0.0) * 0.8;  // Strong diffuse
+        vec3 view_dir = normalize(-r.direction);
+        vec3 reflect_dir = reflect(-light_dir, rec.normal);
+        float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);  // Softer highlight
 
-    // For metal, add reflections (iterative, not recursive)
-    if (depth > 1 && mat_type == 1) {
-        // Trace one reflection
-        vec3 reflected_dir = reflect(normalize(-r.direction), rec.normal);
-        if (fuzz > 0.0) {
-            reflected_dir = normalize(reflected_dir + fuzz * vec3(
-                random_float() * 2.0 - 1.0,
-                random_float() * 2.0 - 1.0,
-                random_float() * 2.0 - 1.0
-            ));
+        // Strong base metal color with diffuse (makes fuzz very visible)
+        color = ambient * albedo + diff * albedo + spec * vec3(0.3, 0.3, 0.3);
+
+        // Add reflection for metal materials
+        if (depth > 1) {
+            vec3 reflected_dir = reflect(normalize(r.direction), rec.normal);
+
+            // Add strong fuzz for rough metals
+            if (fuzz > 0.0) {
+                // Very strong perturbation for visible fuzz effect
+                vec3 fuzz_offset = fuzz * 1.2 * normalize(vec3(
+                    sin(rec.p.x * 6.0),
+                    sin(rec.p.y * 6.0),
+                    sin(rec.p.z * 6.0)
+                ));
+                reflected_dir = normalize(reflected_dir + fuzz_offset);
+            }
+
+            Ray reflected_ray;
+            reflected_ray.origin = rec.p + 0.1 * rec.normal;
+            reflected_ray.direction = normalize(reflected_dir);
+
+            HitRecord ref_rec;
+            vec3 ref_color;
+
+            if (scene_hit(reflected_ray, 0.001, 1000.0, ref_rec)) {
+                // Hit an object - get its color
+                if (ref_rec.material_id != rec.material_id) {
+                    vec3 ref_albedo = sphere_colors[ref_rec.material_id];
+                    int ref_mat_type = sphere_types[ref_rec.material_id];
+
+                    // Simple shading for reflected object
+                    vec3 ref_light_dir = normalize(vec3(1.0, 1.0, 1.0));
+                    vec3 ref_ambient = vec3(0.1, 0.1, 0.1);
+                    float ref_diff = max(dot(ref_rec.normal, ref_light_dir), 0.0);
+
+                    ref_color = ref_ambient * ref_albedo + ref_diff * ref_albedo;
+                } else {
+                    // Self-reflection - use background
+                    vec3 unit_direction = normalize(reflected_dir);
+                    float t = 0.5 * (unit_direction.y + 1.0);
+                    ref_color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
+                }
+            } else {
+                // Didn't hit anything - use background gradient
+                vec3 unit_direction = normalize(reflected_dir);
+                float t = 0.5 * (unit_direction.y + 1.0);
+                ref_color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
+            }
+
+            // Less reflective, more base color (40% reflection, 60% diffuse)
+            color = mix(ref_color, color, 0.6);
         }
+    } else {
+        // Lambertian (diffuse): Full diffuse shading, no reflections
+        vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
+        vec3 light_color = vec3(1.0, 1.0, 1.0);
+        vec3 ambient = vec3(0.1, 0.1, 0.1);
+        float diff = max(dot(rec.normal, light_dir), 0.0);
 
-        Ray reflected_ray;
-        reflected_ray.origin = rec.p + 0.001 * rec.normal;
-        reflected_ray.direction = normalize(reflected_dir);
-
-        // Check what the reflected ray hits
-        HitRecord ref_rec;
-        if (scene_hit(reflected_ray, 0.001, 1000.0, ref_rec)) {
-            vec3 ref_albedo = sphere_colors[ref_rec.material_id];
-            vec3 ref_light_dir = normalize(vec3(1.0, 1.0, 1.0));
-            float ref_diff = max(dot(ref_rec.normal, ref_light_dir), 0.0);
-            vec3 ref_view_dir = normalize(-reflected_ray.direction);
-            vec3 ref_reflect_dir = reflect(-ref_light_dir, ref_rec.normal);
-            float ref_spec = pow(max(dot(ref_view_dir, ref_reflect_dir), 0.0), 32.0);
-
-            vec3 ref_color = vec3(0.1, 0.1, 0.1) * ref_albedo +
-                           ref_diff * light_color * ref_albedo +
-                           ref_spec * light_color * 0.5;
-
-            color = color + albedo * ref_color;
-        }
+        color = ambient * albedo + diff * light_color * albedo;
     }
 
     return color;
@@ -804,7 +831,7 @@ int main(int argc, char* argv[]) {
                     // GPU: Inverted vertical look
                     camera_controller.rotate(
                         event.motion.xrel * 0.1f,
-                        event.motion.yrel * 0.1f
+                        -event.motion.yrel * 0.1f
                     );
 #else
                     // CPU: Standard vertical look
@@ -820,7 +847,7 @@ int main(int argc, char* argv[]) {
 
         // Handle continuous keyboard input
         const Uint8* keystates = SDL_GetKeyboardState(NULL);
-        float move_speed = 0.1f;
+        float move_speed = 0.04f;  // Slower movement for better control
 
         if (keystates[SDL_SCANCODE_W]) {
             camera_controller.move_forward(move_speed);
