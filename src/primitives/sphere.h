@@ -15,6 +15,11 @@ public:
     Sphere(Point3 cen, float r, std::shared_ptr<Material> m)
         : center(cen), radius(r), mat(m) {}
 
+    // Get center X for spatial optimization
+    float get_center_x() const override {
+        return center.x;
+    }
+
     // Ray-sphere intersection using analytic solution
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const override {
         Vec3 oc = r.origin() - center;

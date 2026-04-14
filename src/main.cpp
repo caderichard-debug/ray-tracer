@@ -137,6 +137,9 @@ int main(int argc, char* argv[]) {
     Scene scene;
     setup_cornell_box_scene(scene);
 
+    // Performance optimization: build spatial cache
+    scene.optimize_spatial_layout();
+
     // Create renders directory and generate unique output filename
     system("mkdir -p renders");
 

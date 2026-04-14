@@ -73,6 +73,11 @@ public:
     Point3 vertex0() const { return v0; }
     Point3 vertex1() const { return v1; }
     Point3 vertex2() const { return v2; }
+
+    // Get center X for spatial optimization (centroid)
+    float get_center_x() const override {
+        return (v0.x + v1.x + v2.x) / 3.0f;
+    }
 };
 
 #endif // TRIANGLE_H

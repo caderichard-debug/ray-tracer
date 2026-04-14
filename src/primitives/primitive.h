@@ -29,6 +29,9 @@ public:
     // Check if ray hits this primitive
     // Returns true if hit, with hit record filled in if t_min < t < t_max
     virtual bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const = 0;
+
+    // Get center X coordinate for spatial sorting optimization
+    virtual float get_center_x() const = 0;
 };
 
 #endif // PRIMITIVE_H

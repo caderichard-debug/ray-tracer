@@ -3,6 +3,7 @@
 
 #include "scene.h"
 #include "material/material.h"
+#include "texture/texture.h"
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "light.h"
@@ -70,6 +71,30 @@ inline void setup_cornell_box_scene(Scene& scene) {
     // Small spheres in the back (positioned in larger room)
     scene.add_object(std::make_shared<Sphere>(Point3(-1.0, 0.5, -4.0), 0.4, material_metal));
     scene.add_object(std::make_shared<Sphere>(Point3(1.0, 0.5, -4.0), 0.4, material_metal));
+
+    // === PROCEDURAL TEXTURES ===
+
+    // Checkerboard texture sphere (black and white)
+    auto checker_black = std::make_shared<SolidColor>(Color(0.1f, 0.1f, 0.1f));
+    auto checker_white = std::make_shared<SolidColor>(Color(0.9f, 0.9f, 0.9f));
+    auto texture_checker = std::make_shared<CheckerTexture>(checker_black, checker_white, 8.0f);
+    auto material_checker = std::make_shared<Lambertian>(texture_checker);
+    scene.add_object(std::make_shared<Sphere>(Point3(-5.0, 1.0, -2.0), 0.8, material_checker));
+
+    // Noise texture sphere (blue and white marble-like)
+    auto texture_noise = std::make_shared<NoiseTexture>(Color(0.6f, 0.7f, 0.9f), Color(0.9f, 0.95f, 1.0f), 4.0f, 4, 0.5f);
+    auto material_noise = std::make_shared<Lambertian>(texture_noise);
+    scene.add_object(std::make_shared<Sphere>(Point3(-5.0, 1.0, 2.0), 0.8, material_noise));
+
+    // Gradient texture sphere (red to yellow)
+    auto texture_gradient = std::make_shared<GradientTexture>(Color(0.9f, 0.1f, 0.1f), Color(0.9f, 0.9f, 0.1f), Vec3(0, 1, 0));
+    auto material_gradient = std::make_shared<Lambertian>(texture_gradient);
+    scene.add_object(std::make_shared<Sphere>(Point3(5.0, 1.0, -2.0), 0.8, material_gradient));
+
+    // Stripe texture sphere (blue and cyan stripes)
+    auto texture_stripe = std::make_shared<StripeTexture>(Color(0.1f, 0.3f, 0.7f), Color(0.3f, 0.8f, 0.9f), 6.0f, 0.3f);
+    auto material_stripe = std::make_shared<Lambertian>(texture_stripe);
+    scene.add_object(std::make_shared<Sphere>(Point3(5.0, 1.0, 2.0), 0.8, material_stripe));
 
     // Lighting
     scene.add_light(Light(Point3(0, 18.0, 0), Color(1.0f, 1.0f, 1.0f)));

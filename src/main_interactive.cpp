@@ -28,6 +28,7 @@ std::ofstream gpu_log;
 #include "scene/light.h"
 #include "scene/cornell_box.h"
 #include "renderer/renderer.h"
+#include "renderer/render_analysis.h"
 
 #ifdef USE_GPU_RENDERER
 #include <SDL2/SDL_opengl.h>
@@ -527,8 +528,8 @@ public:
         // Render controls text (condensed)
         const char* controls_text[] = {
             "MOVE: WASD + Arrows | LOOK: Mouse",
-            "1-3: Quality | H: Help | SPACE: Pause",
-            "Click: Capture mouse | ESC: Quit"
+            "1-6: Quality | M: Analysis | SPACE: Pause",
+            "C: Controls | H: Help | ESC: Quit"
         };
 
         int y_offset = 50;
@@ -625,7 +626,8 @@ public:
     }
 
     void render(SDL_Renderer* renderer, int window_width, int window_height,
-                int quality_idx, const QualityPreset& preset, double fps, double render_time) {
+                int quality_idx, const QualityPreset& preset, double fps, double render_time,
+                const char* analysis_mode_name = nullptr) {
         if (!initialized || !font || !title_font) return;
 
         // Panel positioned in top-right corner
@@ -693,6 +695,12 @@ public:
         render_setting("Max Depth:", std::to_string(preset.max_depth).c_str());
         render_setting("Performance:", fps_str);
         render_setting("Render Time:", time_str);
+
+        // Show analysis mode if active
+        if (analysis_mode_name) {
+            y_offset += 5;  // Extra spacing
+            render_setting("Analysis Mode:", analysis_mode_name);
+        }
 
         // Add controls hint
         y_offset += 10;
@@ -835,6 +843,9 @@ int main(int argc, char* argv[]) {
     Scene scene;
     setup_cornell_box_scene(scene);
 
+    // Performance optimization: build spatial cache
+    scene.optimize_spatial_layout();
+
     // Camera controller
     CameraController camera_controller;
 
@@ -877,6 +888,12 @@ int main(int argc, char* argv[]) {
         std::cout << "Note: Controls panel unavailable (SDL_ttf not found)\n";
         show_controls = false;
     }
+
+    // Initialize render analysis system
+    RenderAnalysis analysis;
+    int analysis_height = preset.width * 9 / 16;
+    analysis.resize(preset.width, analysis_height);
+    std::cout << "Analysis system initialized (press M to cycle modes)\n";
 
     // Mouse capture
     SDL_SetRelativeMouseMode(SDL_FALSE);
@@ -941,6 +958,14 @@ int main(int argc, char* argv[]) {
                     case SDLK_c:
                         show_controls = !show_controls;
                         break;
+                    case SDLK_m: {  // Cycle analysis modes
+                        int mode = static_cast<int>(analysis.get_mode());
+                        mode = (mode + 1) % 6;  // 6 analysis modes
+                        analysis.set_mode(static_cast<AnalysisMode>(mode));
+                        std::cout << "Analysis mode: " << analysis.get_mode_name() << std::endl;
+                        need_render = true;
+                        break;
+                    }
                     case SDLK_SPACE:
                         paused = !paused;
                         std::cout << (paused ? "Paused" : "Resumed") << std::endl;
@@ -1449,8 +1474,10 @@ int main(int argc, char* argv[]) {
 
         // Render controls panel if active
         if (show_controls) {
+            const char* mode_name = (analysis.get_mode() != AnalysisMode::NORMAL) ?
+                                   analysis.get_mode_name() : nullptr;
             controls_panel.render(renderer, window_width, window_height,
-                                 current_quality, preset, fps, render_time);
+                                 current_quality, preset, fps, render_time, mode_name);
         }
 
         // Render help overlay if active

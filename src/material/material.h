@@ -4,8 +4,10 @@
 #include "../math/vec3.h"
 #include "../math/ray.h"
 #include "../primitives/primitive.h"
+#include "../texture/texture.h"
 #include <random>
 #include <cmath>
+#include <memory>
 
 class Material {
 public:
@@ -27,7 +29,13 @@ public:
 
 class Lambertian : public Material {
 public:
-    Lambertian(const Color& a) : Material(a) {}
+    std::shared_ptr<Texture> albedo_texture;
+
+    Lambertian(const Color& a) : Material(a) {
+        albedo_texture = std::make_shared<SolidColor>(a);
+    }
+
+    Lambertian(std::shared_ptr<Texture> tex) : Material(Color(1,1,1)), albedo_texture(tex) {}
 
     bool scatter(const Ray& r_in, const HitRecord& rec, Color& attenuation, Ray& scattered) const override {
         (void)r_in; // Unused parameter
@@ -39,7 +47,9 @@ public:
             scatter_direction = rec.normal;
 
         scattered = Ray(rec.p, scatter_direction);
-        attenuation = albedo;
+
+        // Use texture for albedo
+        attenuation = albedo_texture->value(0, 0, rec.p);
         return true;
     }
 };

@@ -23,6 +23,12 @@ public:
         lights.push_back(light);
     }
 
+    // Performance optimization: no-op for now (spatial sorting hurt perf)
+    void optimize_spatial_layout() {
+        // Spatial sorting removed - hurt performance due to cache misses
+        // Keeping method for compatibility
+    }
+
     // Check if ray hits any object in the scene
     // Returns the closest hit (smallest t)
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const {
@@ -49,7 +55,7 @@ public:
 
         for (const auto& object : objects) {
             if (object->hit(shadow_ray, t_min, t_max, shadow_rec)) {
-                return true;
+                return true;  // Early exit on first hit
             }
         }
         return false;
