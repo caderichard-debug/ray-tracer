@@ -6,6 +6,7 @@
 #include "../scene/scene.h"
 #include "../camera/camera.h"
 #include "../material/material.h"
+#include "../primitives/sphere.h"
 #include <vector>
 #include <memory>
 
@@ -39,17 +40,22 @@ public:
     // Phase 3: SIMD packet tracing
     bool enable_simd_packets; // Enable AVX2 ray packet tracing
 
+    // Phase 3: BVH acceleration
+    bool enable_bvh; // Enable BVH acceleration structure
+    std::vector<std::shared_ptr<Sphere>> bvh_spheres; // Spheres for BVH
+    bool bvh_built; // Track if BVH has been built
+
     Renderer() : max_depth(5), enable_shadows(true), enable_reflections(true),
                  enable_progressive(false), current_pass(0), max_passes(10),
                  enable_adaptive(false), variance_threshold(0.01f), min_samples(4), max_samples(64),
                  enable_wavefront(false), wavefront_size(1024), enable_morton(false), enable_frustum(false),
-                 enable_simd_packets(false) {}
+                 enable_simd_packets(false), enable_bvh(false), bvh_built(false) {}
 
     Renderer(int depth) : max_depth(depth), enable_shadows(true), enable_reflections(true),
                           enable_progressive(false), current_pass(0), max_passes(10),
                           enable_adaptive(false), variance_threshold(0.01f), min_samples(4), max_samples(64),
                           enable_wavefront(false), wavefront_size(1024), enable_morton(false), enable_frustum(false),
-                          enable_simd_packets(false) {}
+                          enable_simd_packets(false), enable_bvh(false), bvh_built(false) {}
 
     // Main ray tracing function
     Color ray_color(const Ray& r, const Scene& scene, int depth) const;
@@ -78,6 +84,10 @@ public:
     // Phase 3: SIMD packet tracing
     void render_simd_packets(const Camera& cam, const Scene& scene, std::vector<std::vector<Color>>& framebuffer,
                             int width, int height, int samples);
+
+    // Phase 3: BVH acceleration
+    void build_bvh(const Scene& scene);
+    bool hit_bvh(const Ray& r, float t_min, float t_max, HitRecord& rec, const Scene& scene) const;
 };
 
 #endif // RENDERER_H

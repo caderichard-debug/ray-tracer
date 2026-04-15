@@ -428,7 +428,7 @@ public:
                 const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
                 bool enable_progressive = false, bool enable_adaptive = false, bool enable_wavefront = false,
                 bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false,
-                bool enable_simd_packets = false
+                bool enable_simd_packets = false, bool enable_bvh = false
 #ifdef GPU_RENDERING
                 , RendererType current_renderer = RendererType::CPU
 #endif
@@ -1133,6 +1133,43 @@ public:
             SDL_FreeSurface(simd_text_surface);
         }
 
+        y_offset += 35;
+
+        // BVH toggle button (new row)
+        const char* bvh_label = enable_bvh ? "BVH: ON" : "BVH: OFF";
+        int bvh_button_width = 120;
+        SDL_Rect bvh_button_rect = {15, y_offset, bvh_button_width, 24};
+
+        // Store button for click detection (category 15 = bvh)
+        buttons.push_back({{bvh_button_rect.x + panel_x, bvh_button_rect.y + panel_y, bvh_button_rect.w, bvh_button_rect.h},
+                          "bvh", enable_bvh ? 1 : 0, 15});
+
+        // Draw BVH button background
+        Uint32 bvh_button_bg = SDL_MapRGBA(content_surface->format,
+            enable_bvh ? button_active_color.r : button_color.r,
+            enable_bvh ? button_active_color.g : button_color.g,
+            enable_bvh ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(content_surface, &bvh_button_rect, bvh_button_bg);
+
+        // Draw BVH button border
+        SDL_Rect bvh_border = {bvh_button_rect.x, bvh_button_rect.y, bvh_button_rect.w, 2};
+        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        bvh_border = {bvh_button_rect.x, bvh_button_rect.y + bvh_button_rect.h - 2, bvh_button_rect.w, 2};
+        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+
+        // Draw BVH button text
+        SDL_Surface* bvh_text_surface = TTF_RenderText_Blended(font, bvh_label, text_color);
+        if (bvh_text_surface) {
+            SDL_Rect bvh_text_rect = {
+                bvh_button_rect.x + (bvh_button_width - bvh_text_surface->w) / 2,
+                y_offset + (24 - bvh_text_surface->h) / 2,
+                bvh_text_surface->w, bvh_text_surface->h
+            };
+            SDL_BlitSurface(bvh_text_surface, nullptr, content_surface, &bvh_text_rect);
+            SDL_FreeSurface(bvh_text_surface);
+        }
+
         // Add padding at bottom for scrolling
         y_offset += 40;
 
@@ -1219,6 +1256,8 @@ public:
         bool frustum_changed;
         bool simd_packets_changed;
         bool new_simd_packets;
+        bool bvh_changed;
+        bool new_bvh;
         bool button_clicked;
 
         ClickResult() : quality_changed(false), new_quality(0),
@@ -1231,6 +1270,7 @@ public:
                        adaptive_changed(false), wavefront_changed(false),
                        morton_changed(false), stratified_changed(false), frustum_changed(false),
                        simd_packets_changed(false), new_simd_packets(false),
+                       bvh_changed(false), new_bvh(false),
                        button_clicked(false) {}
     };
 
@@ -1296,6 +1336,10 @@ public:
                     case 14: // SIMD packets toggle
                         result.simd_packets_changed = true;
                         result.new_simd_packets = button.value;
+                        break;
+                    case 15: // BVH toggle
+                        result.bvh_changed = true;
+                        result.new_bvh = button.value;
                         break;
                 }
                 break;
@@ -1775,6 +1819,14 @@ int main(int argc, char* argv[]) {
                             ray_renderer.enable_simd_packets = click_result.new_simd_packets;
                             std::cout << "SIMD packets: " << (ray_renderer.enable_simd_packets ? "ON" : "OFF") << std::endl;
                             need_render = true;
+                        } else if (click_result.bvh_changed) {
+                            // Toggle BVH acceleration
+                            ray_renderer.enable_bvh = click_result.new_bvh;
+                            if (ray_renderer.enable_bvh) {
+                                ray_renderer.build_bvh(scene);
+                            }
+                            std::cout << "BVH: " << (ray_renderer.enable_bvh ? "ON" : "OFF") << std::endl;
+                            need_render = true;
                         } else if (click_result.resolution_changed) {
                             int new_width = click_result.new_resolution;
                             if (!is_samples_safe(preset.samples, new_width)) {
@@ -2176,13 +2228,14 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
-                                 ray_renderer.enable_simd_packets,
+                                 ray_renderer.enable_simd_packets, ray_renderer.enable_bvh,
                                  current_renderer);
 #else
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
-                                 enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets);
+                                 enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
+                                 ray_renderer.enable_bvh);
 #endif
         }
 

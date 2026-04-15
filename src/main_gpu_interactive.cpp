@@ -1057,7 +1057,8 @@ public:
             void main() {
                 if (use_texture == 1) {
                     vec4 tex_color = texture2D(ui_texture, v_tex_coord);
-                    gl_FragColor = vec4(ui_color.rgb, tex_color.a * ui_color.a);
+                    // For text: use texture RGB * color RGB, and texture alpha * color alpha
+                    gl_FragColor = vec4(tex_color.rgb * ui_color.rgb, tex_color.a * ui_color.a);
                 } else {
                     gl_FragColor = ui_color;
                 }
@@ -1145,12 +1146,19 @@ public:
         if (!initialized) return;
 
         // Save current OpenGL state
-        GLint current_program, current_vao;
+        GLint current_program, current_vao, current_array_buffer;
         GLint depth_test_enabled, blend_enabled;
+        GLint blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha;
+
         glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &current_array_buffer);
         glGetIntegerv(GL_DEPTH_TEST, &depth_test_enabled);
         glGetIntegerv(GL_BLEND, &blend_enabled);
+        glGetIntegerv(GL_BLEND_SRC_RGB, &blend_src_rgb);
+        glGetIntegerv(GL_BLEND_DST_RGB, &blend_dst_rgb);
+        glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src_alpha);
+        glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst_alpha);
 
         float x1 = (x / WIDTH) * 2.0f - 1.0f;
         float y1 = 1.0f - (y / HEIGHT) * 2.0f;
@@ -1191,25 +1199,45 @@ public:
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        // Restore OpenGL state
+        // Restore OpenGL state completely
         glUseProgram(current_program);
         glBindVertexArray(current_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, current_array_buffer);
         if (depth_test_enabled) glEnable(GL_DEPTH_TEST);
-        if (!blend_enabled) glDisable(GL_BLEND);
+        if (!blend_enabled) {
+            glDisable(GL_BLEND);
+        } else {
+            glBlendFunc(blend_src_rgb, blend_dst_rgb);
+            if (blend_src_alpha != blend_src_rgb || blend_dst_alpha != blend_dst_rgb) {
+                glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
+            }
+        }
     }
 
     void render_text_quad(float x, float y, float width, float height, GLuint texture, const SDL_Color& color) {
         if (texture == 0) return;
 
         // Save current OpenGL state
-        GLint current_program, current_vao;
+        GLint current_program, current_vao, current_array_buffer;
         GLint depth_test_enabled, blend_enabled;
+        GLint blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha;
+        GLint active_texture, current_texture;
+        GLint texture_unit_0_binding;
+
         glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &current_array_buffer);
         glGetIntegerv(GL_DEPTH_TEST, &depth_test_enabled);
         glGetIntegerv(GL_BLEND, &blend_enabled);
-        GLint current_texture;
+        glGetIntegerv(GL_BLEND_SRC_RGB, &blend_src_rgb);
+        glGetIntegerv(GL_BLEND_DST_RGB, &blend_dst_rgb);
+        glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src_alpha);
+        glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst_alpha);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
+
+        glActiveTexture(GL_TEXTURE0);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture_unit_0_binding);
 
         float x1 = (x / WIDTH) * 2.0f - 1.0f;
         float y1 = 1.0f - (y / HEIGHT) * 2.0f;
@@ -1241,7 +1269,8 @@ public:
         GLint texture_loc = glGetUniformLocation(ui_program, "ui_texture");
         GLint use_tex_loc = glGetUniformLocation(ui_program, "use_texture");
 
-        glUniform4f(color_loc, color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
+        // For text, use pure white color so texture shows true colors
+        glUniform4f(color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
         glUniform1i(use_tex_loc, 1);
 
         glActiveTexture(GL_TEXTURE0);
@@ -1255,12 +1284,21 @@ public:
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        // Restore OpenGL state
+        // Restore OpenGL state completely
         glUseProgram(current_program);
-        glBindTexture(GL_TEXTURE_2D, current_texture);
         glBindVertexArray(current_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, current_array_buffer);
+        glActiveTexture(active_texture);
+        glBindTexture(GL_TEXTURE_2D, current_texture);
         if (depth_test_enabled) glEnable(GL_DEPTH_TEST);
-        if (!blend_enabled) glDisable(GL_BLEND);
+        if (!blend_enabled) {
+            glDisable(GL_BLEND);
+        } else {
+            glBlendFunc(blend_src_rgb, blend_dst_rgb);
+            if (blend_src_alpha != blend_src_rgb || blend_dst_alpha != blend_dst_rgb) {
+                glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
+            }
+        }
     }
 
     TTF_Font* get_font() { return font; }

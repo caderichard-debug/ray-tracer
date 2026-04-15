@@ -3,6 +3,7 @@
 #include "../math/pcg_random.h"
 #include "../math/morton.h"
 #include "../utils/simd_utils.h"
+#include "../acceleration/bvh.h"
 #include <iostream>
 #include <limits>
 #include <algorithm>
@@ -371,4 +372,43 @@ void Renderer::render_simd_packets(const Camera& cam, const Scene& scene,
             }
         }
     }
+}
+
+// Phase 3: BVH Acceleration Implementation
+void Renderer::build_bvh(const Scene& scene) {
+    // Extract spheres from scene for BVH
+    bvh_spheres.clear();
+    for (const auto& obj : scene.objects) {
+        // Try to cast to Sphere (most objects in Cornell Box are spheres)
+        auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
+        if (sphere) {
+            bvh_spheres.push_back(sphere);
+        }
+    }
+
+    std::cout << "BVH: Found " << bvh_spheres.size() << " spheres" << std::endl;
+
+    if (bvh_spheres.empty()) {
+        std::cout << "BVH: No spheres found, BVH not built" << std::endl;
+        bvh_built = false;
+        return;
+    }
+
+    // Build BVH from spheres
+    BVH bvh;
+    bvh.build(bvh_spheres);
+    bvh_built = true;
+
+    std::cout << "BVH: Build complete" << std::endl;
+}
+
+bool Renderer::hit_bvh(const Ray& r, float t_min, float t_max, HitRecord& rec, const Scene& scene) const {
+    if (!bvh_built || bvh_spheres.empty()) {
+        // Fallback to linear traversal
+        return scene.hit(r, t_min, t_max, rec);
+    }
+
+    // Use BVH for spheres only
+    BVH bvh;
+    return bvh.hit(r, t_min, t_max, rec, bvh_spheres);
 }

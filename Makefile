@@ -21,7 +21,7 @@ OPENGL_INCLUDES = -I/usr/local/opt/glew/include
 
 # Source files
 BATCH_CPU_SRC = src/main.cpp src/renderer/renderer.cpp
-INTERACTIVE_CPU_SRC = src/main_cpu_interactive.cpp src/renderer/renderer.cpp
+INTERACTIVE_CPU_SRC = src/main_cpu_interactive.cpp src/renderer/renderer.cpp src/acceleration/bvh.cpp
 INTERACTIVE_GPU_SRC = src/main_gpu_interactive.cpp
 ASCII_SRC = src/main_ascii.cpp src/renderer/renderer.cpp
 
