@@ -25,6 +25,7 @@
 #include "renderer/performance.h"
 #include "scene/cornell_box.h"
 #include "math/morton.h"
+#include "math/stratified.h"
 
 // Fast XOR-shift random number generator with atomic counter
 inline float random_float() {
@@ -179,6 +180,19 @@ int main(int argc, char* argv[]) {
 
         Color pixel_color(0, 0, 0);
 
+#ifdef ENABLE_STRATIFIED
+        // Generate stratified samples for this pixel
+        auto stratified_samples = Stratified::generate_stratified_samples(samples_per_pixel);
+
+        // Sample using stratified pattern for faster convergence
+        for (const auto& sample : stratified_samples) {
+            float u = (i + sample.first) / (image_width - 1);
+            float v = (j + sample.second) / (image_height - 1);
+
+            Ray r = cam.get_ray(u, v);
+            pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
+        }
+#else
         // Sample pixels for anti-aliasing
         for (int s = 0; s < samples_per_pixel; ++s) {
             float u = (i + random_float()) / (image_width - 1);
@@ -187,6 +201,7 @@ int main(int argc, char* argv[]) {
             Ray r = cam.get_ray(u, v);
             pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
         }
+#endif
 
         // Average the samples
         float scale = 1.0f / samples_per_pixel;
@@ -214,6 +229,19 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < image_width; ++i) {
             Color pixel_color(0, 0, 0);
 
+#ifdef ENABLE_STRATIFIED
+            // Generate stratified samples for this pixel
+            auto stratified_samples = Stratified::generate_stratified_samples(samples_per_pixel);
+
+            // Sample using stratified pattern for faster convergence
+            for (const auto& sample : stratified_samples) {
+                float u = (i + sample.first) / (image_width - 1);
+                float v = (j + sample.second) / (image_height - 1);
+
+                Ray r = cam.get_ray(u, v);
+                pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
+            }
+#else
             // Sample pixels for anti-aliasing (16 samples)
             for (int s = 0; s < samples_per_pixel; ++s) {
                 float u = (i + random_float()) / (image_width - 1);
@@ -222,6 +250,7 @@ int main(int argc, char* argv[]) {
                 Ray r = cam.get_ray(u, v);
                 pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
             }
+#endif
 
             // Average the samples
             float scale = 1.0f / samples_per_pixel;
