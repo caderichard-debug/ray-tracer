@@ -50,7 +50,7 @@ struct QualityPreset {
 };
 
 QualityPreset quality_levels[] = {
-    {1920, 1, 3, "Large Window (Default)"},  // Larger default window
+    {1920, 4, 3, "Large Window (Default)"},  // Large window with medium quality
     {640, 1, 3, "Low (Fast)"},
     {800, 4, 3, "Medium"},
     {1280, 16, 5, "High"},
@@ -1324,7 +1324,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Initial quality level
-    int current_quality = 2; // Start at "Medium" quality
+    int current_quality = 0; // Start at "Large Window (Default)" quality
     QualityPreset preset = quality_levels[current_quality];
 
     // Rendering feature toggles
