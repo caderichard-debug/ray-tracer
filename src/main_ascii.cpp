@@ -125,8 +125,8 @@ int main() {
     Scene scene;
     setup_cornell_box_scene(scene);
 
-    // Setup camera - positioned to avoid central sphere during orbit
-    Point3 lookfrom(0, 1, 8);
+    // Setup camera - original position moved left
+    Point3 lookfrom(-4, 1, 4);  // Moved left to -4 instead of 0
     Point3 lookat(0, 0.5, 0);
     Vec3 vup(0, 1, 0);
     float dist_to_focus = (lookfrom - lookat).length();
@@ -217,8 +217,8 @@ int main() {
 
         // Simple animation - move camera slightly
         float angle = frame * 0.02f;
-        lookfrom.x = std::sin(angle) * 8.0f;  // Increased radius to avoid central sphere
-        lookfrom.z = std::cos(angle) * 8.0f;  // Increased radius to avoid central sphere
+        lookfrom.x = std::sin(angle) * 4.0f - 4.0f;  // Original orbit radius, offset by -4
+        lookfrom.z = std::cos(angle) * 4.0f;
         cam = Camera(lookfrom, lookat, vup, vfov, aspect_ratio, aperture, dist_to_focus);
 
         // Small delay to control frame rate
