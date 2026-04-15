@@ -366,7 +366,9 @@ void Renderer::render_simd_packets(const Camera& cam, const Scene& scene,
                     // Gamma correction
                     final_color = AVX2::sqrt_avx2(final_color);
 
-                    framebuffer[height - 1 - (j + dy)][i + dx] = final_color;
+                    // Write to framebuffer (flip Y to match standard rendering)
+                    int y_pos = height - 1 - j - dy;
+                    framebuffer[y_pos][i + dx] = final_color;
                     out_idx++;
                 }
             }
