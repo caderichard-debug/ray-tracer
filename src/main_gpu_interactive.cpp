@@ -14,12 +14,35 @@
 // Include CPU scene setup for shared scene data
 #include "scene/scene.h"
 #include "scene/cornell_box.h"
+#include "scene/gpu_demo.h"
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "material/material.h"
 #include "texture/texture.h"
 #include "math/vec3.h"
 #include "math/ray.h"
+
+// Feature flags (set via Makefile)
+#ifndef ENABLE_PBR
+#define ENABLE_PBR 1  // Enable PBR lighting by default
+#endif
+
+#ifndef ENABLE_MULTIPLE_LIGHTS
+#define ENABLE_MULTIPLE_LIGHTS 1  // Enable multiple light support
+#endif
+
+#ifndef ENABLE_TONE_MAPPING
+#define ENABLE_TONE_MAPPING 1  // Enable ACES tone mapping
+#endif
+
+#ifndef ENABLE_GAMMA_CORRECTION
+#define ENABLE_GAMMA_CORRECTION 1  // Enable gamma correction
+#endif
+
+// Scene selection (set via Makefile)
+#ifndef SCENE_NAME
+#define SCENE_NAME "cornell_box"  // Default scene
+#endif
 
 // Window dimensions
 const int WIDTH = 1280;
@@ -378,8 +401,16 @@ struct TriangleData {
 };
 
 // Fragment shader that reads scene data from uniforms
-const char* fragment_shader_source = R"(
-#version 120
+// Note: Feature flags are injected from C++ macros during compilation
+std::string fragment_shader_source =
+    std::string(R"(#version 120
+
+)") +
+    "#define ENABLE_PBR " + (ENABLE_PBR ? "1" : "0") + "\n" +
+    "#define ENABLE_MULTIPLE_LIGHTS " + (ENABLE_MULTIPLE_LIGHTS ? "1" : "0") + "\n" +
+    "#define ENABLE_TONE_MAPPING " + (ENABLE_TONE_MAPPING ? "1" : "0") + "\n" +
+    "#define ENABLE_GAMMA_CORRECTION " + (ENABLE_GAMMA_CORRECTION ? "1" : "0") + "\n" +
+    R"(
 
 uniform vec2 resolution;
 uniform vec3 camera_pos;
@@ -526,6 +557,7 @@ vec3 stripe_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
 }
 
 // ============================================================================
+#if ENABLE_PBR
 // COOK-TORRANCE BRDF FUNCTIONS (Physically Based Rendering)
 // ============================================================================
 
@@ -701,6 +733,9 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
     return Lo + ibl;
 }
 
+#endif // ENABLE_PBR
+
+#if ENABLE_TONE_MAPPING
 // Tone mapping (ACES filmic)
 vec3 aces_tonemap(vec3 x) {
     const float a = 2.51;
@@ -711,10 +746,15 @@ vec3 aces_tonemap(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
+#endif // ENABLE_TONE_MAPPING
+
+#if ENABLE_GAMMA_CORRECTION
 // Gamma correction
 vec3 gamma_correct(vec3 color) {
     return pow(color, vec3(1.0 / 2.2));
 }
+
+#endif // ENABLE_GAMMA_CORRECTION
 
 // Full color pipeline (tone mapping + gamma)
 vec3 color_pipeline(vec3 color) {
@@ -722,11 +762,15 @@ vec3 color_pipeline(vec3 color) {
     float exposure = 1.0;
     color *= exposure;
 
+#if ENABLE_TONE_MAPPING
     // Tone map
     color = aces_tonemap(color);
+#endif
 
+#if ENABLE_GAMMA_CORRECTION
     // Gamma correct
     color = gamma_correct(color);
+#endif
 
     return color;
 }
@@ -824,6 +868,7 @@ vec3 ray_color(vec3 origin, vec3 direction) {
             if (apply_lighting) {
                 vec3 V = normalize(-current_direction);
 
+#if ENABLE_PBR
                 if (lighting_mode == 1) {
                     // PBR lighting
                     color = calculate_pbr_lighting(hit_point, normal, V, albedo, roughness, metallic);
@@ -839,6 +884,18 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                         color = phong_shading(normal, V, L, albedo, 32.0);
                     }
                 }
+#else
+                // PBR not enabled, always use Phong
+                if (num_lights > 0) {
+                    vec3 L = normalize(light_positions[0] - hit_point);
+                    color = phong_shading(normal, V, L, albedo, 32.0);
+                } else {
+                    // Fallback to single light
+                    vec3 light_pos = vec3(0.0, 18.0, 0.0);
+                    vec3 L = normalize(light_pos - hit_point);
+                    color = phong_shading(normal, V, L, albedo, 32.0);
+                }
+#endif
             } else {
                 color = albedo;  // Self-illuminated
             }
@@ -967,6 +1024,11 @@ GLuint compile_shader(GLenum type, const char* source) {
     return shader;
 }
 
+// Overload for std::string
+GLuint compile_shader(GLenum type, const std::string& source) {
+    return compile_shader(type, source.c_str());
+}
+
 // Program linking helper
 GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
     GLuint program = glCreateProgram();
@@ -996,11 +1058,24 @@ GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
 // Setup scene data using the same CPU scene setup code
 void setup_scene_data(
     std::vector<SphereData>& spheres,
-    std::vector<TriangleData>& triangles
+    std::vector<TriangleData>& triangles,
+    const std::string& scene_name = SCENE_NAME
 ) {
-    // Use the exact same scene setup as CPU renderer
+    // Scene selection based on SCENE_NAME macro or runtime parameter
     Scene scene;
-    setup_cornell_box_scene(scene);
+
+    std::cout << "=== Loading Scene: " << scene_name << " ===" << std::endl;
+
+    if (scene_name == "gpu_demo") {
+        setup_gpu_demo_scene(scene);
+        std::cout << "✓ GPU Demo scene loaded" << std::endl;
+    } else if (scene_name == "cornell_box") {
+        setup_cornell_box_scene(scene);
+        std::cout << "✓ Cornell Box scene loaded" << std::endl;
+    } else {
+        std::cout << "Unknown scene: " << scene_name << ", using Cornell Box" << std::endl;
+        setup_cornell_box_scene(scene);
+    }
 
     // Extract sphere data from Scene objects
     for (const auto& obj : scene.objects) {
@@ -1152,11 +1227,21 @@ void setup_scene_data(
 }
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    // Parse command-line arguments for scene selection
+    std::string scene_name = SCENE_NAME;  // Default from Makefile
 
-    std::cout << "=== Working GPU Ray Tracer (GLSL 1.20 Compatible) ===" << std::endl;
-    std::cout << "Features: Exact CPU Cornell Box scene, Phong shading, uniforms" << std::endl;
+    if (argc > 1) {
+        scene_name = argv[1];
+        std::cout << "Scene override from command line: " << scene_name << std::endl;
+    }
+
+    std::cout << "=== GPU Ray Tracer (GLSL 1.20 Compatible) ===" << std::endl;
+    std::cout << "Build Features:" << std::endl;
+    std::cout << "  PBR Lighting: " << (ENABLE_PBR ? "ENABLED" : "DISABLED") << std::endl;
+    std::cout << "  Multiple Lights: " << (ENABLE_MULTIPLE_LIGHTS ? "ENABLED" : "DISABLED") << std::endl;
+    std::cout << "  Tone Mapping: " << (ENABLE_TONE_MAPPING ? "ENABLED" : "DISABLED") << std::endl;
+    std::cout << "  Gamma Correction: " << (ENABLE_GAMMA_CORRECTION ? "ENABLED" : "DISABLED") << std::endl;
+    std::cout << "  Scene: " << scene_name << std::endl;
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -1336,7 +1421,7 @@ int main(int argc, char* argv[]) {
     // Setup scene data
     std::vector<SphereData> spheres;
     std::vector<TriangleData> triangles;
-    setup_scene_data(spheres, triangles);
+    setup_scene_data(spheres, triangles, scene_name);
 
     std::cout << "✓ Scene loaded: " << spheres.size() << " spheres, " << triangles.size() << " triangles" << std::endl;
 

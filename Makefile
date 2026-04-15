@@ -41,6 +41,15 @@ ENABLE_PROGRESSIVE ?= 0
 ENABLE_ADAPTIVE ?= 0
 ENABLE_WAVEFRONT ?= 0
 
+# GPU feature flags (for main_gpu_interactive)
+ENABLE_GPU_PBR ?= 1              # Enable PBR lighting
+ENABLE_GPU_MULTIPLE_LIGHTS ?= 1  # Enable multiple light support
+ENABLE_GPU_TONE_MAPPING ?= 1     # Enable ACES tone mapping
+ENABLE_GPU_GAMMA_CORRECTION ?= 1 # Enable gamma correction
+
+# GPU scene selection
+GPU_SCENE ?= cornell_box         # Options: cornell_box, gpu_demo
+
 # Threading mode (openmp, pthreads, or none)
 THREADING_MODE ?= openmp
 
