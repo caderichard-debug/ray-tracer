@@ -1064,8 +1064,8 @@ public:
         buttons.push_back({{screenshot_button_rect.x + panel_x, screenshot_button_rect.y + panel_y, screenshot_button_rect.w, screenshot_button_rect.h},
                           "screenshot", 1, 7});
 
-        // Draw screenshot button background
-        Uint32 screenshot_button_bg = SDL_MapRGBA(surface->format, button_color.r, button_color.g, button_color.b, 255);
+        // Draw screenshot button background (make it brighter like the "on" toggle state)
+        Uint32 screenshot_button_bg = SDL_MapRGBA(surface->format, button_active_color.r, button_active_color.g, button_active_color.b, 255);
         SDL_FillRect(surface, &screenshot_button_rect, screenshot_button_bg);
 
         // Draw screenshot button border
