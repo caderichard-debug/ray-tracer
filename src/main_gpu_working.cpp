@@ -538,27 +538,34 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                 material = tri_materials[hit_object];
 
                 // Apply procedural textures for triangles
+                bool apply_lighting = true;
                 if (material == 8) {
                     // Pyramid checkerboard
                     color = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
                 } else if (material == 9) {
                     // Gradient quad (red to blue horizontal)
                     color = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
+                    // Don't apply lighting to gradient texture - it should be self-illuminated
+                    apply_lighting = false;
                 }
             }
 
             // Simple lighting
-            vec3 light_pos = vec3(0.0, 18.0, 0.0);
-            vec3 light_dir = normalize(light_pos - hit_point);
-            float diff = max(dot(normal, light_dir), 0.0);
+            vec3 lighting = vec3(1.0);
+            if (apply_lighting) {
+                vec3 light_pos = vec3(0.0, 18.0, 0.0);
+                vec3 light_dir = normalize(light_pos - hit_point);
+                float diff = max(dot(normal, light_dir), 0.0);
 
-            // Add simple Phong specular
-            vec3 view_dir = normalize(-current_direction);
-            vec3 reflect_dir = reflect(-light_dir, normal);
-            float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+                // Add simple Phong specular
+                vec3 view_dir = normalize(-current_direction);
+                vec3 reflect_dir = reflect(-light_dir, normal);
+                float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
 
-            // Ambient + diffuse + specular
-            vec3 lighting = vec3(0.1 + diff * 0.7 + spec * 0.3);
+                // Ambient + diffuse + specular
+                lighting = vec3(0.1 + diff * 0.7 + spec * 0.3);
+            }
+
             color = color * lighting;
 
             // Add contribution to final color
