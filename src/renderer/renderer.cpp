@@ -47,11 +47,14 @@ Color Renderer::get_progressive_color(int x, int y) const {
 
 // Adaptive Sampling Implementation
 bool Renderer::should_continue_sampling(int x, int y, const std::vector<Color>& samples) const {
-    if (samples.size() < min_samples) {
+    (void)x;  // Currently unused, reserved for future spatial analysis
+    (void)y;  // Currently unused, reserved for future spatial analysis
+
+    if (static_cast<int>(samples.size()) < min_samples) {
         return true; // Need at least minimum samples
     }
 
-    if (samples.size() >= max_samples) {
+    if (static_cast<int>(samples.size()) >= max_samples) {
         return false; // Reached maximum samples
     }
 

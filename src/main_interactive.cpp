@@ -415,7 +415,8 @@ public:
 
     void render(SDL_Renderer* renderer, int window_width, int window_height,
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
-                const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true
+                const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
+                bool enable_progressive = false, bool enable_adaptive = false, bool enable_wavefront = false
 #ifdef GPU_RENDERING
                 , RendererType current_renderer = RendererType::CPU
 #endif
@@ -425,7 +426,7 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(652, window_height - 20);  // Increased from 630 to accommodate renderer status
+        int panel_height = std::min(750, window_height - 20);  // Increased to accommodate advanced rendering features
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
@@ -837,6 +838,123 @@ public:
             }
         }
 
+        // Advanced Rendering Features section
+        y_offset += 35;
+        label_surface = TTF_RenderText_Blended(font, "Advanced Rendering:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        // Progressive rendering toggle button
+        const char* progressive_label = enable_progressive ? "Progressive: ON" : "Progressive: OFF";
+        int progressive_button_width = 120;
+        SDL_Rect progressive_button_rect = {15, y_offset, progressive_button_width, 24};
+
+        // Store button for click detection (category 8 = progressive)
+        buttons.push_back({{progressive_button_rect.x + panel_x, progressive_button_rect.y + panel_y, progressive_button_rect.w, progressive_button_rect.h},
+                          "progressive", enable_progressive ? 1 : 0, 8});
+
+        // Draw progressive button background
+        Uint32 progressive_button_bg = SDL_MapRGBA(surface->format,
+            enable_progressive ? button_active_color.r : button_color.r,
+            enable_progressive ? button_active_color.g : button_color.g,
+            enable_progressive ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &progressive_button_rect, progressive_button_bg);
+
+        // Draw progressive button border
+        SDL_Rect progressive_border = {progressive_button_rect.x, progressive_button_rect.y, progressive_button_rect.w, 2};
+        SDL_FillRect(surface, &progressive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        progressive_border = {progressive_button_rect.x, progressive_button_rect.y + progressive_button_rect.h - 2, progressive_button_rect.w, 2};
+        SDL_FillRect(surface, &progressive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw progressive button text
+        SDL_Surface* progressive_text_surface = TTF_RenderText_Blended(font, progressive_label, text_color);
+        if (progressive_text_surface) {
+            SDL_Rect progressive_text_rect = {
+                progressive_button_rect.x + (progressive_button_width - progressive_text_surface->w) / 2,
+                y_offset + (24 - progressive_text_surface->h) / 2,
+                progressive_text_surface->w, progressive_text_surface->h
+            };
+            SDL_BlitSurface(progressive_text_surface, nullptr, surface, &progressive_text_rect);
+            SDL_FreeSurface(progressive_text_surface);
+        }
+
+        // Adaptive sampling toggle button (next to progressive)
+        const char* adaptive_label = enable_adaptive ? "Adaptive: ON" : "Adaptive: OFF";
+        int adaptive_button_width = 120;
+        SDL_Rect adaptive_button_rect = {150, y_offset, adaptive_button_width, 24};
+
+        // Store button for click detection (category 9 = adaptive)
+        buttons.push_back({{adaptive_button_rect.x + panel_x, adaptive_button_rect.y + panel_y, adaptive_button_rect.w, adaptive_button_rect.h},
+                          "adaptive", enable_adaptive ? 1 : 0, 9});
+
+        // Draw adaptive button background
+        Uint32 adaptive_button_bg = SDL_MapRGBA(surface->format,
+            enable_adaptive ? button_active_color.r : button_color.r,
+            enable_adaptive ? button_active_color.g : button_color.g,
+            enable_adaptive ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &adaptive_button_rect, adaptive_button_bg);
+
+        // Draw adaptive button border
+        SDL_Rect adaptive_border = {adaptive_button_rect.x, adaptive_button_rect.y, adaptive_button_rect.w, 2};
+        SDL_FillRect(surface, &adaptive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        adaptive_border = {adaptive_button_rect.x, adaptive_button_rect.y + adaptive_button_rect.h - 2, adaptive_button_rect.w, 2};
+        SDL_FillRect(surface, &adaptive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw adaptive button text
+        SDL_Surface* adaptive_text_surface = TTF_RenderText_Blended(font, adaptive_label, text_color);
+        if (adaptive_text_surface) {
+            SDL_Rect adaptive_text_rect = {
+                adaptive_button_rect.x + (adaptive_button_width - adaptive_text_surface->w) / 2,
+                y_offset + (24 - adaptive_text_surface->h) / 2,
+                adaptive_text_surface->w, adaptive_text_surface->h
+            };
+            SDL_BlitSurface(adaptive_text_surface, nullptr, surface, &adaptive_text_rect);
+            SDL_FreeSurface(adaptive_text_surface);
+        }
+
+        y_offset += 35;
+
+        // Wavefront rendering toggle button (new row)
+        const char* wavefront_label = enable_wavefront ? "Wavefront: ON" : "Wavefront: OFF";
+        int wavefront_button_width = 120;
+        SDL_Rect wavefront_button_rect = {15, y_offset, wavefront_button_width, 24};
+
+        // Store button for click detection (category 10 = wavefront)
+        buttons.push_back({{wavefront_button_rect.x + panel_x, wavefront_button_rect.y + panel_y, wavefront_button_rect.w, wavefront_button_rect.h},
+                          "wavefront", enable_wavefront ? 1 : 0, 10});
+
+        // Draw wavefront button background
+        Uint32 wavefront_button_bg = SDL_MapRGBA(surface->format,
+            enable_wavefront ? button_active_color.r : button_color.r,
+            enable_wavefront ? button_active_color.g : button_color.g,
+            enable_wavefront ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &wavefront_button_rect, wavefront_button_bg);
+
+        // Draw wavefront button border
+        SDL_Rect wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y, wavefront_button_rect.w, 2};
+        SDL_FillRect(surface, &wavefront_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y + wavefront_button_rect.h - 2, wavefront_button_rect.w, 2};
+        SDL_FillRect(surface, &wavefront_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw wavefront button text
+        SDL_Surface* wavefront_text_surface = TTF_RenderText_Blended(font, wavefront_label, text_color);
+        if (wavefront_text_surface) {
+            SDL_Rect wavefront_text_rect = {
+                wavefront_button_rect.x + (wavefront_button_width - wavefront_text_surface->w) / 2,
+                y_offset + (24 - wavefront_text_surface->h) / 2,
+                wavefront_text_surface->w, wavefront_text_surface->h
+            };
+            SDL_BlitSurface(wavefront_text_surface, nullptr, surface, &wavefront_text_rect);
+            SDL_FreeSurface(wavefront_text_surface);
+        }
+
         // Convert surface to texture
 
         // Convert surface to texture
@@ -864,6 +982,9 @@ public:
         bool analysis_mode_changed;
         int new_analysis_mode;
         bool screenshot_requested;
+        bool progressive_changed;
+        bool adaptive_changed;
+        bool wavefront_changed;
         bool button_clicked;
 
         ClickResult() : quality_changed(false), new_quality(0),
@@ -872,7 +993,9 @@ public:
                        resolution_changed(false), new_resolution(0),
                        shadows_changed(false), reflections_changed(false),
                        analysis_mode_changed(false), new_analysis_mode(0),
-                       screenshot_requested(false), button_clicked(false) {}
+                       screenshot_requested(false), progressive_changed(false),
+                       adaptive_changed(false), wavefront_changed(false),
+                       button_clicked(false) {}
     };
 
     ClickResult handle_click(int mouse_x, int mouse_y) {
@@ -912,6 +1035,15 @@ public:
                         break;
                     case 7: // Screenshot
                         result.screenshot_requested = true;
+                        break;
+                    case 8: // Progressive toggle
+                        result.progressive_changed = true;
+                        break;
+                    case 9: // Adaptive toggle
+                        result.adaptive_changed = true;
+                        break;
+                    case 10: // Wavefront toggle
+                        result.wavefront_changed = true;
                         break;
                 }
                 break;
@@ -1331,6 +1463,27 @@ int main(int argc, char* argv[]) {
                             std::stringstream ss;
                             ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
                             save_cpu_screenshot(renderer, texture, image_width, image_height, ss.str().c_str());
+                        } else if (click_result.progressive_changed) {
+                            // Toggle progressive rendering
+                            ray_renderer.enable_progressive = !ray_renderer.enable_progressive;
+                            if (ray_renderer.enable_progressive) {
+                                ray_renderer.initialize_progressive(image_width, image_height);
+                                std::cout << "Progressive rendering: ON" << std::endl;
+                            } else {
+                                ray_renderer.reset_progressive();
+                                std::cout << "Progressive rendering: OFF" << std::endl;
+                            }
+                            need_render = true;
+                        } else if (click_result.adaptive_changed) {
+                            // Toggle adaptive sampling
+                            ray_renderer.enable_adaptive = !ray_renderer.enable_adaptive;
+                            std::cout << "Adaptive sampling: " << (ray_renderer.enable_adaptive ? "ON" : "OFF") << std::endl;
+                            need_render = true;
+                        } else if (click_result.wavefront_changed) {
+                            // Toggle wavefront rendering
+                            ray_renderer.enable_wavefront = !ray_renderer.enable_wavefront;
+                            std::cout << "Wavefront rendering: " << (ray_renderer.enable_wavefront ? "ON" : "OFF") << std::endl;
+                            need_render = true;
                         } else if (click_result.resolution_changed) {
                             int new_width = click_result.new_resolution;
                             if (!is_samples_safe(preset.samples, new_width)) {
@@ -1607,10 +1760,12 @@ int main(int argc, char* argv[]) {
 #ifdef GPU_RENDERING
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
+                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
                                  current_renderer);
 #else
             controls_panel.render(renderer, window_width, window_height,
-                                 current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections);
+                                 current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
+                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront);
 #endif
         }
 
