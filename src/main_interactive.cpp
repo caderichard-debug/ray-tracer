@@ -393,6 +393,32 @@ void save_gpu_framebuffer(int width, int height, const char* filename) {
     stbi_write_png(filename, width, height, 3, flipped_pixels.data(), width * 3);
     std::cout << "Saved framebuffer to " << filename << std::endl;
 }
+#else
+// Save CPU renderer texture to PNG file
+void save_cpu_screenshot(SDL_Renderer* renderer, SDL_Texture* texture, int width, int height, const char* filename) {
+    // Allocate buffer for pixel data
+    std::vector<unsigned char> pixels(width * height * 3);
+
+    // Read pixels from texture
+    SDL_Rect rect = {0, 0, width, height};
+    SDL_RenderReadPixels(renderer, &rect, SDL_PIXELFORMAT_RGB24, pixels.data(), width * 3);
+
+    // Flip vertically (SDL has top-left origin, but texture might be flipped)
+    std::vector<unsigned char> flipped_pixels(width * height * 3);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int src_idx = ((height - 1 - y) * width + x) * 3;
+            int dst_idx = (y * width + x) * 3;
+            flipped_pixels[dst_idx + 0] = pixels[src_idx + 0]; // R
+            flipped_pixels[dst_idx + 1] = pixels[src_idx + 1]; // G
+            flipped_pixels[dst_idx + 2] = pixels[src_idx + 2]; // B
+        }
+    }
+
+    // Save as PNG
+    stbi_write_png(filename, width, height, 3, flipped_pixels.data(), width * 3);
+    std::cout << "Screenshot saved: " << filename << std::endl;
+}
 #endif
 
 // Camera controller
@@ -1485,9 +1511,8 @@ int main(int argc, char* argv[]) {
                         ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
 #ifdef USE_GPU_RENDERER
                         save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
-                        std::cout << "Screenshot saved: " << ss.str() << std::endl;
 #else
-                        std::cout << "Screenshot only available in GPU mode" << std::endl;
+                        save_cpu_screenshot(renderer, texture, image_width, image_height, ss.str().c_str());
 #endif
                         break;
                     }
