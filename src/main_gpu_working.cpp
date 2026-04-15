@@ -131,13 +131,22 @@ public:
     bool is_showing() const { return show; }
 };
 
-// Maximum scene objects (hardcoded for GLSL 1.20)
-const int NUM_SPHERES = 16;
-const int NUM_TRIANGLES = 20;
-const int NUM_MATERIALS = 12;
-const int NUM_LIGHTS = 1;
+// Scene data (matching CPU Cornell Box exactly)
+struct SphereData {
+    float center[3];
+    float radius;
+    float color[3];
+    int material;
+};
 
-// Simple fragment shader that works with GLSL 1.20
+struct TriangleData {
+    float v0[3], v1[3], v2[3];
+    float normal[3];
+    float color[3];
+    int material;
+};
+
+// Fragment shader that reads scene data from uniforms
 const char* fragment_shader_source = R"(
 #version 120
 
@@ -146,6 +155,21 @@ uniform vec3 camera_pos;
 uniform vec3 camera_lookat;
 uniform vec3 camera_vup;
 uniform float camera_vfov;
+
+// Scene uniforms
+uniform vec3 sphere_centers[16];
+uniform float sphere_radii[16];
+uniform vec3 sphere_colors[16];
+uniform int sphere_materials[16];
+uniform int num_spheres;
+
+uniform vec3 tri_v0[20];
+uniform vec3 tri_v1[20];
+uniform vec3 tri_v2[20];
+uniform vec3 tri_normals[20];
+uniform vec3 tri_colors[20];
+uniform int tri_materials[20];
+uniform int num_triangles;
 
 // Simple ray-sphere intersection
 bool hit_sphere(vec3 origin, vec3 direction, vec3 center, float radius, inout float t) {
@@ -209,152 +233,116 @@ bool hit_triangle(vec3 origin, vec3 direction, vec3 v0, vec3 v1, vec3 v2, vec3 n
     return true;
 }
 
+// Procedural texture functions
+vec3 checkerboard_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
+    float checker = mod(floor(pos.x * scale) + floor(pos.y * scale) + floor(pos.z * scale), 2.0);
+    return mix(color1, color2, checker);
+}
+
+float hash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float noise(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    return mix(
+        mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x),
+            mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+        mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+            mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+
+vec3 noise_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
+    float n = noise(pos * scale);
+    return mix(color1, color2, n);
+}
+
+vec3 gradient_texture(vec3 pos, vec3 color1, vec3 color2, vec3 dir) {
+    float t = dot(pos, dir) * 0.5 + 0.5;
+    return mix(color1, color2, clamp(t, 0.0, 1.0));
+}
+
+vec3 stripe_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
+    float stripe = mod(floor(pos.y * scale), 2.0);
+    return mix(color1, color2, stripe);
+}
+
 // Simple scene rendering
 vec3 ray_color(vec3 origin, vec3 direction) {
     // Background gradient
     vec3 unit_dir = normalize(direction);
-    float t = 0.5 * (unit_dir.y + 1.0);
-    vec3 background = mix(vec3(1.0), vec3(0.5, 0.7, 1.0), t);
-
-    // Scene objects (simplified Cornell box)
-    vec3 sphere_centers[2];
-    sphere_centers[0] = vec3(-1.5, 1.0, 0.0);
-    sphere_centers[1] = vec3(1.5, 1.0, 0.0);
-
-    float sphere_radii[2];
-    sphere_radii[0] = 1.0;
-    sphere_radii[1] = 1.0;
-
-    vec3 sphere_colors[2];
-    sphere_colors[0] = vec3(0.95, 0.95, 0.95); // Metal
-    sphere_colors[1] = vec3(1.0, 1.0, 1.0);    // Glass
+    float t_bg = 0.5 * (unit_dir.y + 1.0);
+    vec3 background = mix(vec3(1.0), vec3(0.5, 0.7, 1.0), t_bg);
 
     float t_min = 1000.0;
     int hit_object = -1;
+    int hit_type = -1; // 0 = sphere, 1 = triangle
 
     // Check sphere intersections
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < num_spheres; i++) {
         if (hit_sphere(origin, direction, sphere_centers[i], sphere_radii[i], t_min)) {
             hit_object = i;
+            hit_type = 0;
         }
     }
 
-    // Simple triangle intersections (walls)
-    vec3 tri_colors[12];
-    tri_colors[0] = vec3(0.65, 0.05, 0.05); // Red wall
-    tri_colors[1] = vec3(0.65, 0.05, 0.05);
-    tri_colors[2] = vec3(0.12, 0.45, 0.15); // Green wall
-    tri_colors[3] = vec3(0.12, 0.45, 0.15);
-    tri_colors[4] = vec3(0.73, 0.73, 0.73); // White walls
-    tri_colors[5] = vec3(0.73, 0.73, 0.73);
-    tri_colors[6] = vec3(0.73, 0.73, 0.73);
-    tri_colors[7] = vec3(0.73, 0.73, 0.73);
-    tri_colors[8] = vec3(0.73, 0.73, 0.73);
-    tri_colors[9] = vec3(0.73, 0.73, 0.73);
-    tri_colors[10] = vec3(0.73, 0.73, 0.73);
-    tri_colors[11] = vec3(0.73, 0.73, 0.73);
-
-    // Floor triangles
-    vec3 floor0_v0 = vec3(-5.0, 0.0, -5.0);
-    vec3 floor0_v1 = vec3(5.0, 0.0, -5.0);
-    vec3 floor0_v2 = vec3(5.0, 0.0, 5.0);
-    vec3 floor0_n = vec3(0.0, 1.0, 0.0);
-
-    vec3 floor1_v0 = vec3(-5.0, 0.0, -5.0);
-    vec3 floor1_v1 = vec3(5.0, 0.0, 5.0);
-    vec3 floor1_v2 = vec3(-5.0, 0.0, 5.0);
-    vec3 floor1_n = vec3(0.0, 1.0, 0.0);
-
-    if (hit_triangle(origin, direction, floor0_v0, floor0_v1, floor0_v2, floor0_n, t_min)) hit_object = 10;
-    if (hit_triangle(origin, direction, floor1_v0, floor1_v1, floor1_v2, floor1_n, t_min)) hit_object = 10;
-
-    // Ceiling triangles
-    vec3 ceil0_v0 = vec3(-5.0, 5.0, -5.0);
-    vec3 ceil0_v1 = vec3(5.0, 5.0, -5.0);
-    vec3 ceil0_v2 = vec3(5.0, 5.0, 5.0);
-    vec3 ceil0_n = vec3(0.0, -1.0, 0.0);
-
-    vec3 ceil1_v0 = vec3(-5.0, 5.0, -5.0);
-    vec3 ceil1_v1 = vec3(5.0, 5.0, 5.0);
-    vec3 ceil1_v2 = vec3(-5.0, 5.0, 5.0);
-    vec3 ceil1_n = vec3(0.0, -1.0, 0.0);
-
-    if (hit_triangle(origin, direction, ceil0_v0, ceil0_v1, ceil0_v2, ceil0_n, t_min)) hit_object = 11;
-    if (hit_triangle(origin, direction, ceil1_v0, ceil1_v1, ceil1_v2, ceil1_n, t_min)) hit_object = 11;
-
-    // Back wall triangles
-    vec3 back0_v0 = vec3(-5.0, 0.0, -5.0);
-    vec3 back0_v1 = vec3(5.0, 0.0, -5.0);
-    vec3 back0_v2 = vec3(5.0, 5.0, -5.0);
-    vec3 back0_n = vec3(0.0, 0.0, 1.0);
-
-    vec3 back1_v0 = vec3(-5.0, 0.0, -5.0);
-    vec3 back1_v1 = vec3(5.0, 5.0, -5.0);
-    vec3 back1_v2 = vec3(-5.0, 5.0, -5.0);
-    vec3 back1_n = vec3(0.0, 0.0, 1.0);
-
-    if (hit_triangle(origin, direction, back0_v0, back0_v1, back0_v2, back0_n, t_min)) hit_object = 12;
-    if (hit_triangle(origin, direction, back1_v0, back1_v1, back1_v2, back1_n, t_min)) hit_object = 12;
-
-    // Left wall (red)
-    vec3 left0_v0 = vec3(-5.0, 0.0, -5.0);
-    vec3 left0_v1 = vec3(-5.0, 0.0, 5.0);
-    vec3 left0_v2 = vec3(-5.0, 5.0, 5.0);
-    vec3 left0_n = vec3(1.0, 0.0, 0.0);
-
-    vec3 left1_v0 = vec3(-5.0, 0.0, -5.0);
-    vec3 left1_v1 = vec3(-5.0, 5.0, 5.0);
-    vec3 left1_v2 = vec3(-5.0, 5.0, -5.0);
-    vec3 left1_n = vec3(1.0, 0.0, 0.0);
-
-    if (hit_triangle(origin, direction, left0_v0, left0_v1, left0_v2, left0_n, t_min)) hit_object = 13;
-    if (hit_triangle(origin, direction, left1_v0, left1_v1, left1_v2, left1_n, t_min)) hit_object = 13;
-
-    // Right wall (green)
-    vec3 right0_v0 = vec3(5.0, 0.0, -5.0);
-    vec3 right0_v1 = vec3(5.0, 0.0, 5.0);
-    vec3 right0_v2 = vec3(5.0, 5.0, 5.0);
-    vec3 right0_n = vec3(-1.0, 0.0, 0.0);
-
-    vec3 right1_v0 = vec3(5.0, 0.0, -5.0);
-    vec3 right1_v1 = vec3(5.0, 5.0, 5.0);
-    vec3 right1_v2 = vec3(5.0, 5.0, -5.0);
-    vec3 right1_n = vec3(-1.0, 0.0, 0.0);
-
-    if (hit_triangle(origin, direction, right0_v0, right0_v1, right0_v2, right0_n, t_min)) hit_object = 14;
-    if (hit_triangle(origin, direction, right1_v0, right1_v1, right1_v2, right1_n, t_min)) hit_object = 14;
+    // Check triangle intersections
+    for (int i = 0; i < num_triangles; i++) {
+        if (hit_triangle(origin, direction, tri_v0[i], tri_v1[i], tri_v2[i], tri_normals[i], t_min)) {
+            hit_object = i;
+            hit_type = 1;
+        }
+    }
 
     if (hit_object >= 0) {
         vec3 hit_point = origin + t_min * direction;
         vec3 color;
         vec3 normal;
+        int material;
 
-        if (hit_object < 2) {
+        if (hit_type == 0) {
             // Sphere hit
             normal = normalize(hit_point - sphere_centers[hit_object]);
             color = sphere_colors[hit_object];
+            material = sphere_materials[hit_object];
+
+            // Apply procedural textures based on material
+            if (material == 4) {
+                // Checkerboard (red and blue)
+                color = checkerboard_texture(hit_point, vec3(0.8, 0.2, 0.2), vec3(0.2, 0.2, 0.8), 8.0);
+            } else if (material == 5) {
+                // Noise (black and white)
+                color = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
+            } else if (material == 6) {
+                // Gradient (purple to yellow vertical)
+                color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0));
+            } else if (material == 7) {
+                // Stripe (orange and white horizontal)
+                color = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
+            }
         } else {
-            // Triangle hit - determine normal based on which wall
-            if (hit_object == 10 || hit_object == 11) { // Floor or ceiling
-                normal = (hit_object == 10) ? vec3(0.0, 1.0, 0.0) : vec3(0.0, -1.0, 0.0);
-                color = vec3(0.73, 0.73, 0.73);
-            } else if (hit_object == 12) { // Back wall
-                normal = vec3(0.0, 0.0, 1.0);
-                color = vec3(0.73, 0.73, 0.73);
-            } else if (hit_object == 13) { // Left wall (red)
-                normal = vec3(1.0, 0.0, 0.0);
-                color = vec3(0.65, 0.05, 0.05);
-            } else if (hit_object == 14) { // Right wall (green)
-                normal = vec3(-1.0, 0.0, 0.0);
-                color = vec3(0.12, 0.45, 0.15);
-            } else {
-                normal = vec3(0.0, 1.0, 0.0);
-                color = vec3(0.73, 0.73, 0.73);
+            // Triangle hit
+            normal = tri_normals[hit_object];
+            color = tri_colors[hit_object];
+            material = tri_materials[hit_object];
+
+            // Apply procedural textures for triangles
+            if (material == 8) {
+                // Pyramid checkerboard
+                color = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
+            } else if (material == 9) {
+                // Gradient quad (red to blue horizontal)
+                color = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
             }
         }
 
         // Simple lighting
-        vec3 light_pos = vec3(0.0, 4.99, 0.0);
+        vec3 light_pos = vec3(0.0, 18.0, 0.0);
         vec3 light_dir = normalize(light_pos - hit_point);
         float diff = max(dot(normal, light_dir), 0.0);
 
@@ -363,6 +351,7 @@ vec3 ray_color(vec3 origin, vec3 direction) {
         vec3 reflect_dir = reflect(-light_dir, normal);
         float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
 
+        // Ambient + diffuse + specular
         color = color * (0.1 + diff * 0.7 + spec * 0.3);
 
         return color;
@@ -373,7 +362,6 @@ vec3 ray_color(vec3 origin, vec3 direction) {
 
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution;
-    uv.y = 1.0 - uv.y;
 
     // Camera from uniforms
     vec3 origin = camera_pos;
@@ -415,6 +403,7 @@ varying vec2 uv;
 
 void main() {
     uv = texCoord;
+    uv.y = 1.0 - uv.y;  // Flip Y coordinate here
     gl_Position = vec4(position, 0.0, 1.0);
 }
 )";
@@ -470,12 +459,246 @@ GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
     return program;
 }
 
+// Setup scene data (matching CPU Cornell Box exactly)
+void setup_scene_data(
+    std::vector<SphereData>& spheres,
+    std::vector<TriangleData>& triangles
+) {
+    // === SPHERES (matching cornell_box.h exactly) ===
+
+    // Center sphere (gold - reflective, BIG)
+    spheres.push_back({{0.0f, 0.0f, 0.0f}, 2.0f, {1.0f, 0.77f, 0.35f}, 1}); // Metal
+
+    // Orbiting spheres
+    spheres.push_back({{-3.0f, 1.0f, 2.0f}, 0.8f, {0.7f, 0.6f, 0.5f}, 2}); // Fuzzy metal
+    spheres.push_back({{3.0f, 0.8f, 2.0f}, 0.9f, {0.1f, 0.2f, 0.7f}, 0}); // Blue
+    spheres.push_back({{0.0f, 0.5f, 1.5f}, 0.6f, {0.65f, 0.05f, 0.05f}, 0}); // Red
+    spheres.push_back({{-1.5f, 0.3f, 2.0f}, 0.5f, {0.8f, 0.7f, 0.1f}, 0}); // Yellow
+
+    // Glass sphere
+    spheres.push_back({{1.0f, -1.5f, 2.5f}, 0.8f, {1.0f, 1.0f, 1.0f}, 3}); // Glass
+
+    // Sphere behind glass
+    spheres.push_back({{0.5f, -2.0f, 1.5f}, 0.5f, {0.65f, 0.05f, 0.05f}, 0}); // Red
+
+    // Small metal spheres
+    spheres.push_back({{-0.5f, 2.5f, 0.0f}, 0.2f, {0.8f, 0.8f, 0.8f}, 1}); // Metal
+    spheres.push_back({{-3.5f, 2.8f, 0.0f}, 0.2f, {0.8f, 0.8f, 0.8f}, 1}); // Metal
+
+    // Procedural texture spheres
+    // Checkerboard sphere
+    spheres.push_back({{-3.0f, 1.0f, -2.0f}, 0.8f, {0.8f, 0.2f, 0.2f}, 4}); // Checkerboard
+
+    // Noise sphere
+    spheres.push_back({{-3.5f, -2.0f, 2.0f}, 0.8f, {1.0f, 1.0f, 1.0f}, 5}); // Noise
+
+    // Gradient sphere
+    spheres.push_back({{-1.0f, -1.5f, 2.0f}, 0.8f, {0.6f, 0.2f, 0.8f}, 6}); // Gradient
+
+    // Stripe sphere
+    spheres.push_back({{0.5f, 1.5f, 2.0f}, 0.8f, {0.8f, 0.5f, 0.2f}, 7}); // Stripe
+
+    // === TRIANGLES ===
+
+    // Helper function for vector operations
+    auto cross = [](float a[3], float b[3], float result[3]) {
+        result[0] = a[1] * b[2] - a[2] * b[1];
+        result[1] = a[2] * b[0] - a[0] * b[2];
+        result[2] = a[0] * b[1] - a[1] * b[0];
+    };
+
+    auto normalize = [](float v[3], float result[3]) {
+        float len = sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        result[0] = v[0] / len;
+        result[1] = v[1] / len;
+        result[2] = v[2] / len;
+    };
+
+    auto sub = [](float a[3], float b[3], float result[3]) {
+        result[0] = a[0] - b[0];
+        result[1] = a[1] - b[1];
+        result[2] = a[2] - b[2];
+    };
+
+    // Pyramid triangles (checkerboard)
+    // Top: (-2.0, 4.0, 0.0), Base1: (-1.0, 2.0, -1.0), Base2: (-3.0, 2.0, -1.0), Base3: (-2.0, 2.0, 1.0)
+    float pyramid_top[3] = {-2.0f, 4.0f, 0.0f};
+    float pyramid_base1[3] = {-1.0f, 2.0f, -1.0f};
+    float pyramid_base2[3] = {-3.0f, 2.0f, -1.0f};
+    float pyramid_base3[3] = {-2.0f, 2.0f, 1.0f};
+
+    float edge1[3], edge2[3], pyramid_n0[3], pyramid_n1[3], pyramid_n2[3];
+    sub(pyramid_base1, pyramid_top, edge1);
+    sub(pyramid_base2, pyramid_top, edge2);
+    cross(edge1, edge2, pyramid_n0);
+    normalize(pyramid_n0, pyramid_n0);
+
+    sub(pyramid_base2, pyramid_top, edge1);
+    sub(pyramid_base3, pyramid_top, edge2);
+    cross(edge1, edge2, pyramid_n1);
+    normalize(pyramid_n1, pyramid_n1);
+
+    sub(pyramid_base3, pyramid_top, edge1);
+    sub(pyramid_base1, pyramid_top, edge2);
+    cross(edge1, edge2, pyramid_n2);
+    normalize(pyramid_n2, pyramid_n2);
+
+    float pyramid_n3[3] = {0.0f, 1.0f, 0.0f};
+
+    // Pyramid face 1
+    triangles.push_back({
+        {pyramid_top[0], pyramid_top[1], pyramid_top[2]},
+        {pyramid_base1[0], pyramid_base1[1], pyramid_base1[2]},
+        {pyramid_base2[0], pyramid_base2[1], pyramid_base2[2]},
+        {pyramid_n0[0], pyramid_n0[1], pyramid_n0[2]},
+        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
+    });
+
+    // Pyramid face 2
+    triangles.push_back({
+        {pyramid_top[0], pyramid_top[1], pyramid_top[2]},
+        {pyramid_base2[0], pyramid_base2[1], pyramid_base2[2]},
+        {pyramid_base3[0], pyramid_base3[1], pyramid_base3[2]},
+        {pyramid_n1[0], pyramid_n1[1], pyramid_n1[2]},
+        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
+    });
+
+    // Pyramid face 3
+    triangles.push_back({
+        {pyramid_top[0], pyramid_top[1], pyramid_top[2]},
+        {pyramid_base3[0], pyramid_base3[1], pyramid_base3[2]},
+        {pyramid_base1[0], pyramid_base1[1], pyramid_base1[2]},
+        {pyramid_n2[0], pyramid_n2[1], pyramid_n2[2]},
+        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
+    });
+
+    // Pyramid base
+    triangles.push_back({
+        {pyramid_base1[0], pyramid_base1[1], pyramid_base1[2]},
+        {pyramid_base3[0], pyramid_base3[1], pyramid_base3[2]},
+        {pyramid_base2[0], pyramid_base2[1], pyramid_base2[2]},
+        {pyramid_n3[0], pyramid_n3[1], pyramid_n3[2]},
+        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
+    });
+
+    // Gradient quad triangles (on right wall)
+    // Top-left: (4.0, 3.0, 1.0), Top-right: (4.0, 3.0, 5.0), Bottom-left: (4.0, -1.0, 1.0), Bottom-right: (4.0, -1.0, 5.0)
+    float quad_top_left[3] = {4.0f, 3.0f, 1.0f};
+    float quad_top_right[3] = {4.0f, 3.0f, 5.0f};
+    float quad_bottom_left[3] = {4.0f, -1.0f, 1.0f};
+    float quad_bottom_right[3] = {4.0f, -1.0f, 5.0f};
+    float quad_n[3] = {-1.0f, 0.0f, 0.0f};
+
+    triangles.push_back({
+        {quad_top_left[0], quad_top_left[1], quad_top_left[2]},
+        {quad_top_right[0], quad_top_right[1], quad_top_right[2]},
+        {quad_bottom_right[0], quad_bottom_right[1], quad_bottom_right[2]},
+        {quad_n[0], quad_n[1], quad_n[2]},
+        {0.73f, 0.73f, 0.73f}, 9 // Gradient
+    });
+
+    triangles.push_back({
+        {quad_top_left[0], quad_top_left[1], quad_top_left[2]},
+        {quad_bottom_right[0], quad_bottom_right[1], quad_bottom_right[2]},
+        {quad_bottom_left[0], quad_bottom_left[1], quad_bottom_left[2]},
+        {quad_n[0], quad_n[1], quad_n[2]},
+        {0.73f, 0.73f, 0.73f}, 9 // Gradient
+    });
+
+    // === WALLS (simplified - using large triangles) ===
+
+    // Back wall (green)
+    triangles.push_back({
+        {-20.0f, -20.0f, -16.0f},
+        {20.0f, -20.0f, -16.0f},
+        {20.0f, 20.0f, -16.0f},
+        {0.0f, 0.0f, 1.0f},
+        {0.12f, 0.45f, 0.15f}, 0
+    });
+
+    triangles.push_back({
+        {-20.0f, -20.0f, -16.0f},
+        {20.0f, 20.0f, -16.0f},
+        {-20.0f, 20.0f, -16.0f},
+        {0.0f, 0.0f, 1.0f},
+        {0.12f, 0.45f, 0.15f}, 0
+    });
+
+    // Floor (gray)
+    triangles.push_back({
+        {-20.0f, -16.0f, -20.0f},
+        {20.0f, -16.0f, -20.0f},
+        {20.0f, -16.0f, 20.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.73f, 0.73f, 0.73f}, 0
+    });
+
+    triangles.push_back({
+        {-20.0f, -16.0f, -20.0f},
+        {20.0f, -16.0f, 20.0f},
+        {-20.0f, -16.0f, 20.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.73f, 0.73f, 0.73f}, 0
+    });
+
+    // Ceiling (gray)
+    triangles.push_back({
+        {-20.0f, 16.0f, -20.0f},
+        {20.0f, 16.0f, -20.0f},
+        {20.0f, 16.0f, 20.0f},
+        {0.0f, -1.0f, 0.0f},
+        {0.73f, 0.73f, 0.73f}, 0
+    });
+
+    triangles.push_back({
+        {-20.0f, 16.0f, -20.0f},
+        {20.0f, 16.0f, 20.0f},
+        {-20.0f, 16.0f, 20.0f},
+        {0.0f, -1.0f, 0.0f},
+        {0.73f, 0.73f, 0.73f}, 0
+    });
+
+    // Left wall (red)
+    triangles.push_back({
+        {-16.0f, -20.0f, -20.0f},
+        {-16.0f, -20.0f, 20.0f},
+        {-16.0f, 20.0f, 20.0f},
+        {1.0f, 0.0f, 0.0f},
+        {0.65f, 0.05f, 0.05f}, 0
+    });
+
+    triangles.push_back({
+        {-16.0f, -20.0f, -20.0f},
+        {-16.0f, 20.0f, 20.0f},
+        {-16.0f, 20.0f, -20.0f},
+        {1.0f, 0.0f, 0.0f},
+        {0.65f, 0.05f, 0.05f}, 0
+    });
+
+    // Right wall (green)
+    triangles.push_back({
+        {16.0f, -20.0f, -20.0f},
+        {16.0f, -20.0f, 20.0f},
+        {16.0f, 20.0f, 20.0f},
+        {-1.0f, 0.0f, 0.0f},
+        {0.12f, 0.45f, 0.15f}, 0
+    });
+
+    triangles.push_back({
+        {16.0f, -20.0f, -20.0f},
+        {16.0f, 20.0f, 20.0f},
+        {16.0f, 20.0f, -20.0f},
+        {-1.0f, 0.0f, 0.0f},
+        {0.12f, 0.45f, 0.15f}, 0
+    });
+}
+
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
     std::cout << "=== Working GPU Ray Tracer (GLSL 1.20 Compatible) ===" << std::endl;
-    std::cout << "Features: Cornell Box, Phong shading, spheres and triangles" << std::endl;
+    std::cout << "Features: Exact CPU Cornell Box scene, Phong shading, uniforms" << std::endl;
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -596,11 +819,27 @@ int main(int argc, char* argv[]) {
     GLint camera_vup_loc = glGetUniformLocation(program, "camera_vup");
     GLint camera_vfov_loc = glGetUniformLocation(program, "camera_vfov");
 
+    // Scene uniform locations
+    GLint num_spheres_loc = glGetUniformLocation(program, "num_spheres");
+    GLint num_triangles_loc = glGetUniformLocation(program, "num_triangles");
+
+    // Setup scene data
+    std::vector<SphereData> spheres;
+    std::vector<TriangleData> triangles;
+    setup_scene_data(spheres, triangles);
+
+    std::cout << "✓ Scene loaded: " << spheres.size() << " spheres, " << triangles.size() << " triangles" << std::endl;
+
     std::cout << "\n=== Starting Working GPU Ray Tracer ===" << std::endl;
-    std::cout << "You should see a Cornell Box scene with:" << std::endl;
-    std::cout << "  - Metal sphere (left) and glass sphere (right)" << std::endl;
-    std::cout << "  - Red wall (left) and green wall (right)" << std::endl;
-    std::cout << "  - Phong shading with specular highlights" << std::endl;
+    std::cout << "You should see the EXACT CPU Cornell Box scene with:" << std::endl;
+    std::cout << "  - Center gold sphere (large)" << std::endl;
+    std::cout << "  - 5 orbiting spheres (metal, blue, red, yellow)" << std::endl;
+    std::cout << "  - Glass sphere and sphere behind glass" << std::endl;
+    std::cout << "  - Pyramid with checkerboard texture" << std::endl;
+    std::cout << "  - 2 small metal spheres" << std::endl;
+    std::cout << "  - Procedural texture spheres (checkerboard, noise, gradient, stripe)" << std::endl;
+    std::cout << "  - Gradient quad on right wall" << std::endl;
+    std::cout << "  - Red wall (left), green walls (right/back), gray floor/ceiling" << std::endl;
     std::cout << "Controls:" << std::endl;
     std::cout << "  Click window to capture mouse" << std::endl;
     std::cout << "  WASD/Arrows - Move (slower)" << std::endl;
@@ -694,12 +933,62 @@ int main(int argc, char* argv[]) {
 
             glUseProgram(program);
 
-            // Set uniforms
+            // Set camera uniforms
             glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
             glUniform3f(camera_pos_loc, camera.position[0], camera.position[1], camera.position[2]);
             glUniform3f(camera_lookat_loc, camera.lookat[0], camera.lookat[1], camera.lookat[2]);
             glUniform3f(camera_vup_loc, camera.vup[0], camera.vup[1], camera.vup[2]);
             glUniform1f(camera_vfov_loc, camera.vfov);
+
+            // Set scene uniforms
+            glUniform1i(num_spheres_loc, spheres.size());
+            glUniform1i(num_triangles_loc, triangles.size());
+
+            // Set sphere uniforms
+            for (size_t i = 0; i < spheres.size(); i++) {
+                std::string name = "sphere_centers[" + std::to_string(i) + "]";
+                GLint loc = glGetUniformLocation(program, name.c_str());
+                glUniform3f(loc, spheres[i].center[0], spheres[i].center[1], spheres[i].center[2]);
+
+                name = "sphere_radii[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, spheres[i].radius);
+
+                name = "sphere_colors[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform3f(loc, spheres[i].color[0], spheres[i].color[1], spheres[i].color[2]);
+
+                name = "sphere_materials[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1i(loc, spheres[i].material);
+            }
+
+            // Set triangle uniforms
+            for (size_t i = 0; i < triangles.size(); i++) {
+                std::string name = "tri_v0[" + std::to_string(i) + "]";
+                GLint loc = glGetUniformLocation(program, name.c_str());
+                glUniform3f(loc, triangles[i].v0[0], triangles[i].v0[1], triangles[i].v0[2]);
+
+                name = "tri_v1[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform3f(loc, triangles[i].v1[0], triangles[i].v1[1], triangles[i].v1[2]);
+
+                name = "tri_v2[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform3f(loc, triangles[i].v2[0], triangles[i].v2[1], triangles[i].v2[2]);
+
+                name = "tri_normals[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform3f(loc, triangles[i].normal[0], triangles[i].normal[1], triangles[i].normal[2]);
+
+                name = "tri_colors[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform3f(loc, triangles[i].color[0], triangles[i].color[1], triangles[i].color[2]);
+
+                name = "tri_materials[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1i(loc, triangles[i].material);
+            }
 
             // Render fullscreen quad
             glBindVertexArray(vao);

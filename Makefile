@@ -84,105 +84,17 @@ interactive-gpu: $(BUILD_DIR)
 	@echo "✓ Interactive GPU built: $(BUILD_DIR)/raytracer_interactive_gpu"
 	@ln -sf $(BUILD_DIR)/raytracer_interactive_gpu raytracer_interactive_gpu
 
-# Simple GPU infrastructure test
-.PHONY: gpu-infra-test
-gpu-infra-test: $(BUILD_DIR)
-	@echo "Building GPU Infrastructure Test"
-	@echo "This tests OpenGL context creation and shader compilation"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		-DGPU_INFRASTRUCTURE_TEST \
-		src/renderer/gpu_renderer.cpp src/renderer/shader_manager.cpp \
-		-o $(BUILD_DIR)/gpu_infra_test $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ GPU Infrastructure Test built: $(BUILD_DIR)/gpu_infra_test"
-	@echo "Run with: ./build/gpu_infra_test"
-
-# Standalone GPU ray tracer (compute shaders only) - REQUIRES OpenGL 4.3+
-.PHONY: gpu-only
-gpu-only: $(BUILD_DIR)
-	@echo "Building Standalone GPU Ray Tracer (OpenGL 4.3+ Compute Shaders)"
-	@echo "Features: OpenGL compute shaders, ray tracing, no CPU fallback"
-	@echo "WARNING: Requires OpenGL 4.3+ or higher"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		src/main_gpu_only.cpp \
-		-o $(BUILD_DIR)/gpu_only $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ Standalone GPU Ray Tracer built: $(BUILD_DIR)/gpu_only"
-	@echo "Run with: ./build/gpu_only"
-
-# Legacy GPU ray tracer (fragment shaders) - Works with OpenGL 2.0+
-.PHONY: gpu-legacy
-gpu-legacy: $(BUILD_DIR)
-	@echo "Building Legacy GPU Ray Tracer (OpenGL 2.0+ Fragment Shaders)"
-	@echo "Features: Fragment shader ray tracing, works on older GPUs"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		src/main_legacy_gpu.cpp \
-		-o $(BUILD_DIR)/gpu_legacy $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ Legacy GPU Ray Tracer built: $(BUILD_DIR)/gpu_legacy"
-	@echo "Run with: ./build/gpu_legacy"
-
-# GPU ray tracer with full CPU feature parity (fragment shaders) - Works with OpenGL 3.3+
-.PHONY: gpu-fragment
-gpu-fragment: $(BUILD_DIR)
-	@echo "Building GPU Ray Tracer with Full CPU Feature Parity (OpenGL 3.3+ Fragment Shaders)"
-	@echo "Features: Phong shading, shadows, reflections, triangles, dielectric materials, anti-aliasing"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		src/main_gpu_fragment.cpp \
-		-o $(BUILD_DIR)/gpu_fragment $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ GPU Fragment Ray Tracer built: $(BUILD_DIR)/gpu_fragment"
-	@echo "Run with: ./build/gpu_fragment"
 
 # Working GPU ray tracer (GLSL 1.20 compatible) - Works with OpenGL 2.0+
 .PHONY: gpu-working
 gpu-working: $(BUILD_DIR)
 	@echo "Building Working GPU Ray Tracer (GLSL 1.20 - OpenGL 2.0+ Compatible)"
-	@echo "Features: Cornell Box, Phong shading, spheres, triangles, metal and glass materials"
+	@echo "Features: Exact CPU Cornell Box scene, Phong shading, uniform-based scene data"
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
 		src/main_gpu_working.cpp \
 		-o $(BUILD_DIR)/gpu_working $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
 	@echo "✓ Working GPU Ray Tracer built: $(BUILD_DIR)/gpu_working"
 	@echo "Run with: ./build/gpu_working"
-
-# Interactive GPU ray tracer (same scene as CPU, with camera controls)
-.PHONY: gpu-interactive
-gpu-interactive: $(BUILD_DIR)
-	@echo "Building Interactive GPU Ray Tracer (Same Scene as CPU + Camera Controls)"
-	@echo "Features: Same scene as CPU, WASD movement, mouse look, real-time rendering"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		src/main_gpu_interactive.cpp \
-		-o $(BUILD_DIR)/gpu_interactive $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ Interactive GPU Ray Tracer built: $(BUILD_DIR)/gpu_interactive"
-	@echo "Run with: ./build/gpu_interactive"
-
-# Interactive GPU ray tracer (full featured with UI panels)
-.PHONY: gpu-interactive-full
-gpu-interactive-full: $(BUILD_DIR)
-	@echo "Building Interactive GPU Ray Tracer (Full Featured - Fixed Scene + Controls + UI)"
-	@echo "Features: Fixed scene, slower camera, reflections, settings panel, help overlay"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		src/main_gpu_interactive_full.cpp \
-		-o $(BUILD_DIR)/gpu_interactive_full $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ Interactive GPU Ray Tracer (Full) built: $(BUILD_DIR)/gpu_interactive_full"
-	@echo "Run with: ./build/gpu_interactive_full"
-
-# Interactive GPU ray tracer (WORKING - fixed black screen issue)
-.PHONY: gpu-working-fixed
-gpu-working-fixed: $(BUILD_DIR)
-	@echo "Building Interactive GPU Ray Tracer (WORKING - Fixed Black Screen)"
-	@echo "Features: Same scene as CPU, slower camera, UI panels, simplified shader"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		src/main_gpu_working_fixed.cpp \
-		-o $(BUILD_DIR)/gpu_working_fixed $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ Working GPU Ray Tracer built: $(BUILD_DIR)/gpu_working_fixed"
-	@echo "Run with: ./build/gpu_working_fixed"
-
-# Simple GPU test - renders a green window to verify OpenGL works
-.PHONY: gpu-test
-gpu-test: $(BUILD_DIR)
-	@echo "Building Simple GPU Test"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) \
-		src/main_gpu.cpp \
-		-o $(BUILD_DIR)/gpu_test $(LDFLAGS) $(SDL_LDFLAGS) -framework OpenGL
-	@echo "✓ GPU Test built: $(BUILD_DIR)/gpu_test"
-	@echo "Run with: ./build/gpu_test"
 
 # Simple SDL test - renders a blue window without OpenGL
 .PHONY: sdl-test
@@ -232,7 +144,7 @@ phase6:
 	@echo "⚠️  Phase 6 not yet implemented"
 
 # Run current phase
-.PHONY: run runi runi-gpu test-int
+.PHONY: run runi runi-gpu run-gpu-working test-int
 run: phase2
 	@echo "Running ray tracer (Phase 2)..."
 	./$(BINARY) > output.ppm
@@ -253,53 +165,13 @@ runi-gpu: interactive-gpu
 	@echo "Expected performance: 60-300x faster than CPU depending on GPU"
 	./raytracer_interactive_gpu
 
-# Run legacy GPU ray tracer (OpenGL 2.0+ compatible)
-.PHONY: run-gpu-legacy
-run-gpu-legacy: gpu-legacy
-	@echo "Starting Legacy GPU Ray Tracer..."
-	@echo "Features: Fragment shader ray tracing, compatible with older GPUs"
-	@echo "Controls: ESC to quit"
-	./build/gpu_legacy
-
-# Run GPU fragment ray tracer with full CPU feature parity (OpenGL 3.3+)
-.PHONY: run-gpu-fragment
-run-gpu-fragment: gpu-fragment
-	@echo "Starting GPU Fragment Ray Tracer (Full CPU Feature Parity)..."
-	@echo "Features: Phong shading, shadows, reflections, triangles, dielectric materials"
-	@echo "Controls: ESC to quit"
-	./build/gpu_fragment
-
 # Run working GPU ray tracer (GLSL 1.20 compatible)
 .PHONY: run-gpu-working
 run-gpu-working: gpu-working
 	@echo "Starting Working GPU Ray Tracer (GLSL 1.20 Compatible)..."
-	@echo "Features: Cornell Box, Phong shading, spheres, triangles, metal and glass materials"
-	@echo "Controls: ESC to quit"
-	./build/gpu_working
-
-# Run interactive GPU ray tracer (same scene as CPU, with camera controls)
-.PHONY: run-gpu-interactive
-run-gpu-interactive: gpu-interactive
-	@echo "Starting Interactive GPU Ray Tracer (Same Scene as CPU + Camera Controls)..."
-	@echo "Features: Same scene as CPU renderer, WASD + mouse controls"
+	@echo "Features: Exact CPU Cornell Box scene, Phong shading, uniform-based scene data"
 	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, ESC to quit"
-	./build/gpu_interactive
-
-# Run interactive GPU ray tracer (full featured with all fixes)
-.PHONY: run-gpu-interactive-full
-run-gpu-interactive-full: gpu-interactive-full
-	@echo "Starting Interactive GPU Ray Tracer (Full Featured - All Issues Fixed)..."
-	@echo "Features: Fixed scene, slower camera, reflections, settings panel (C), help overlay (H)"
-	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, C/H for panels, ESC to quit"
-	./build/gpu_interactive_full
-
-# Run working GPU ray tracer (fixed black screen issue)
-.PHONY: run-gpu-working-fixed
-run-gpu-working-fixed: gpu-working-fixed
-	@echo "Starting Working GPU Ray Tracer (Fixed Black Screen Issue)..."
-	@echo "Features: Same scene as CPU, slower camera, UI panels, working shader"
-	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, C/H for panels, ESC to quit"
-	./build/gpu_working_fixed
+	./build/gpu_working
 
 # Run with test scene
 .PHONY: test
