@@ -173,6 +173,8 @@ public:
             "  WASD/Arrows - Move camera",
             "  Mouse       - Look around",
             "  R           - Toggle reflections",
+            "  P           - Toggle Phong/PBR lighting",
+            "  L           - Cycle light configurations",
             "  H           - Toggle this help",
             "  C           - Toggle controls panel",
             "  ESC         - Quit",
@@ -180,7 +182,8 @@ public:
             "Features:",
             "  - Real-time GPU ray tracing",
             "  - Exact CPU Cornell Box scene",
-            "  - Phong shading with reflections",
+            "  - Phong & PBR lighting modes",
+            "  - Multiple light configurations",
             "  - Procedural textures",
             "  - 75+ FPS performance",
             "",
@@ -246,7 +249,7 @@ public:
     void toggle() { show = !show; }
     bool is_showing() const { return show; }
 
-    void render(SDL_Window* window, bool reflections_enabled) {
+    void render(SDL_Window* window, bool reflections_enabled, int lighting_mode, int num_lights) {
         if (!show || !initialized) return;
 
         int width, height;
@@ -257,7 +260,7 @@ public:
         if (!renderer) return;
 
         // Semi-transparent background
-        SDL_Rect bg_rect = {width - 300, 50, 250, 200};
+        SDL_Rect bg_rect = {width - 300, 50, 250, 250};
         SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
         SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
 
@@ -283,6 +286,32 @@ public:
         char settings_text[256];
 
         sprintf(settings_text, "Reflections: %s", reflections_enabled ? "ON" : "OFF");
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Lighting: %s", lighting_mode == 0 ? "Phong" : "PBR");
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Lights: %d", num_lights);
         surface = TTF_RenderText_Blended(font, settings_text, text_color);
         if (surface) {
             SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -333,6 +362,8 @@ struct SphereData {
     int material;
     float gradient_scale;   // For gradient textures
     float gradient_offset;  // For gradient textures
+    float roughness;        // PBR roughness (0=mirror, 1=matte)
+    float metallic;         // PBR metallic (0=dielectric, 1=metal)
 };
 
 struct TriangleData {
@@ -342,6 +373,8 @@ struct TriangleData {
     int material;
     float gradient_scale;   // For gradient textures
     float gradient_offset;  // For gradient textures
+    float roughness;        // PBR roughness
+    float metallic;         // PBR metallic
 };
 
 // Fragment shader that reads scene data from uniforms
@@ -361,6 +394,8 @@ uniform vec3 sphere_colors[16];
 uniform int sphere_materials[16];
 uniform float sphere_gradient_scale[16];
 uniform float sphere_gradient_offset[16];
+uniform float sphere_roughness[16];     // PBR roughness (0=mirror, 1=matte)
+uniform float sphere_metallic[16];      // PBR metallic (0=dielectric, 1=metal)
 uniform int num_spheres;
 
 uniform vec3 tri_v0[20];
@@ -371,11 +406,22 @@ uniform vec3 tri_colors[20];
 uniform int tri_materials[20];
 uniform float tri_gradient_scale[20];
 uniform float tri_gradient_offset[20];
+uniform float tri_roughness[20];        // PBR roughness
+uniform float tri_metallic[20];         // PBR metallic
 uniform int num_triangles;
 
 // Rendering options
 uniform bool enable_reflections;
 uniform int max_depth;
+
+// PBR lighting options
+uniform int lighting_mode;              // 0=Phong, 1=PBR
+uniform int num_lights;                 // Number of active lights
+
+// Light uniforms (up to 4 lights)
+uniform vec3 light_positions[4];
+uniform vec3 light_colors[4];
+uniform float light_intensities[4];
 
 // Simple ray-sphere intersection
 bool hit_sphere(vec3 origin, vec3 direction, vec3 center, float radius, inout float t) {
@@ -479,6 +525,212 @@ vec3 stripe_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
     return mix(color1, color2, stripe);
 }
 
+// ============================================================================
+// COOK-TORRANCE BRDF FUNCTIONS (Physically Based Rendering)
+// ============================================================================
+
+// Constants
+const float PI = 3.14159265359;
+
+// Microfacet distribution function (GGX/Trowbridge-Reitz)
+// D: How many microfacets are aligned to reflect light toward viewer
+float D_GGX(vec3 N, vec3 H, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH * NdotH;
+
+    float nom = a2;
+    float denom = NdotH2 * (a2 - 1.0) + 1.0;
+    denom = PI * denom * denom;
+
+    return nom / denom;
+}
+
+// Geometry function (Smith method)
+// G: Accounts for microfacets shadowing each other
+float G_Smith(vec3 N, vec3 V, vec3 L, float roughness) {
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+
+    float r = (roughness + 1.0);
+    float k = (r * r) / 8.0;
+
+    float ggx1 = NdotV / (NdotV * (1.0 - k) + k);
+    float ggx2 = NdotL / (NdotL * (1.0 - k) + k);
+
+    return ggx1 * ggx2;
+}
+
+// Fresnel equation (Schlick approximation)
+// F: How much light reflects vs refracts (grazing angles become mirrors)
+vec3 F_Schlick(float cosTheta, vec3 F0) {
+    float pow5 = pow(1.0 - cosTheta, 5.0);
+    return F0 + (1.0 - F0) * pow5;
+}
+
+// Full Cook-Torrance BRDF
+// Returns: ratio of reflected radiance to incident irradiance
+vec3 cook_torrance_brdf(vec3 N, vec3 V, vec3 L, vec3 H,
+                        vec3 albedo, float roughness, float metallic) {
+    float NdotL = max(dot(N, L), 0.0);
+    float NdotV = max(dot(N, V), 0.0);
+    float HdotV = max(dot(H, V), 0.0);
+
+    // Base reflectivity (0.04 for most dielectrics)
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+
+    // Specular component (Cook-Torrance)
+    float D = D_GGX(N, H, roughness);
+    float G = G_Smith(N, V, L, roughness);
+    vec3 F = F_Schlick(HdotV, F0);
+
+    vec3 numerator = D * G * F;
+    float denominator = 4.0 * NdotL * NdotV + 0.0001;
+    vec3 specular = numerator / denominator;
+
+    // Diffuse component (Lambertian)
+    // Metals have no diffuse, dielectrics have full diffuse
+    vec3 kS = F;  // Specular reflection
+    vec3 kD = vec3(1.0) - kS;  // Diffuse reflection
+    kD *= 1.0 - metallic;  // Metals have no diffuse component
+
+    vec3 diffuse = kD * albedo / PI;
+
+    return diffuse + specular;
+}
+
+// Simple Phong shading (for comparison/compatibility)
+vec3 phong_shading(vec3 N, vec3 V, vec3 L, vec3 albedo, float specular_power) {
+    vec3 light_dir = normalize(L);
+    float diff = max(dot(N, light_dir), 0.0);
+
+    vec3 view_dir = normalize(V);
+    vec3 reflect_dir = reflect(-light_dir, N);
+    float spec = pow(max(dot(view_dir, reflect_dir), 0.0), specular_power);
+
+    return albedo * (0.1 + diff * 0.7 + spec * 0.3);
+}
+
+// Calculate PBR lighting for a point
+vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
+                            vec3 albedo, float roughness, float metallic) {
+    vec3 Lo = vec3(0.0);  // Total outgoing radiance
+
+    // Accumulate contribution from each light
+    for (int i = 0; i < 4; i++) {
+        if (i >= num_lights) break;
+
+        vec3 light_pos = light_positions[i];
+        vec3 light_color = light_colors[i];
+        float light_intensity = light_intensities[i];
+
+        vec3 L = normalize(light_pos - hit_point);
+        vec3 H = normalize(V + L);
+
+        // Shadow check (simple ray to light)
+        float shadow = 1.0;
+        vec3 shadow_origin = hit_point + N * 0.001;
+        vec3 shadow_dir = L;
+        float light_dist = length(light_pos - hit_point);
+
+        // Check for shadow occluders
+        float t_shadow = light_dist;
+        bool in_shadow = false;
+
+        // Check spheres for shadow
+        for (int j = 0; j < num_spheres; j++) {
+            if (hit_sphere(shadow_origin, shadow_dir, sphere_centers[j], sphere_radii[j], t_shadow)) {
+                if (t_shadow < light_dist) {
+                    in_shadow = true;
+                    break;
+                }
+            }
+        }
+
+        // Check triangles for shadow
+        if (!in_shadow) {
+            for (int j = 0; j < num_triangles; j++) {
+                if (hit_triangle(shadow_origin, shadow_dir, tri_v0[j], tri_v1[j], tri_v2[j],
+                               tri_normals[j], t_shadow)) {
+                    if (t_shadow < light_dist) {
+                        in_shadow = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (in_shadow) {
+            shadow = 0.0;
+        }
+
+        // Cook-Torrance BRDF
+        vec3 brdf = cook_torrance_brdf(N, V, L, H, albedo, roughness, metallic);
+
+        // Light attenuation (quadratic falloff)
+        float distance = length(light_pos - hit_point);
+        float attenuation = 1.0 / (1.0 + 0.09 * distance + 0.032 * distance * distance);
+
+        // Add light contribution
+        float NdotL = max(dot(N, L), 0.0);
+        Lo += brdf * light_color * light_intensity * attenuation * NdotL * shadow;
+    }
+
+    // Add Image-Based Lighting approximation (ambient)
+    vec3 R = reflect(-V, N);
+
+    // Sample environment gradient
+    float env_dot = max(R.y, 0.0);
+    vec3 env_color = mix(vec3(0.1), vec3(0.5, 0.7, 1.0), env_dot);
+
+    // Roughness-based blur approximation
+    float roughness2 = roughness * roughness;
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F = F_Schlick(max(dot(N, V), 0.0), F0);
+
+    // Specular IBL
+    vec3 specular_ibl = env_color * (roughness2 * F) * 0.3;
+
+    // Diffuse IBL (irradiance approximation)
+    float irradiance = max(N.y, 0.0) * 0.5 + 0.5;
+    vec3 diffuse_ibl = albedo * irradiance * 0.15;
+
+    vec3 ibl = diffuse_ibl + specular_ibl;
+
+    return Lo + ibl;
+}
+
+// Tone mapping (ACES filmic)
+vec3 aces_tonemap(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// Gamma correction
+vec3 gamma_correct(vec3 color) {
+    return pow(color, vec3(1.0 / 2.2));
+}
+
+// Full color pipeline (tone mapping + gamma)
+vec3 color_pipeline(vec3 color) {
+    // Exposure
+    float exposure = 1.0;
+    color *= exposure;
+
+    // Tone map
+    color = aces_tonemap(color);
+
+    // Gamma correct
+    color = gamma_correct(color);
+
+    return color;
+}
+
 // Simple scene rendering with iterative reflections
 vec3 ray_color(vec3 origin, vec3 direction) {
     // Background gradient
@@ -515,72 +767,81 @@ vec3 ray_color(vec3 origin, vec3 direction) {
 
         if (hit_object >= 0) {
             vec3 hit_point = current_origin + t_min * current_direction;
-            vec3 color;
+            vec3 albedo;
             vec3 normal;
             int material;
-            bool apply_lighting = true;  // Declare before if/else blocks
+            float roughness = 0.5;   // Default roughness
+            float metallic = 0.0;     // Default metallic
+            bool apply_lighting = true;
 
             if (hit_type == 0) {
                 // Sphere hit
                 normal = normalize(hit_point - sphere_centers[hit_object]);
-                color = sphere_colors[hit_object];
+                albedo = sphere_colors[hit_object];
                 material = sphere_materials[hit_object];
+                roughness = sphere_roughness[hit_object];
+                metallic = sphere_metallic[hit_object];
 
                 // Apply procedural textures based on material
                 if (material == 4) {
                     // Checkerboard (red and blue)
-                    color = checkerboard_texture(hit_point, vec3(0.8, 0.2, 0.2), vec3(0.2, 0.2, 0.8), 8.0);
+                    albedo = checkerboard_texture(hit_point, vec3(0.8, 0.2, 0.2), vec3(0.2, 0.2, 0.8), 8.0);
                 } else if (material == 5) {
                     // Noise (black and white)
-                    color = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
+                    albedo = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
                 } else if (material == 6) {
-                    // Gradient (purple to yellow vertical) - use proper scale/offset from texture
-                    // Debug: test with simple gradient based on Y position
-                    float gradient_t = (hit_point.y + 2.3) / 1.6;  // Map Y from [-2.3, -0.7] to [0, 1]
+                    // Gradient (purple to yellow vertical)
+                    float gradient_t = (hit_point.y + 2.3) / 1.6;
                     gradient_t = clamp(gradient_t, 0.0, 1.0);
-                    color = mix(vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), gradient_t);
-                    // Don't apply lighting to gradient texture - it should be self-illuminated
-                    apply_lighting = false;
+                    albedo = mix(vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), gradient_t);
+                    apply_lighting = false;  // Self-illuminated
                 } else if (material == 7) {
                     // Stripe (orange and white horizontal)
-                    color = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
+                    albedo = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
                 }
             } else {
                 // Triangle hit
                 normal = tri_normals[hit_object];
-                color = tri_colors[hit_object];
+                albedo = tri_colors[hit_object];
                 material = tri_materials[hit_object];
+                roughness = tri_roughness[hit_object];
+                metallic = tri_metallic[hit_object];
 
                 // Apply procedural textures for triangles
                 if (material == 8) {
                     // Pyramid checkerboard
-                    color = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
+                    albedo = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
                 } else if (material == 9) {
-                    // Gradient quad (red to blue along Z) - use proper scale/offset from texture
-                    color = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0),
-                                              tri_gradient_scale[hit_object], tri_gradient_offset[hit_object]);
-                    // Don't apply lighting to gradient texture - it should be self-illuminated
-                    apply_lighting = false;
+                    // Gradient quad (red to blue along Z)
+                    albedo = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0),
+                                             tri_gradient_scale[hit_object], tri_gradient_offset[hit_object]);
+                    apply_lighting = false;  // Self-illuminated
                 }
             }
 
-            // Simple lighting
-            vec3 lighting = vec3(1.0);
+            // Calculate lighting (PBR or Phong)
+            vec3 color;
             if (apply_lighting) {
-                vec3 light_pos = vec3(0.0, 18.0, 0.0);
-                vec3 light_dir = normalize(light_pos - hit_point);
-                float diff = max(dot(normal, light_dir), 0.0);
+                vec3 V = normalize(-current_direction);
 
-                // Add simple Phong specular
-                vec3 view_dir = normalize(-current_direction);
-                vec3 reflect_dir = reflect(-light_dir, normal);
-                float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
-
-                // Ambient + diffuse + specular
-                lighting = vec3(0.1 + diff * 0.7 + spec * 0.3);
+                if (lighting_mode == 1) {
+                    // PBR lighting
+                    color = calculate_pbr_lighting(hit_point, normal, V, albedo, roughness, metallic);
+                } else {
+                    // Legacy Phong shading (for comparison)
+                    if (num_lights > 0) {
+                        vec3 L = normalize(light_positions[0] - hit_point);
+                        color = phong_shading(normal, V, L, albedo, 32.0);
+                    } else {
+                        // Fallback to single light
+                        vec3 light_pos = vec3(0.0, 18.0, 0.0);
+                        vec3 L = normalize(light_pos - hit_point);
+                        color = phong_shading(normal, V, L, albedo, 32.0);
+                    }
+                }
+            } else {
+                color = albedo;  // Self-illuminated
             }
-
-            color = color * lighting;
 
             // Add contribution to final color
             final_color += accumulated_weight * color;
@@ -656,6 +917,9 @@ void main() {
 
     // Trace ray and get color
     vec3 color = ray_color(origin, direction);
+
+    // Apply tone mapping and gamma correction
+    color = color_pipeline(color);
 
     // Output color
     gl_FragColor = vec4(color, 1.0);
@@ -750,20 +1014,26 @@ void setup_scene_data(
             data.color[1] = sphere->mat->albedo.y;
             data.color[2] = sphere->mat->albedo.z;
 
-            // Determine material type
+            // Determine material type and PBR parameters
             std::cout << "Sphere material type: ";
             if (auto metal = std::dynamic_pointer_cast<Metal>(sphere->mat)) {
                 if (metal->fuzz < 0.1) {
                     data.material = 1; // Perfect metal
+                    data.roughness = 0.1f;   // Polished metal
+                    data.metallic = 1.0f;    // Fully metallic
                     std::cout << "Perfect metal" << std::endl;
                 } else {
                     data.material = 2; // Fuzzy metal
+                    data.roughness = 0.4f;   // Rougher metal
+                    data.metallic = 1.0f;    // Fully metallic
                     std::cout << "Fuzzy metal" << std::endl;
                 }
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
             } else if (auto glass = std::dynamic_pointer_cast<Dielectric>(sphere->mat)) {
                 data.material = 3; // Glass
+                data.roughness = 0.05f;  // Very smooth
+                data.metallic = 0.0f;    // Dielectric
                 std::cout << "Glass" << std::endl;
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
@@ -772,32 +1042,44 @@ void setup_scene_data(
                 // Check if this is a procedural texture material
                 if (auto checker = std::dynamic_pointer_cast<CheckerTexture>(lambertian->albedo_texture)) {
                     data.material = 4; // Checkerboard
+                    data.roughness = 0.8f;   // Matte plastic
+                    data.metallic = 0.0f;    // Dielectric
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
                     std::cout << "  -> Checkerboard texture" << std::endl;
                 } else if (auto noise = std::dynamic_pointer_cast<NoiseTexture>(lambertian->albedo_texture)) {
                     data.material = 5; // Noise
+                    data.roughness = 0.9f;   // Very rough
+                    data.metallic = 0.0f;    // Dielectric
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
                     std::cout << "  -> Noise texture" << std::endl;
                 } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->albedo_texture)) {
                     data.material = 6; // Gradient
+                    data.roughness = 0.5f;   // Medium roughness
+                    data.metallic = 0.0f;    // Dielectric
                     data.gradient_scale = gradient->scale;
                     data.gradient_offset = gradient->offset;
                     std::cout << "  -> Gradient texture! scale=" << gradient->scale << " offset=" << gradient->offset << std::endl;
                 } else if (auto stripe = std::dynamic_pointer_cast<StripeTexture>(lambertian->albedo_texture)) {
                     data.material = 7; // Stripe
+                    data.roughness = 0.7f;   // Matte
+                    data.metallic = 0.0f;    // Dielectric
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
                     std::cout << "  -> Stripe texture" << std::endl;
                 } else {
                     data.material = 0; // Regular lambertian
+                    data.roughness = 0.8f;   // Matte wall/floor
+                    data.metallic = 0.0f;    // Dielectric
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
                     std::cout << "  -> Regular lambertian (unknown texture)" << std::endl;
                 }
             } else {
                 data.material = 0; // Default lambertian
+                data.roughness = 0.8f;   // Matte
+                data.metallic = 0.0f;    // Dielectric
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
                 std::cout << "Unknown material type" << std::endl;
@@ -835,20 +1117,28 @@ void setup_scene_data(
                 std::cout << "Lambertian, checking texture..." << std::endl;
                 if (auto checker = std::dynamic_pointer_cast<CheckerTexture>(lambertian->albedo_texture)) {
                     data.material = 8; // Checkerboard (pyramid)
+                    data.roughness = 0.6f;   // Medium matte
+                    data.metallic = 0.0f;    // Dielectric
                     std::cout << "  -> Checkerboard texture" << std::endl;
                 } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->albedo_texture)) {
                     data.material = 9; // Gradient (quad on right wall)
                     data.gradient_scale = gradient->scale;
                     data.gradient_offset = gradient->offset;
+                    data.roughness = 0.5f;   // Medium roughness
+                    data.metallic = 0.0f;    // Dielectric
                     std::cout << "  -> Gradient texture! scale=" << gradient->scale << " offset=" << gradient->offset << std::endl;
                 } else {
                     data.material = 0; // Regular lambertian
+                    data.roughness = 0.8f;   // Matte wall
+                    data.metallic = 0.0f;    // Dielectric
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
                     std::cout << "  -> Regular lambertian (unknown texture)" << std::endl;
                 }
             } else {
                 data.material = 0; // Default lambertian
+                data.roughness = 0.8f;   // Matte
+                data.metallic = 0.0f;    // Dielectric
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
                 std::cout << "Not Lambertian" << std::endl;
@@ -995,9 +1285,53 @@ int main(int argc, char* argv[]) {
     GLint enable_reflections_loc = glGetUniformLocation(program, "enable_reflections");
     GLint max_depth_loc = glGetUniformLocation(program, "max_depth");
 
+    // PBR lighting uniforms
+    GLint lighting_mode_loc = glGetUniformLocation(program, "lighting_mode");
+    GLint num_lights_loc = glGetUniformLocation(program, "num_lights");
+    GLint light_positions_loc[4];
+    GLint light_colors_loc[4];
+    GLint light_intensities_loc[4];
+
+    for (int i = 0; i < 4; i++) {
+        std::string name = "light_positions[" + std::to_string(i) + "]";
+        light_positions_loc[i] = glGetUniformLocation(program, name.c_str());
+
+        name = "light_colors[" + std::to_string(i) + "]";
+        light_colors_loc[i] = glGetUniformLocation(program, name.c_str());
+
+        name = "light_intensities[" + std::to_string(i) + "]";
+        light_intensities_loc[i] = glGetUniformLocation(program, name.c_str());
+    }
+
     // Rendering settings (matching CPU version)
     bool enable_reflections = true;
     int max_depth = 5;
+
+    // PBR lighting settings
+    int lighting_mode = 0;  // Start with Phong for compatibility
+    int num_lights = 1;     // Start with single light
+
+    // Light setup (3-point lighting)
+    float light_positions[4][3] = {
+        {0.0f, 18.0f, 0.0f},    // Main light (overhead)
+        {-10.0f, 10.0f, 10.0f}, // Fill light
+        {15.0f, 5.0f, -5.0f},   // Rim light
+        {0.0f, 0.0f, 0.0f}      // Spare
+    };
+
+    float light_colors[4][3] = {
+        {1.0f, 1.0f, 1.0f},     // White main
+        {0.8f, 0.9f, 1.0f},     // Cool fill
+        {1.0f, 0.9f, 0.8f},     // Warm rim
+        {1.0f, 1.0f, 1.0f}      // White spare
+    };
+
+    float light_intensities[4] = {
+        1.0f,    // Main light
+        0.3f,    // Fill light
+        0.5f,    // Rim light
+        0.0f     // Spare (off)
+    };
 
     // Setup scene data
     std::vector<SphereData> spheres;
@@ -1021,6 +1355,8 @@ int main(int argc, char* argv[]) {
     std::cout << "  WASD/Arrows - Move (slower)" << std::endl;
     std::cout << "  Mouse       - Look around" << std::endl;
     std::cout << "  R           - Toggle reflections" << std::endl;
+    std::cout << "  P           - Toggle Phong/PBR lighting" << std::endl;
+    std::cout << "  L           - Cycle light configurations" << std::endl;
     std::cout << "  H           - Help" << std::endl;
     std::cout << "  C           - Controls panel" << std::endl;
     std::cout << "  ESC         - Quit" << std::endl;
@@ -1061,6 +1397,14 @@ int main(int argc, char* argv[]) {
                 } else if (event.key.keysym.sym == SDLK_r) {
                     enable_reflections = !enable_reflections;
                     std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_p) {
+                    lighting_mode = 1 - lighting_mode;  // Toggle between 0 and 1
+                    std::cout << "Lighting: " << (lighting_mode == 0 ? "Phong (Legacy)" : "PBR (Physically Based)") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_l) {
+                    num_lights = (num_lights % 3) + 1;  // Cycle 1->2->3->1
+                    std::cout << "Lights: " << num_lights << (num_lights == 1 ? " (Single)" : num_lights == 2 ? " (2-point)" : " (3-point)") << std::endl;
                     need_render = true;
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
@@ -1130,6 +1474,16 @@ int main(int argc, char* argv[]) {
             glUniform1i(enable_reflections_loc, enable_reflections ? 1 : 0);
             glUniform1i(max_depth_loc, max_depth);
 
+            // Set PBR lighting uniforms
+            glUniform1i(lighting_mode_loc, lighting_mode);
+            glUniform1i(num_lights_loc, num_lights);
+
+            for (int i = 0; i < 4; i++) {
+                glUniform3f(light_positions_loc[i], light_positions[i][0], light_positions[i][1], light_positions[i][2]);
+                glUniform3f(light_colors_loc[i], light_colors[i][0], light_colors[i][1], light_colors[i][2]);
+                glUniform1f(light_intensities_loc[i], light_intensities[i]);
+            }
+
             // Set sphere uniforms
             for (size_t i = 0; i < spheres.size(); i++) {
                 std::string name = "sphere_centers[" + std::to_string(i) + "]";
@@ -1155,6 +1509,14 @@ int main(int argc, char* argv[]) {
                 name = "sphere_gradient_offset[" + std::to_string(i) + "]";
                 loc = glGetUniformLocation(program, name.c_str());
                 glUniform1f(loc, spheres[i].gradient_offset);
+
+                name = "sphere_roughness[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, spheres[i].roughness);
+
+                name = "sphere_metallic[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, spheres[i].metallic);
             }
 
             // Set triangle uniforms
@@ -1190,6 +1552,14 @@ int main(int argc, char* argv[]) {
                 name = "tri_gradient_offset[" + std::to_string(i) + "]";
                 loc = glGetUniformLocation(program, name.c_str());
                 glUniform1f(loc, triangles[i].gradient_offset);
+
+                name = "tri_roughness[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, triangles[i].roughness);
+
+                name = "tri_metallic[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, triangles[i].metallic);
             }
 
             // Render fullscreen quad
@@ -1200,7 +1570,7 @@ int main(int argc, char* argv[]) {
             if (help_overlay.is_showing()) {
                 help_overlay.render(window);
             } else if (controls_panel.is_showing()) {
-                controls_panel.render(window, enable_reflections);
+                controls_panel.render(window, enable_reflections, lighting_mode, num_lights);
             }
 
             SDL_GL_SwapWindow(window);
