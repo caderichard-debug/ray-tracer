@@ -7,6 +7,41 @@
 // AVX2 (256-bit SIMD) optimized vector operations
 // Can process 8 floats at once for improved performance
 
+// Vec3_AVX2: Structure of Arrays layout for 8 Vec3s
+struct alignas(32) Vec3_AVX2 {  // 32-byte alignment for AVX2
+    __m256 x;  // 8 x-coordinates
+    __m256 y;  // 8 y-coordinates
+    __m256 z;  // 8 z-coordinates
+
+    Vec3_AVX2() : x(_mm256_setzero_ps()), y(_mm256_setzero_ps()), z(_mm256_setzero_ps()) {}
+
+    Vec3_AVX2(__m256 x_, __m256 y_, __m256 z_) : x(x_), y(y_), z(z_) {}
+
+    // Load from array of 8 Vec3s (Array of Structures → Structure of Arrays)
+    static Vec3_AVX2 load_AoS(const Vec3* vecs) {
+        float x_arr[8], y_arr[8], z_arr[8];
+        for (int i = 0; i < 8; i++) {
+            x_arr[i] = vecs[i].x;
+            y_arr[i] = vecs[i].y;
+            z_arr[i] = vecs[i].z;
+        }
+        return Vec3_AVX2(_mm256_loadu_ps(x_arr),
+                         _mm256_loadu_ps(y_arr),
+                         _mm256_loadu_ps(z_arr));
+    }
+
+    // Store to array of 8 Vec3s (Structure of Arrays → Array of Structures)
+    void store_AoS(Vec3* vecs) const {
+        float x_arr[8], y_arr[8], z_arr[8];
+        _mm256_storeu_ps(x_arr, x);
+        _mm256_storeu_ps(y_arr, y);
+        _mm256_storeu_ps(z_arr, z);
+        for (int i = 0; i < 8; i++) {
+            vecs[i] = Vec3(x_arr[i], y_arr[i], z_arr[i]);
+        }
+    }
+};
+
 namespace AVX2 {
 
 // AVX2-optimized dot product for Vec3
@@ -25,9 +60,9 @@ inline float dot_product_avx2(const Vec3& a, const Vec3& b) {
 inline Vec3 add_avx2(const Vec3& a, const Vec3& b) {
     __m128 va = _mm_set_ps(0.0f, a.z, a.y, a.x);
     __m128 vb = _mm_set_ps(0.0f, b.z, b.y, b.x);
-    
+
     __m128 result = _mm_add_ps(va, vb);
-    
+
     float temp[4];
     _mm_storeu_ps(temp, result);
     return Vec3(temp[0], temp[1], temp[2]);
@@ -37,9 +72,9 @@ inline Vec3 add_avx2(const Vec3& a, const Vec3& b) {
 inline Vec3 sub_avx2(const Vec3& a, const Vec3& b) {
     __m128 va = _mm_set_ps(0.0f, a.z, a.y, a.x);
     __m128 vb = _mm_set_ps(0.0f, b.z, b.y, b.x);
-    
+
     __m128 result = _mm_sub_ps(va, vb);
-    
+
     float temp[4];
     _mm_storeu_ps(temp, result);
     return Vec3(temp[0], temp[1], temp[2]);
@@ -49,9 +84,9 @@ inline Vec3 sub_avx2(const Vec3& a, const Vec3& b) {
 inline Vec3 scale_avx2(const Vec3& v, float t) {
     __m128 va = _mm_set_ps(0.0f, v.z, v.y, v.x);
     __m128 vt = _mm_set1_ps(t);
-    
+
     __m128 result = _mm_mul_ps(va, vt);
-    
+
     float temp[4];
     _mm_storeu_ps(temp, result);
     return Vec3(temp[0], temp[1], temp[2]);

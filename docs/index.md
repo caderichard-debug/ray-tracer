@@ -144,6 +144,78 @@ Expected results:
 - SIMD (Phase 3): ~6-10 MRays/sec
 - Multi-threaded (Phase 5): ~20-40 MRays/sec
 
+## GPU Renderer
+
+A standalone GLSL 1.20 GPU ray tracer with real-time performance and advanced post-processing.
+
+### Current Status: Phase 4 Complete ✅
+
+**Features:**
+- Real-time ray tracing (60-300x faster than CPU)
+- Global Illumination (color bleeding)
+- Screen-Space Reflections (SSR)
+- Environment Mapping
+- Post-processing: SSAO, Bloom, Vignette, Film Grain
+- Advanced Tone Mapping (5 operators)
+- Color Grading (Exposure, Contrast, Saturation)
+- 3 Showcase scenes with enhanced textures
+
+### Documentation
+
+- **[GPU Renderer Guide](GPU_RENDERER.md)** - Complete GPU implementation
+- **[GPU Phase 4: Post-Processing](GPU_PHASE4_POST_PROCESSING.md)** - Post-processing effects
+- **[GPU Showcase Guide](GPU_SHOWCASE_GUIDE.md)** - Scene showcase guide
+- **[GPU Quick Reference](../SHOWCASE_QUICK_REFERENCE.md)** - Quick controls reference
+- **[GPU Improvement Roadmap](GPU_IMPROVEMENT_ROADMAP.md)** - Future improvements roadmap
+
+### Quick Start
+
+```bash
+# Automated scene launcher
+./showcase_scene.sh
+
+# Or build directly
+make phase4-complete GPU_SCENE=pbr_showcase
+./build/raytracer_interactive_gpu
+```
+
+### Performance
+
+| GPU Tier | Resolution | FPS | Quality |
+|----------|-----------|-----|---------|
+| Intel Integrated | 1280x720 | 15-20 | Maximum |
+| Mid-range GPU | 1280x720 | 60-90 | Maximum |
+| High-end GPU | 1280x720 | 120-200 | Maximum |
+
+### Future Phases
+
+- **Phase 5:** Post-Processing Polish (TAA, DOF, Motion Blur)
+- **Phase 6:** Advanced Lighting (SSGI, Volumetric, Procedural Sky)
+- **Phase 7:** Performance Optimization (Adaptive Quality, LOD, BVH)
+- **Phase 8:** Advanced Features (Compute Shaders, Path Tracing)
+
+See [GPU Improvement Roadmap](GPU_IMPROVEMENT_ROADMAP.md) for complete details.
+
+## ASCII Renderer
+
+A cross-platform terminal-based ray tracer with animated camera orbits.
+
+### Current Status: Complete ✅
+
+**Features:**
+- Pure terminal rendering (no GUI)
+- Animated camera orbits
+- Adaptive terminal sizing
+- Cross-platform compatibility
+
+**Quick Start:**
+```bash
+make ascii
+./build/raytracer_ascii
+```
+
+Documentation: [ASCII Renderer Guide](ASCII_RENDERER.md)
+
 ## References
 
 - [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html)

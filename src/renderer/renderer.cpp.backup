@@ -101,8 +101,6 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
         debug_log << "SIMD compute_phong_shading:" << std::endl;
         debug_log << "  ambient = (" << color.x << ", " << color.y << ", " << color.z << ")" << std::endl;
         debug_log << "  albedo = (" << rec.mat->albedo.x << ", " << rec.mat->albedo.y << ", " << rec.mat->albedo.z << ")" << std::endl;
-        debug_log << "  rec.ptr=" << &rec << " rec.mat.ptr=" << rec.mat.get() << " rec.mat->albedo.ptr=" << &rec.mat->albedo << std::endl;
-
         debug_log << "  normal = (" << rec.normal.x << ", " << rec.normal.y << ", " << rec.normal.z << ")" << std::endl;
         debug_log << "  lights = " << scene.lights.size() << std::endl;
         debug_lighting = false;
@@ -147,19 +145,6 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
             float diffuse_intensity = dot_product;
             Color diffuse_light = AVX2::mul_color_avx2(light.intensity, rec.mat->albedo);
             Color diffuse = AVX2::scale_avx2(diffuse_light, diffuse_intensity);
-
-	            // Debug: log intermediate diffuse values
-	            static bool debug_diffuse_inter_once = true;
-	            if (debug_diffuse_inter_once) {
-	                std::ofstream debug_log("simd_debug.log", std::ios::app);
-	                debug_log << "DEBUG diffuse: light.intensity=(" << light.intensity.x << "," << light.intensity.y << "," << light.intensity.z << ")" << std::endl;
-	                debug_log << "DEBUG diffuse: rec.mat->albedo=(" << rec.mat->albedo.x << "," << rec.mat->albedo.y << "," << rec.mat->albedo.z << ")" << std::endl;
-	                debug_log << "DEBUG diffuse: diffuse_light=(" << diffuse_light.x << "," << diffuse_light.y << "," << diffuse_light.z << ")" << std::endl;
-	                debug_log << "DEBUG diffuse: diffuse_intensity=" << diffuse_intensity << std::endl;
-	                debug_log << "DEBUG diffuse: diffuse=(" << diffuse.x << "," << diffuse.y << "," << diffuse.z << ")" << std::endl;
-	                debug_log.close();
-	                debug_diffuse_inter_once = false;
-	            }
 
             // Specular component (Phong) - use SIMD operations
             Vec3 view_dir = AVX2::normalize_avx2(-light_dir_normalized);

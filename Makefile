@@ -301,6 +301,208 @@ gpu-showcase: $(BUILD_DIR)
 		ENABLE_AMBIENT_OCCLUSION=1 \
 		GPU_SCENE=gpu_demo
 
+# GI Fast: Fast global illumination for testing
+.PHONY: gi-fast
+gi-fast: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (GI Fast - Low Samples)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=1 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=2 \
+		GI_INTENSITY=0.2
+
+# GI Balanced: Balanced quality and performance
+.PHONY: gi-balanced
+gi-balanced: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (GI Balanced - Medium Quality)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=2 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=4 \
+		GI_INTENSITY=0.4
+
+# GI Quality: Maximum quality global illumination
+.PHONY: gi-quality
+gi-quality: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (GI Quality - High Quality)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=3 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_SOFT_SHADOWS=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=8 \
+		GI_INTENSITY=0.6
+
+# Phase 3.5: Advanced Reflection Presets
+.PHONY: ssr-fast
+ssr-fast: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (SSR Fast - Low Quality)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=1 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_SSR=1 \
+		SSR_SAMPLES=8 \
+		SSR_STEP_SIZE=0.02 \
+		SSR_ROUGHNESS_CUTOFF=0.6
+
+.PHONY: ssr-quality
+ssr-quality: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (SSR Quality - High Quality)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=2 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_SSR=1 \
+		SSR_SAMPLES=24 \
+		SSR_STEP_SIZE=0.01 \
+		SSR_ROUGHNESS_CUTOFF=0.8
+
+.PHONY: env-quality
+env-quality: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (Environment Mapping)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=1 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_ENV_MAPPING=1 \
+		ENV_MIP_LEVELS=8
+
+.PHONY: phase35-complete
+phase35-complete: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (Phase 3.5 Complete - All Features)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=3 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=4 \
+		GI_INTENSITY=0.4 \
+		ENABLE_SSR=1 \
+		SSR_SAMPLES=16 \
+		SSR_STEP_SIZE=0.01 \
+		SSR_ROUGHNESS_CUTOFF=0.7 \
+		ENABLE_ENV_MAPPING=1
+
+# ============================================================================
+# PHASE 4: POST-PROCESSING & VISUAL EFFECTS
+# ============================================================================
+
+# SSAO (Screen-Space Ambient Occlusion) - Better depth perception
+.PHONY: ssao-quality
+ssao-quality: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (Phase 4: SSAO Quality)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=3 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=4 \
+		GI_INTENSITY=0.4 \
+		ENABLE_SSR=1 \
+		SSR_SAMPLES=16 \
+		SSR_STEP_SIZE=0.01 \
+		SSR_ROUGHNESS_CUTOFF=0.7 \
+		ENABLE_ENV_MAPPING=1 \
+		ENABLE_SSAO=1
+
+# Bloom effect - Cinematic glow
+.PHONY: bloom-quality
+bloom-quality: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (Phase 4: Bloom Quality)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=3 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=4 \
+		GI_INTENSITY=0.4 \
+		ENABLE_SSR=1 \
+		SSR_SAMPLES=16 \
+		SSR_STEP_SIZE=0.01 \
+		SSR_ROUGHNESS_CUTOFF=0.7 \
+		ENABLE_ENV_MAPPING=1 \
+		ENABLE_BLOOM=1
+
+# Cinematic mode - Vignette + Film grain
+.PHONY: cinematic-quality
+cinematic-quality: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (Phase 4: Cinematic Quality)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=3 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=4 \
+		GI_INTENSITY=0.4 \
+		ENABLE_SSR=1 \
+		SSR_SAMPLES=16 \
+		SSR_STEP_SIZE=0.01 \
+		SSR_ROUGHNESS_CUTOFF=0.7 \
+		ENABLE_ENV_MAPPING=1 \
+		ENABLE_VIGNETTE=1 \
+		ENABLE_FILM_GRAIN=1
+
+# Phase 4 Complete - All Phase 3.5 features + Phase 4 post-processing
+.PHONY: phase4-complete
+phase4-complete: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building GPU (Phase 4 Complete - All Features)"
+	@echo "=========================================="
+	$(MAKE) interactive-gpu \
+		ENABLE_PBR=1 \
+		ENABLE_MULTIPLE_LIGHTS=3 \
+		ENABLE_TONE_MAPPING=1 \
+		ENABLE_GAMMA_CORRECTION=1 \
+		ENABLE_GI=1 \
+		GI_SAMPLES=4 \
+		GI_INTENSITY=0.4 \
+		ENABLE_SSR=1 \
+		SSR_SAMPLES=16 \
+		SSR_STEP_SIZE=0.01 \
+		SSR_ROUGHNESS_CUTOFF=0.7 \
+		ENABLE_ENV_MAPPING=1 \
+		ENABLE_SSAO=1 \
+		ENABLE_BLOOM=1 \
+		ENABLE_VIGNETTE=1 \
+		ENABLE_FILM_GRAIN=1 \
+		TONE_MAPPING_OPERATOR=1
+
 # ============================================================================
 # PERFORMANCE COMPARISON TARGETS
 # ============================================================================

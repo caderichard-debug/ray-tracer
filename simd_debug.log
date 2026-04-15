@@ -1,0 +1,18 @@
+SIMD compute_phong_shading:
+  ambient = (0.065, 0.005, 0.005)
+  albedo = (0.65, 0.05, 0.05)
+  normal = (0.962068, 0.162041, 0.219474)
+  lights = 1
+SIMD Lighting:
+  light_pos = (0, 18, 0)
+  dot_product = 0.374118
+  in_shadow = checking...
+DEBUG diffuse: light.intensity=(1,1,1)
+DEBUG diffuse: rec.mat->albedo=(0.73,0.73,0.73)
+DEBUG diffuse: diffuse_light=(0.73,0.73,0.73)
+DEBUG diffuse: diffuse_intensity=0.999728
+DEBUG diffuse: diffuse=(0.729801,0.729801,0.729801)
+  ambient = (0.073, 0.073, 0.073)
+  diffuse = (0.729801, 0.729801, 0.729801)
+  specular = (0, 0, 0)
+  final = (0.802801, 0.802801, 0.802801)

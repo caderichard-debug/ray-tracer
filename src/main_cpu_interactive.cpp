@@ -1816,6 +1816,9 @@ int main(int argc, char* argv[]) {
                             need_render = true;
                         } else if (click_result.simd_packets_changed) {
                             // Toggle SIMD packet tracing (disable BVH if enabling SIMD)
+                            std::cout << "SIMD button clicked - current state: " << (ray_renderer.enable_simd_packets ? "ON" : "OFF") << std::endl;
+                            std::cout << "Button value: " << click_result.new_simd_packets << std::endl;
+
                             if (!ray_renderer.enable_simd_packets) {
                                 // Enabling SIMD - disable BVH
                                 ray_renderer.enable_simd_packets = true;
@@ -1827,7 +1830,7 @@ int main(int argc, char* argv[]) {
                                 // Disabling SIMD
                                 ray_renderer.enable_simd_packets = false;
                             }
-                            std::cout << "SIMD packets: " << (ray_renderer.enable_simd_packets ? "ON" : "OFF") << std::endl;
+                            std::cout << "SIMD packets: " << (ray_renderer.enable_simd_packets ? "ON (AVX2 intersection)" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.bvh_changed) {
                             // Toggle BVH acceleration (disable SIMD if enabling BVH)
@@ -2096,12 +2099,27 @@ int main(int argc, char* argv[]) {
                     std::cout << "Wavefront render complete" << std::endl;
 
                 } else if (ray_renderer.enable_simd_packets) {
-                    // SIMD PACKET RENDERING: DISABLED - needs full AVX2 intersection implementation
-                    std::cout << "SIMD packet tracing disabled (not yet performant - falling back to wavefront)" << std::endl;
-                    ray_renderer.enable_simd_packets = false;
-                    ray_renderer.enable_wavefront = true;
+                    // SIMD PACKET RENDERING: AVX2 ray packet tracing
+                    std::cout << "SIMD packet rendering (8 rays × spheres)..." << std::endl;
 
-                    // Fall through to wavefront rendering
+                    std::vector<std::vector<Color>> simd_framebuffer(image_height, std::vector<Color>(image_width));
+                    ray_renderer.render_simd_packets(cam, scene, simd_framebuffer, image_width, image_height, preset.samples);
+
+                    // Convert to SDL framebuffer format
+                    #pragma omp parallel for schedule(dynamic, 4)
+                    for (int j = image_height - 1; j >= 0; --j) {
+                        for (int i = 0; i < image_width; ++i) {
+                            Color pixel_color = simd_framebuffer[j][i];
+
+                            // Write to framebuffer
+                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+                        }
+                    }
+
+                    std::cout << "SIMD packet render complete" << std::endl;
 
                 } else {
                     // STANDARD RENDERING: Original path with optional adaptive sampling

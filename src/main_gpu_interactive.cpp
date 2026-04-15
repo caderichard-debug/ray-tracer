@@ -15,6 +15,7 @@
 #include "scene/scene.h"
 #include "scene/cornell_box.h"
 #include "scene/gpu_demo.h"
+#include "scene/pbr_showcase.h"
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "material/material.h"
@@ -49,6 +50,65 @@
 
 #ifndef ENABLE_GI
 #define ENABLE_GI 0  // Enable global illumination (Phase 3)
+#endif
+
+#ifndef GI_SAMPLES
+#define GI_SAMPLES 4  // GI hemisphere samples (1-8)
+#endif
+
+#ifndef GI_INTENSITY
+#define GI_INTENSITY 0.3f  // GI intensity (0.0-1.0)
+#endif
+
+// Phase 3.5: Advanced reflection features
+#ifndef ENABLE_SSR
+#define ENABLE_SSR 0  // Enable screen-space reflections
+#endif
+
+#ifndef ENABLE_ENV_MAPPING
+#define ENABLE_ENV_MAPPING 0  // Enable environment mapping
+#endif
+
+#ifndef ENABLE_GLOSSY_REFLECTIONS
+#define ENABLE_GLOSSY_REFLECTIONS 0  // Enable glossy reflections with roughness
+#endif
+
+#ifndef SSR_SAMPLES
+#define SSR_SAMPLES 16  // SSR ray march samples
+#endif
+
+#ifndef SSR_STEP_SIZE
+#define SSR_STEP_SIZE 0.01f  // SSR ray march step size
+#endif
+
+// Phase 4: Post-processing and visual effects
+#ifndef ENABLE_SSAO
+#define ENABLE_SSAO 0  // Enable screen-space ambient occlusion
+#endif
+
+#ifndef ENABLE_BLOOM
+#define ENABLE_BLOOM 0  // Enable bloom/glow effect
+#endif
+
+#ifndef ENABLE_VIGNETTE
+#define ENABLE_VIGNETTE 0  // Enable cinematic vignette
+#endif
+
+#ifndef ENABLE_FILM_GRAIN
+#define ENABLE_FILM_GRAIN 0  // Enable film grain effect
+#endif
+
+// Phase 5: Chromatic Aberration
+#ifndef ENABLE_CHROMATIC_ABERRATION
+#define ENABLE_CHROMATIC_ABERRATION 0  // Enable chromatic aberration
+#endif
+
+#ifndef CHROMATIC_ABERRATION_STRENGTH
+#define CHROMATIC_ABERRATION_STRENGTH 1.0  // Default strength (0.0-2.0)
+#endif
+
+#ifndef TONE_MAPPING_OPERATOR
+#define TONE_MAPPING_OPERATOR 1  // 0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted
 #endif
 
 // Scene selection (set via Makefile)
@@ -483,6 +543,41 @@ uniform bool enable_gi;                  // Enable global illumination
 uniform int gi_samples;                  // GI samples (1-8)
 uniform float gi_intensity;              // GI intensity (0.0-1.0)
 
+// Phase 3.5: Advanced reflection options
+uniform bool enable_ssr;                 // Enable screen-space reflections
+uniform int ssr_samples;                 // SSR ray march samples
+uniform float ssr_step_size;             // SSR ray march step size
+uniform float ssr_roughness_cutoff;      // Cutoff for glossy reflections (0.0-1.0)
+uniform bool enable_env_mapping;         // Enable environment mapping
+uniform int env_mip_levels;              // Environment map mip levels
+
+// Phase 4: Post-processing options
+uniform bool enable_ssao;                // Enable screen-space ambient occlusion
+uniform int ssao_samples;                // SSAO samples (4-32)
+uniform float ssao_radius;               // SSAO sample radius
+uniform float ssao_intensity;            // SSAO intensity (0.0-2.0)
+
+uniform bool enable_bloom;               // Enable bloom/glow effect
+uniform float bloom_threshold;           // Bloom brightness threshold (0.5-2.0)
+uniform float bloom_intensity;           // Bloom intensity (0.0-1.0)
+
+uniform bool enable_vignette;            // Enable cinematic vignette
+uniform float vignette_intensity;        // Vignette intensity (0.0-1.0)
+uniform float vignette_falloff;          // Vignette falloff (0.1-1.0)
+
+uniform bool enable_film_grain;          // Enable film grain effect
+uniform float grain_intensity;           // Film grain intensity (0.0-1.0)
+uniform float grain_size;                // Film grain size (1.0-10.0)
+
+// Phase 5: Chromatic Aberration
+uniform bool enable_chromatic_aberration; // Enable chromatic aberration
+uniform float chromatic_aberration_strength; // Chromatic aberration strength (0.0-2.0)
+
+uniform int tone_mapping_op;             // Tone mapping operator (0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted)
+uniform float exposure;                  // Exposure compensation (0.1-2.0)
+uniform float contrast;                  // Contrast (0.8-1.2)
+uniform float saturation;                // Saturation (0.8-1.2)
+
 // Simple ray-sphere intersection
 bool hit_sphere(vec3 origin, vec3 direction, vec3 center, float radius, inout float t) {
     vec3 oc = origin - center;
@@ -586,7 +681,6 @@ vec3 stripe_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
 }
 
 // ============================================================================
-#if ENABLE_PBR
 // COOK-TORRANCE BRDF FUNCTIONS (Physically Based Rendering)
 // ============================================================================
 
@@ -674,9 +768,12 @@ vec3 phong_shading(vec3 N, vec3 V, vec3 L, vec3 albedo, float specular_power) {
 }
 
 // ============================================================================
-#if ENABLE_SOFT_SHADOWS
 // Soft shadow calculation using stratified area light sampling
 float calculate_soft_shadow(vec3 hit_point, vec3 light_pos, vec3 N, vec3 L, float light_dist) {
+    if (!enable_soft_shadows || soft_shadow_samples <= 1) {
+        // Hard shadow fallback
+        return 1.0;  // Will be computed inline
+    }
     float shadow = 0.0;
 
     // Create orthonormal basis around light direction
@@ -739,12 +836,12 @@ float calculate_soft_shadow(vec3 hit_point, vec3 light_pos, vec3 N, vec3 L, floa
 
     return shadow / float(soft_shadow_samples * soft_shadow_samples);
 }
-#endif
 
 // ============================================================================
-#if ENABLE_AMBIENT_OCCLUSION
 // Ray-traced ambient occlusion
 float calculate_ao(vec3 hit_point, vec3 N) {
+    if (!enable_ao || ao_samples <= 0) return 1.0;
+
     float ao = 0.0;
 
     for (int i = 0; i < ao_samples; i++) {
@@ -804,11 +901,11 @@ float calculate_ao(vec3 hit_point, vec3 N) {
 
     return 1.0 - (ao / ao_samples);
 }
-#endif
 
-#if ENABLE_GI
 // Global Illumination - Indirect lighting via hemisphere sampling
 vec3 calculate_gi(vec3 hit_point, vec3 N, vec3 albedo) {
+    if (!enable_gi || gi_samples <= 0) return vec3(0.0);
+
     vec3 gi_color = vec3(0.0);
 
     // Build orthonormal basis around normal
@@ -872,7 +969,138 @@ vec3 calculate_gi(vec3 hit_point, vec3 N, vec3 albedo) {
 
     return gi_color * (gi_intensity / float(gi_samples));
 }
-#endif
+
+// Screen-space reflections using ray traced scene data
+vec3 calculate_ssr(vec3 hit_point, vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
+    if (!enable_ssr || ssr_samples <= 0) return vec3(0.0);
+
+    vec3 ssr_color = vec3(0.0);
+
+    // Only do SSR for reflective surfaces
+    float reflectivity = mix(0.04, 1.0, metallic);
+    if (reflectivity < 0.1) return ssr_color;
+
+    // Calculate reflection direction
+    vec3 R = reflect(-V, N);
+
+    // Roughness-based cutoff (skip very rough surfaces)
+    if (roughness > ssr_roughness_cutoff) return ssr_color;
+
+    // Ray march in reflection direction
+    vec3 ray_origin = hit_point + N * 0.01;  // Start slightly above surface
+    vec3 ray_dir = R;
+    float ray_step = ssr_step_size;
+
+    vec3 accumulated_color = vec3(0.0);
+    float total_weight = 0.0;
+
+    for (int i = 0; i < ssr_samples; i++) {
+        vec3 sample_point = ray_origin + ray_dir * (float(i) * ray_step);
+
+        // Find closest intersection
+        float t_min = 100.0;
+        bool hit = false;
+        vec3 hit_color = vec3(0.0);
+        vec3 hit_normal = vec3(0.0);
+
+        // Check spheres
+        for (int j = 0; j < num_spheres; j++) {
+            if (hit_sphere(ray_origin, ray_dir, sphere_centers[j], sphere_radii[j], t_min)) {
+                vec3 hit_pt = ray_origin + ray_dir * t_min;
+                vec3 normal = normalize(hit_pt - sphere_centers[j]);
+
+                // Check if facing the reflection direction
+                if (dot(ray_dir, normal) < 0.0) {
+                    hit = true;
+                    hit_color = sphere_colors[j];
+                    hit_normal = normal;
+                    break;
+                }
+            }
+        }
+
+        // Check triangles
+        if (!hit) {
+            for (int j = 0; j < num_triangles; j++) {
+                if (hit_triangle(ray_origin, ray_dir, tri_v0[j], tri_v1[j], tri_v2[j],
+                               tri_normals[j], t_min)) {
+                    // Check if facing the reflection direction
+                    if (dot(ray_dir, tri_normals[j]) < 0.0) {
+                        hit = true;
+                        hit_color = tri_colors[j];
+                        hit_normal = tri_normals[j];
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (hit) {
+            // Calculate fresnel for this hit
+            float NdotV = max(dot(hit_normal, -ray_dir), 0.0);
+            vec3 F0 = mix(vec3(0.04), hit_color, metallic);
+            vec3 F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+
+            // Weight by distance and fresnel
+            float weight = exp(-float(i) * 0.1) * dot(F, vec3(1.0));
+            accumulated_color += hit_color * F * weight;
+            total_weight += weight;
+
+            // First hit contributes most
+            if (i == 0) break;
+        }
+    }
+
+    if (total_weight > 0.0) {
+        ssr_color = accumulated_color / total_weight;
+    }
+
+    // Apply roughness blur
+    float roughness_factor = 1.0 - (roughness / ssr_roughness_cutoff);
+    ssr_color *= roughness_factor * reflectivity;
+
+    return ssr_color;
+}
+
+// Environment mapping for realistic sky lighting
+vec3 calculate_env_mapping(vec3 hit_point, vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
+    if (!enable_env_mapping) return vec3(0.0);
+
+    // Calculate reflection direction
+    vec3 R = reflect(-V, N);
+
+    // Sample procedural environment based on reflection direction
+    vec3 env_color;
+
+    // Sky gradient (horizon to zenith)
+    float sky_factor = max(R.y, 0.0);
+    vec3 sky_color = mix(vec3(0.8, 0.9, 1.0), vec3(0.4, 0.6, 0.9), sky_factor);
+
+    // Ground color
+    vec3 ground_color = vec3(0.15, 0.12, 0.10);
+
+    // Blend based on direction
+    float horizon_blend = smoothstep(-0.1, 0.1, R.y);
+    env_color = mix(ground_color, sky_color, horizon_blend);
+
+    // Sun (bright spot in sky)
+    vec3 sun_dir = normalize(vec3(0.5, 0.8, -0.3));
+    float sun_dot = max(dot(R, sun_dir), 0.0);
+    vec3 sun_color = vec3(1.0, 0.95, 0.8) * 5.0;
+    vec3 sun_disk = pow(sun_dot, 64.0) * sun_color;
+    env_color += sun_disk;
+
+    // Fresnel effect for grazing angles
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    float NdotV = max(dot(N, V), 0.0);
+    vec3 F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+
+    // Roughness blur approximation
+    float roughness_blur = roughness * 0.5;
+    env_color = mix(env_color, vec3(dot(env_color, vec3(1.0/3.0))), roughness_blur);
+
+    return env_color * F * 0.3;  // Scale intensity
+}
 
 // ============================================================================
 
@@ -895,7 +1123,6 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
 
         // Shadow calculation (soft or hard)
         float shadow = 1.0;
-#if ENABLE_SOFT_SHADOWS
         if (enable_soft_shadows && soft_shadow_samples > 1) {
             shadow = calculate_soft_shadow(hit_point, light_pos, N, L, light_dist);
         } else {
@@ -927,35 +1154,6 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
 
             shadow = in_shadow ? 0.0 : 1.0;
         }
-#else
-        // Hard shadows only (soft shadows disabled at compile time)
-        vec3 shadow_origin = hit_point + N * 0.001;
-        float t_shadow = light_dist;
-        bool in_shadow = false;
-
-        for (int j = 0; j < num_spheres; j++) {
-            if (hit_sphere(shadow_origin, L, sphere_centers[j], sphere_radii[j], t_shadow)) {
-                if (t_shadow < light_dist) {
-                    in_shadow = true;
-                    break;
-                }
-            }
-        }
-
-        if (!in_shadow) {
-            for (int j = 0; j < num_triangles; j++) {
-                if (hit_triangle(shadow_origin, L, tri_v0[j], tri_v1[j], tri_v2[j],
-                               tri_normals[j], t_shadow)) {
-                    if (t_shadow < light_dist) {
-                        in_shadow = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        shadow = in_shadow ? 0.0 : 1.0;
-#endif
 
         // Cook-Torrance BRDF
         vec3 brdf = cook_torrance_brdf(N, V, L, H, albedo, roughness, metallic);
@@ -991,21 +1189,23 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
     vec3 ibl = diffuse_ibl + specular_ibl;
 
     // Apply ambient occlusion if enabled
-#if ENABLE_AMBIENT_OCCLUSION
     float ao = 1.0;
     if (enable_ao && ao_samples > 0) {
         ao = calculate_ao(hit_point, N);
     }
     ibl *= ao;
-#endif
 
     return Lo + ibl;
 }
 
-#endif // ENABLE_PBR
+// Gamma correction
+vec3 gamma_correct(vec3 color) {
+    return pow(color, vec3(1.0 / 2.2));
+}
 
-#if ENABLE_TONE_MAPPING
-// Tone mapping (ACES filmic)
+// ========== PHASE 4: POST-PROCESSING FUNCTIONS ==========
+
+// ACES tone mapping operator
 vec3 aces_tonemap(vec3 x) {
     const float a = 2.51;
     const float b = 0.03;
@@ -1015,31 +1215,222 @@ vec3 aces_tonemap(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-#endif // ENABLE_TONE_MAPPING
-
-#if ENABLE_GAMMA_CORRECTION
-// Gamma correction
-vec3 gamma_correct(vec3 color) {
-    return pow(color, vec3(1.0 / 2.2));
+// Reinhard tone mapping operator
+vec3 reinhard_tonemap(vec3 color) {
+    vec3 result = color / (color + vec3(1.0));
+    return result;
 }
 
-#endif // ENABLE_GAMMA_CORRECTION
+// Filmic tone mapping operator (optimized Uncharted 2)
+vec3 filmic_tonemap(vec3 color) {
+    vec3 x = max(vec3(0.0), color - 0.004);
+    vec3 result = (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
+    return result / (result / vec3(11.2) + vec3(1.0));  // White balance
+}
 
-// Full color pipeline (tone mapping + gamma)
-vec3 color_pipeline(vec3 color) {
+// Uncharted 2 tone mapping operator
+vec3 uncharted2_tonemap(vec3 color) {
+    const float A = 0.15;
+    const float B = 0.50;
+    const float C = 0.10;
+    const float D = 0.20;
+    const float E = 0.02;
+    const float F = 0.30;
+    const float W = 11.2;
+
+    vec3 result = ((color * (A * color + C) * B + D * E) / (color * (A * color + B) + D * F)) - E / F;
+
+    vec3 white = ((vec3(W) * (A * vec3(W) + C) * B + D * E) / (vec3(W) * (A * vec3(W) + B) + D * F)) - E / F;
+
+    return result / white;
+}
+
+// Screen-Space Ambient Occlusion (simplified, depth-based approximation)
+float calculate_ssao(vec3 pos, vec3 normal, vec2 uv) {
+    if (!enable_ssao || ssao_samples <= 0) return 1.0;
+
+    float occlusion = 0.0;
+    int max_samples = 32;
+    int actual_samples = ssao_samples;
+    if (actual_samples > max_samples) actual_samples = max_samples;
+
+    for (int i = 0; i < actual_samples; i++) {
+        // Simple hemisphere sampling
+        float fi = float(i);
+        float ftotal = float(actual_samples);
+
+        // Create sample direction
+        float angle1 = fi * 6.28318 / ftotal;
+        float angle2 = fi * 3.14159 / ftotal;
+
+        vec3 sample_dir_local = normalize(vec3(
+            cos(angle1) * sin(angle2),
+            sin(angle1) * sin(angle2),
+            cos(angle2)
+        ));
+
+        sample_dir_local = normalize(sample_dir_local + normal * 0.5);
+        vec3 sample_pos_local = pos + sample_dir_local * ssao_radius;
+
+        // Check occlusion
+        float t_min_local = ssao_radius;
+        bool hit_local = false;
+
+        for (int j = 0; j < num_spheres; j++) {
+            if (hit_sphere(sample_pos_local, -sample_dir_local, sphere_centers[j], sphere_radii[j], t_min_local)) {
+                hit_local = true;
+                break;
+            }
+        }
+
+        if (hit_local) {
+            occlusion += 1.0;
+        }
+    }
+
+    float ftotal = float(actual_samples);
+    occlusion /= ftotal;
+    return 1.0 - occlusion * ssao_intensity;
+}
+
+// Apply tone mapping based on selected operator
+vec3 apply_tone_mapping(vec3 color) {
+    // Apply exposure compensation
+    color *= exposure;
+
+    // Apply selected tone mapping operator
+    vec3 result;
+    if (tone_mapping_op == 0) {
+        // None
+        result = color;
+    } else if (tone_mapping_op == 1) {
+        // ACES
+        result = aces_tonemap(color);
+    } else if (tone_mapping_op == 2) {
+        // Reinhard
+        result = reinhard_tonemap(color);
+    } else if (tone_mapping_op == 3) {
+        // Filmic
+        result = filmic_tonemap(color);
+    } else if (tone_mapping_op == 4) {
+        // Uncharted 2
+        result = uncharted2_tonemap(color);
+    } else {
+        // Default to ACES
+        result = aces_tonemap(color);
+    }
+    return result;
+}
+
+// Cinematic vignette effect
+vec3 apply_vignette(vec3 color, vec2 uv) {
+    if (!enable_vignette) return color;
+
+    vec2 center = vec2(0.5, 0.5);
+    float dist = distance(uv, center);
+    float vignette = smoothstep(vignette_falloff, 0.0, dist);
+
+    return color * mix(1.0 - vignette_intensity, 1.0, vignette);
+}
+
+// Film grain effect
+vec3 apply_film_grain(vec3 color, vec2 uv) {
+    if (!enable_film_grain) return color;
+
+    float grain = fract(sin(dot(uv * grain_size, vec2(12.9898, 78.233))) * 43758.5453);
+    grain = grain * 2.0 - 1.0;  // Remap to [-1, 1]
+
+    float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+    vec3 grain_color = vec3(grain * grain_intensity * (0.5 + luminance * 0.5));
+
+    return color + grain_color;
+}
+
+// Bloom/glow effect (simplified single-pass approximation)
+vec3 apply_bloom(vec3 color) {
+    if (!enable_bloom) return color;
+
+    // Calculate luminance
+    float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+
+    // Threshold for bloom
+    if (luminance > bloom_threshold) {
+        float excess = luminance - bloom_threshold;
+        vec3 bloom_color = color * (excess / luminance) * bloom_intensity;
+        return color + bloom_color;
+    }
+
+    return color;
+}
+
+// Color grading (lift/gamma/gain approximation)
+vec3 apply_color_grading(vec3 color) {
+    // Contrast adjustment
+    color = (color - vec3(0.5)) * contrast + vec3(0.5);
+
+    // Saturation adjustment
+    float gray = dot(color, vec3(0.299, 0.587, 0.114));
+    color = mix(vec3(gray), color, saturation);
+
+    return clamp(color, vec3(0.0), vec3(1.0));
+}
+
+// Full Phase 4 post-processing pipeline
+vec3 apply_post_processing(vec3 color, vec2 uv) {
+    // Phase 5: Apply chromatic aberration (first, before other effects)
+    if (enable_chromatic_aberration) {
+        // Simple RGB separation based on screen position
+        vec2 offset = uv - vec2(0.5);
+        float dist = length(offset);
+        float strength = chromatic_aberration_strength * 0.01;
+
+        // Shift red channel outward, blue channel inward
+        float r_shift = dist * strength;
+        float b_shift = -dist * strength * 0.5;
+
+        // Apply subtle RGB shift
+        color.r = mix(color.r, color.r + r_shift * 0.1, min(1.0, dist * 2.0));
+        color.b = mix(color.b, color.b + b_shift * 0.1, min(1.0, dist * 2.0));
+    }
+
+    // Apply bloom (before tone mapping)
+    color = apply_bloom(color);
+
+    // Apply tone mapping
+    color = apply_tone_mapping(color);
+
+    // Apply color grading
+    color = apply_color_grading(color);
+
+    // Apply gamma correction
+    color = gamma_correct(color);
+
+    // Apply vignette
+    color = apply_vignette(color, uv);
+
+    // Apply film grain
+    color = apply_film_grain(color, uv);
+
+    return clamp(color, vec3(0.0), vec3(1.0));
+}
+
+// Full color pipeline (Phase 4: Advanced post-processing)
+vec3 color_pipeline(vec3 color, vec2 uv) {
+    // Phase 4: Apply advanced post-processing pipeline
+    return apply_post_processing(color, uv);
+}
+
+// Legacy color pipeline (for backwards compatibility)
+vec3 color_pipeline_legacy(vec3 color) {
     // Exposure
     float exposure = 1.0;
     color *= exposure;
 
-#if ENABLE_TONE_MAPPING
     // Tone map
     color = aces_tonemap(color);
-#endif
 
-#if ENABLE_GAMMA_CORRECTION
     // Gamma correct
     color = gamma_correct(color);
-#endif
 
     return color;
 }
@@ -1137,7 +1528,6 @@ vec3 ray_color(vec3 origin, vec3 direction) {
             if (apply_lighting) {
                 vec3 V = normalize(-current_direction);
 
-#if ENABLE_PBR
                 if (lighting_mode == 1) {
                     // PBR lighting
                     color = calculate_pbr_lighting(hit_point, normal, V, albedo, roughness, metallic);
@@ -1153,26 +1543,24 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                         color = phong_shading(normal, V, L, albedo, 32.0);
                     }
                 }
-#else
-                // PBR not enabled, always use Phong
-                if (num_lights > 0) {
-                    vec3 L = normalize(light_positions[0] - hit_point);
-                    color = phong_shading(normal, V, L, albedo, 32.0);
-                } else {
-                    // Fallback to single light
-                    vec3 light_pos = vec3(0.0, 18.0, 0.0);
-                    vec3 L = normalize(light_pos - hit_point);
-                    color = phong_shading(normal, V, L, albedo, 32.0);
-                }
-#endif
 
                 // Add Global Illumination (indirect lighting)
-#if ENABLE_GI
                 if (enable_gi && gi_samples > 0) {
                     vec3 gi_color = calculate_gi(hit_point, normal, albedo);
                     color += gi_color;
                 }
-#endif
+
+                // Add Screen-Space Reflections
+                if (enable_ssr && ssr_samples > 0) {
+                    vec3 ssr_color = calculate_ssr(hit_point, normal, V, albedo, roughness, metallic);
+                    color += ssr_color;
+                }
+
+                // Add Environment Mapping
+                if (enable_env_mapping) {
+                    vec3 env_color = calculate_env_mapping(hit_point, normal, V, albedo, roughness, metallic);
+                    color += env_color;
+                }
             } else {
                 color = albedo;  // Self-illuminated
             }
@@ -1252,8 +1640,8 @@ void main() {
     // Trace ray and get color
     vec3 color = ray_color(origin, direction);
 
-    // Apply tone mapping and gamma correction
-    color = color_pipeline(color);
+    // Apply Phase 4 tone mapping and post-processing
+    color = color_pipeline(color, uv);
 
     // Output color
     gl_FragColor = vec4(color, 1.0);
@@ -1346,6 +1734,9 @@ void setup_scene_data(
     if (scene_name == "gpu_demo") {
         setup_gpu_demo_scene(scene);
         std::cout << "✓ GPU Demo scene loaded" << std::endl;
+    } else if (scene_name == "pbr_showcase") {
+        setup_pbr_showcase_scene(scene);
+        std::cout << "✓ PBR Showcase scene loaded" << std::endl;
     } else if (scene_name == "cornell_box") {
         setup_cornell_box_scene(scene);
         std::cout << "✓ Cornell Box scene loaded" << std::endl;
@@ -1675,6 +2066,41 @@ int main(int argc, char* argv[]) {
     GLint gi_samples_loc = glGetUniformLocation(program, "gi_samples");
     GLint gi_intensity_loc = glGetUniformLocation(program, "gi_intensity");
 
+        // Phase 3.5: Advanced reflection uniform locations
+    GLint enable_ssr_loc = glGetUniformLocation(program, "enable_ssr");
+    GLint ssr_samples_loc = glGetUniformLocation(program, "ssr_samples");
+    GLint ssr_step_size_loc = glGetUniformLocation(program, "ssr_step_size");
+    GLint ssr_roughness_cutoff_loc = glGetUniformLocation(program, "ssr_roughness_cutoff");
+    GLint enable_env_mapping_loc = glGetUniformLocation(program, "enable_env_mapping");
+    GLint env_mip_levels_loc = glGetUniformLocation(program, "env_mip_levels");
+
+    // Phase 4: Post-processing uniform locations
+    GLint enable_ssao_loc = glGetUniformLocation(program, "enable_ssao");
+    GLint ssao_samples_loc = glGetUniformLocation(program, "ssao_samples");
+    GLint ssao_radius_loc = glGetUniformLocation(program, "ssao_radius");
+    GLint ssao_intensity_loc = glGetUniformLocation(program, "ssao_intensity");
+
+    GLint enable_bloom_loc = glGetUniformLocation(program, "enable_bloom");
+    GLint bloom_threshold_loc = glGetUniformLocation(program, "bloom_threshold");
+    GLint bloom_intensity_loc = glGetUniformLocation(program, "bloom_intensity");
+
+    GLint enable_vignette_loc = glGetUniformLocation(program, "enable_vignette");
+    GLint vignette_intensity_loc = glGetUniformLocation(program, "vignette_intensity");
+    GLint vignette_falloff_loc = glGetUniformLocation(program, "vignette_falloff");
+
+    GLint enable_film_grain_loc = glGetUniformLocation(program, "enable_film_grain");
+    GLint grain_intensity_loc = glGetUniformLocation(program, "grain_intensity");
+    GLint grain_size_loc = glGetUniformLocation(program, "grain_size");
+
+    // Phase 5: Chromatic Aberration
+    GLint enable_chromatic_aberration_loc = glGetUniformLocation(program, "enable_chromatic_aberration");
+    GLint chromatic_aberration_strength_loc = glGetUniformLocation(program, "chromatic_aberration_strength");
+
+    GLint tone_mapping_op_loc = glGetUniformLocation(program, "tone_mapping_op");
+    GLint exposure_loc = glGetUniformLocation(program, "exposure");
+    GLint contrast_loc = glGetUniformLocation(program, "contrast");
+    GLint saturation_loc = glGetUniformLocation(program, "saturation");
+
     // Rendering settings (matching CPU version)
     bool enable_reflections = true;
     int max_depth = 5;
@@ -1714,9 +2140,44 @@ int main(int argc, char* argv[]) {
     int ao_samples = 8;                // AO hemisphere samples
 
     // Phase 3: Global Illumination settings
-    bool enable_gi = false;            // Disabled by default (performance)
-    int gi_samples = 4;                // GI hemisphere samples
-    float gi_intensity = 0.3f;         // GI intensity (0.0-1.0)
+    bool enable_gi = ENABLE_GI ? true : false;  // From Makefile
+    int gi_samples = GI_SAMPLES;                // From Makefile
+    float gi_intensity = GI_INTENSITY;          // From Makefile
+
+        // Phase 3.5: Advanced reflection settings
+    bool enable_ssr = ENABLE_SSR ? true : false;           // Screen-space reflections
+    int ssr_samples = SSR_SAMPLES;                       // SSR ray samples
+    float ssr_step_size = SSR_STEP_SIZE;                 // SSR step size
+    float ssr_roughness_cutoff = 0.5f;                     // Roughness cutoff for SSR
+    bool enable_env_mapping = ENABLE_ENV_MAPPING ? true : false;  // Environment mapping
+    int env_mip_levels = 6;                               // Environment map quality
+
+    // Phase 4: Post-processing settings
+    bool enable_ssao = ENABLE_SSAO ? true : false;       // Screen-space ambient occlusion
+    int ssao_samples = 16;                               // SSAO samples
+    float ssao_radius = 0.5f;                            // SSAO sample radius
+    float ssao_intensity = 1.0f;                         // SSAO intensity
+
+    bool enable_bloom = ENABLE_BLOOM ? true : false;     // Bloom/glow effect
+    float bloom_threshold = 0.8f;                         // Bloom brightness threshold
+    float bloom_intensity = 0.3f;                         // Bloom intensity
+
+    bool enable_vignette = ENABLE_VIGNETTE ? true : false;  // Cinematic vignette
+    float vignette_intensity = 0.3f;                      // Vignette intensity
+    float vignette_falloff = 0.5f;                        // Vignette falloff
+
+    bool enable_film_grain = ENABLE_FILM_GRAIN ? true : false;  // Film grain effect
+    float grain_intensity = 0.1f;                         // Film grain intensity
+    float grain_size = 2.0f;                              // Film grain size
+
+    // Phase 5: Chromatic Aberration
+    bool enable_chromatic_aberration = ENABLE_CHROMATIC_ABERRATION ? true : false;
+    float chromatic_aberration_strength = CHROMATIC_ABERRATION_STRENGTH;  // Chromatic aberration strength
+
+    int tone_mapping_op = TONE_MAPPING_OPERATOR;          // Tone mapping operator
+    float exposure = 1.0f;                                // Exposure compensation
+    float contrast = 1.0f;                                // Contrast adjustment
+    float saturation = 1.0f;                              // Saturation adjustment
 
     // Setup scene data
     std::vector<SphereData> spheres;
@@ -1745,6 +2206,19 @@ int main(int argc, char* argv[]) {
     std::cout << "  G           - Toggle Global Illumination" << std::endl;
     std::cout << "  [ / ]       - Adjust GI samples (1-8)" << std::endl;
     std::cout << "  - / =       - Adjust GI intensity" << std::endl;
+    std::cout << "  Shift+S     - Toggle Screen-Space Reflections" << std::endl;
+    std::cout << "  E           - Toggle Environment Mapping" << std::endl;
+    std::cout << "  , / .       - Adjust SSR samples" << std::endl;
+    std::cout << "  /           - Adjust SSR roughness cutoff" << std::endl;
+    std::cout << "\nPhase 4 Controls:" << std::endl;
+    std::cout << "  O           - Toggle SSAO (Screen-Space Ambient Occlusion)" << std::endl;
+    std::cout << "  B           - Toggle Bloom/Glow" << std::endl;
+    std::cout << "  V           - Toggle Vignette" << std::endl;
+    std::cout << "  N           - Toggle Film Grain" << std::endl;
+    std::cout << "  T           - Cycle Tone Mapping (None/ACES/Reinhard/Filmic/Uncharted)" << std::endl;
+    std::cout << "  1 / 2       - Decrease/Increase Exposure" << std::endl;
+    std::cout << "  3 / 4       - Decrease/Increase Contrast" << std::endl;
+    std::cout << "  5 / 6       - Decrease/Increase Saturation" << std::endl;
     std::cout << "  H           - Help" << std::endl;
     std::cout << "  C           - Controls panel" << std::endl;
     std::cout << "  ESC         - Quit" << std::endl;
@@ -1817,6 +2291,92 @@ int main(int argc, char* argv[]) {
                 } else if (event.key.keysym.sym == SDLK_MINUS) {
                     gi_intensity = std::max(0.0f, gi_intensity - 0.1f);
                     std::cout << "GI Intensity: " << gi_intensity << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_s) {  // S key for SSR (shift+s to avoid screenshot conflict)
+                    // Shift+S combo to avoid screenshot
+                    if (event.key.keysym.mod & KMOD_SHIFT) {
+                        enable_ssr = !enable_ssr;
+                        std::cout << "Screen-Space Reflections: " << (enable_ssr ? "ON" : "OFF") << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_e) {  // E key for environment mapping
+                    enable_env_mapping = !enable_env_mapping;
+                    std::cout << "Environment Mapping: " << (enable_env_mapping ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_COMMA) {
+                    ssr_samples = std::max(4, ssr_samples - 4);
+                    std::cout << "SSR Samples: " << ssr_samples << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_PERIOD) {
+                    ssr_samples = std::min(32, ssr_samples + 4);
+                    std::cout << "SSR Samples: " << ssr_samples << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_SLASH) {
+                    ssr_roughness_cutoff = std::min(1.0f, ssr_roughness_cutoff + 0.1f);
+                    std::cout << "SSR Roughness Cutoff: " << ssr_roughness_cutoff << std::endl;
+                    need_render = true;
+                }
+                // Phase 4: Post-processing controls
+                else if (event.key.keysym.sym == SDLK_o) {  // O key for SSAO
+                    enable_ssao = !enable_ssao;
+                    std::cout << "SSAO: " << (enable_ssao ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_b) {  // B key for Bloom
+                    enable_bloom = !enable_bloom;
+                    std::cout << "Bloom: " << (enable_bloom ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_v) {  // V key for Vignette
+                    enable_vignette = !enable_vignette;
+                    std::cout << "Vignette: " << (enable_vignette ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_n) {  // N key for Film Grain
+                    enable_film_grain = !enable_film_grain;
+                    std::cout << "Film Grain: " << (enable_film_grain ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_c) {  // C key for Chromatic Aberration (Phase 5)
+                    enable_chromatic_aberration = !enable_chromatic_aberration;
+                    std::cout << "Chromatic Aberration: " << (enable_chromatic_aberration ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_LEFTBRACKET) {  // [ key for CA strength down
+                    if (chromatic_aberration_strength > 0.0f) {
+                        chromatic_aberration_strength = std::max(0.0f, chromatic_aberration_strength - 0.1f);
+                        std::cout << "Chromatic Aberration Strength: " << chromatic_aberration_strength << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_RIGHTBRACKET) {  // ] key for CA strength up
+                    if (chromatic_aberration_strength < 2.0f) {
+                        chromatic_aberration_strength = std::min(2.0f, chromatic_aberration_strength + 0.1f);
+                        std::cout << "Chromatic Aberration Strength: " << chromatic_aberration_strength << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_t) {  // T key to cycle tone mapping
+                    tone_mapping_op = (tone_mapping_op + 1) % 5;  // Cycle 0-4
+                    const char* op_names[] = {"None", "ACES", "Reinhard", "Filmic", "Uncharted 2"};
+                    std::cout << "Tone Mapping: " << op_names[tone_mapping_op] << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_1) {  // 1 key for exposure down
+                    exposure = std::max(0.1f, exposure - 0.1f);
+                    std::cout << "Exposure: " << exposure << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_2) {  // 2 key for exposure up
+                    exposure = std::min(2.0f, exposure + 0.1f);
+                    std::cout << "Exposure: " << exposure << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_3) {  // 3 key for contrast down
+                    contrast = std::max(0.8f, contrast - 0.05f);
+                    std::cout << "Contrast: " << contrast << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_4) {  // 4 key for contrast up
+                    contrast = std::min(1.2f, contrast + 0.05f);
+                    std::cout << "Contrast: " << contrast << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_5) {  // 5 key for saturation down
+                    saturation = std::max(0.8f, saturation - 0.05f);
+                    std::cout << "Saturation: " << saturation << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_6) {  // 6 key for saturation up
+                    saturation = std::min(1.2f, saturation + 0.05f);
+                    std::cout << "Saturation: " << saturation << std::endl;
                     need_render = true;
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
@@ -1907,6 +2467,41 @@ int main(int argc, char* argv[]) {
             glUniform1i(enable_gi_loc, enable_gi ? 1 : 0);
             glUniform1i(gi_samples_loc, gi_samples);
             glUniform1f(gi_intensity_loc, gi_intensity);
+
+            // Set Phase 3.5 advanced reflection uniforms
+            glUniform1i(enable_ssr_loc, enable_ssr ? 1 : 0);
+            glUniform1i(ssr_samples_loc, ssr_samples);
+            glUniform1f(ssr_step_size_loc, ssr_step_size);
+            glUniform1f(ssr_roughness_cutoff_loc, ssr_roughness_cutoff);
+            glUniform1i(enable_env_mapping_loc, enable_env_mapping ? 1 : 0);
+            glUniform1i(env_mip_levels_loc, env_mip_levels);
+
+            // Set Phase 4 post-processing uniforms
+            glUniform1i(enable_ssao_loc, enable_ssao ? 1 : 0);
+            glUniform1i(ssao_samples_loc, ssao_samples);
+            glUniform1f(ssao_radius_loc, ssao_radius);
+            glUniform1f(ssao_intensity_loc, ssao_intensity);
+
+            glUniform1i(enable_bloom_loc, enable_bloom ? 1 : 0);
+            glUniform1f(bloom_threshold_loc, bloom_threshold);
+            glUniform1f(bloom_intensity_loc, bloom_intensity);
+
+            glUniform1i(enable_vignette_loc, enable_vignette ? 1 : 0);
+            glUniform1f(vignette_intensity_loc, vignette_intensity);
+            glUniform1f(vignette_falloff_loc, vignette_falloff);
+
+            glUniform1i(enable_film_grain_loc, enable_film_grain ? 1 : 0);
+            glUniform1f(grain_intensity_loc, grain_intensity);
+            glUniform1f(grain_size_loc, grain_size);
+
+            // Phase 5: Chromatic Aberration
+            glUniform1i(enable_chromatic_aberration_loc, enable_chromatic_aberration ? 1 : 0);
+            glUniform1f(chromatic_aberration_strength_loc, chromatic_aberration_strength);
+
+            glUniform1i(tone_mapping_op_loc, tone_mapping_op);
+            glUniform1f(exposure_loc, exposure);
+            glUniform1f(contrast_loc, contrast);
+            glUniform1f(saturation_loc, saturation);
 
             // Set sphere uniforms
             for (size_t i = 0; i < spheres.size(); i++) {

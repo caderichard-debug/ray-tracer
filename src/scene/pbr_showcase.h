@@ -2,117 +2,197 @@
 #define PBR_SHOWCASE_H
 
 #include "scene.h"
-#include "primitives/sphere.h"
 #include "material/material.h"
 #include "texture/texture.h"
-#include "math/vec3.h"
+#include "primitives/sphere.h"
+#include "primitives/triangle.h"
+#include "light.h"
+#include <memory>
+#include <algorithm>
 
 // PBR Showcase Scene - Demonstrates material quality differences
-// This scene is designed to show off the Cook-Torrance BRDF capabilities
+// This scene is designed to show off the PBR capabilities
 
 inline void setup_pbr_showcase_scene(Scene& scene) {
-    // Ground plane (matte gray)
-    auto ground_mat = std::make_shared<Lambertian>(Color3(0.5, 0.5, 0.5));
-    ground_mat->name = "Ground";
-    scene.add(std::make_shared<Sphere>(Point3(0, -100.5, 0), 100, ground_mat));
+    scene.ambient_light = Color(0.1f, 0.1f, 0.1f);
 
-    // Background wall (matte white)
-    auto wall_mat = std::make_shared<Lambertian>(Color3(0.8, 0.8, 0.8));
-    wall_mat->name = "Wall";
-    scene.add(std::make_shared<Sphere>(Point3(0, 0, -105), 100, wall_mat));
+    // Ground plane (checkerboard texture - classic marble floor look)
+    auto checker_floor = std::make_shared<CheckerTexture>(
+        std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.8f)),  // White marble
+        std::make_shared<SolidColor>(Color(0.2f, 0.2f, 0.2f)),  // Dark marble
+        8.0f  // Checker size
+    );
+    auto ground_mat = std::make_shared<Lambertian>(checker_floor);
+    scene.add_object(std::make_shared<Sphere>(Point3(0, -100.5, 0), 100, ground_mat));
+
+    // Background wall (gradient texture - sunset effect)
+    auto gradient_wall = std::make_shared<GradientTexture>(
+        Color(0.1f, 0.1f, 0.3f),  // Deep blue at top
+        Color(0.8f, 0.5f, 0.3f),  // Orange at bottom
+        Vec3(0, 1, 0),            // Vertical gradient
+        0.1f                      // Fine scale
+    );
+    auto wall_mat = std::make_shared<Lambertian>(gradient_wall);
+    scene.add_object(std::make_shared<Sphere>(Point3(0, 0, -105), 100, wall_mat));
 
     // === ROUGHNESS SWEEP (Left to Right) ===
     // Shows roughness from 0.0 (mirror) to 1.0 (matte)
 
     // Mirror (roughness = 0.0, metallic = 1.0)
-    auto mirror_mat = std::make_shared<Metal>(Color3(0.95, 0.95, 0.95), 0.0);
-    mirror_mat->name = "Mirror_R0.0";
-    scene.add(std::make_shared<Sphere>(Point3(-4.5, 0, 0), 0.5, mirror_mat));
+    auto mirror_mat = std::make_shared<Metal>(Color(0.95f, 0.95f, 0.95f), 0.0);
+    scene.add_object(std::make_shared<Sphere>(Point3(-4.5, 0.5, 0), 0.5, mirror_mat));
 
     // Polished metal (roughness = 0.1, metallic = 1.0)
-    auto polished_metal_mat = std::make_shared<Metal>(Color3(0.9, 0.9, 0.9), 0.05);
-    polished_metal_mat->name = "Polished_R0.1";
-    scene.add(std::make_shared<Sphere>(Point3(-3.5, 0, 0), 0.5, polished_metal_mat));
+    auto polished_metal_mat = std::make_shared<Metal>(Color(0.9f, 0.9f, 0.9f), 0.05);
+    scene.add_object(std::make_shared<Sphere>(Point3(-3.5, 0.5, 0), 0.5, polished_metal_mat));
 
     // Glossy metal (roughness = 0.3, metallic = 1.0)
-    auto glossy_metal_mat = std::make_shared<Metal>(Color3(0.85, 0.85, 0.85), 0.15);
-    glossy_metal_mat->name = "Glossy_R0.3";
-    scene.add(std::make_shared<Sphere>(Point3(-2.5, 0, 0), 0.5, glossy_metal_mat));
+    auto glossy_metal_mat = std::make_shared<Metal>(Color(0.85f, 0.85f, 0.85f), 0.15);
+    scene.add_object(std::make_shared<Sphere>(Point3(-2.5, 0.5, 0), 0.5, glossy_metal_mat));
 
     // Medium metal (roughness = 0.5, metallic = 1.0)
-    auto medium_metal_mat = std::make_shared<Metal>(Color3(0.8, 0.8, 0.8), 0.25);
-    medium_metal_mat->name = "Medium_R0.5";
-    scene.add(std::make_shared<Sphere>(Point3(-1.5, 0, 0), 0.5, medium_metal_mat));
+    auto medium_metal_mat = std::make_shared<Metal>(Color(0.8f, 0.8f, 0.8f), 0.25);
+    scene.add_object(std::make_shared<Sphere>(Point3(-1.5, 0.5, 0), 0.5, medium_metal_mat));
 
     // Rough metal (roughness = 0.7, metallic = 1.0)
-    auto rough_metal_mat = std::make_shared<Metal>(Color3(0.75, 0.75, 0.75), 0.35);
-    rough_metal_mat->name = "Rough_R0.7";
-    scene.add(std::make_shared<Sphere>(Point3(-0.5, 0, 0), 0.5, rough_metal_mat));
+    auto rough_metal_mat = std::make_shared<Metal>(Color(0.75f, 0.75f, 0.75f), 0.35);
+    scene.add_object(std::make_shared<Sphere>(Point3(-0.5, 0.5, 0), 0.5, rough_metal_mat));
 
     // Matte metal (roughness = 0.9, metallic = 1.0)
-    auto matte_metal_mat = std::make_shared<Metal>(Color3(0.7, 0.7, 0.7), 0.5);
-    matte_metal_mat->name = "Matte_R0.9";
-    scene.add(std::make_shared<Sphere>(Point3(0.5, 0, 0), 0.5, matte_metal_mat));
+    auto matte_metal_mat = std::make_shared<Metal>(Color(0.7f, 0.7f, 0.7f), 0.5);
+    scene.add_object(std::make_shared<Sphere>(Point3(0.5, 0.5, 0), 0.5, matte_metal_mat));
 
     // === METALLIC SWEEP (Left to Right) ===
     // Shows metallic from 0.0 (dielectric) to 1.0 (metal)
 
-    // Plastic (roughness = 0.3, metallic = 0.0)
-    auto plastic_mat = std::make_shared<Lambertian>(Color3(0.8, 0.2, 0.2));
-    plastic_mat->name = "Plastic_M0.0";
-    scene.add(std::make_shared<Sphere>(Point3(2.0, 0, 2), 0.5, plastic_mat));
+    // Plastic with checkerboard texture
+    auto checker_red_yellow = std::make_shared<CheckerTexture>(
+        std::make_shared<SolidColor>(Color(0.8f, 0.2f, 0.2f)),  // Red
+        std::make_shared<SolidColor>(Color(0.8f, 0.8f, 0.2f)),  // Yellow
+        4.0f  // Fine checker pattern
+    );
+    auto plastic_mat = std::make_shared<Lambertian>(checker_red_yellow);
+    scene.add_object(std::make_shared<Sphere>(Point3(2.0, 0.5, 2), 0.5, plastic_mat));
 
     // Rusty metal (roughness = 0.6, metallic = 0.5)
     // Approximated with fuzzy metal
-    auto rusty_mat = std::make_shared<Metal>(Color3(0.7, 0.5, 0.3), 0.3);
-    rusty_mat->name = "Rusty_M0.5";
-    scene.add(std::make_shared<Sphere>(Point3(3.0, 0, 2), 0.5, rusty_mat));
+    auto rusty_mat = std::make_shared<Metal>(Color(0.7f, 0.5f, 0.3f), 0.3);
+    scene.add_object(std::make_shared<Sphere>(Point3(3.0, 0.5, 2), 0.5, rusty_mat));
 
-    // Pure metal (roughness = 0.2, metallic = 1.0)
-    auto pure_metal_mat = std::make_shared<Metal>(Color3(0.95, 0.9, 0.7), 0.1);
-    pure_metal_mat->name = "Pure_M1.0";
-    scene.add(std::make_shared<Sphere>(Point3(4.0, 0, 2), 0.5, pure_metal_mat));
+    // Pure metal with gradient (silver to gold)
+    auto gradient_gold = std::make_shared<GradientTexture>(
+        Color(0.95f, 0.9f, 0.7f),  // Silver
+        Color(1.0f, 0.85f, 0.3f),  // Gold
+        Vec3(1, 0, 0),             // Horizontal gradient
+        0.15f                     // Scale
+    );
+    auto pure_metal_mat = std::make_shared<Lambertian>(gradient_gold);  // Lambertian for texture support
+    scene.add_object(std::make_shared<Sphere>(Point3(4.0, 0.5, 2), 0.5, pure_metal_mat));
 
-    // === DEMONSTRATION SPHERES ===
+    // === DEMONSTRATION SPHERES (Center Stage) ===
 
-    // Gold sphere (classic metal test)
-    auto gold_mat = std::make_shared<Metal>(Color3(1.0, 0.85, 0.3), 0.1);
-    gold_mat->name = "Gold";
-    scene.add(std::make_shared<Sphere>(Point3(0, 1.5, -1), 0.7, gold_mat));
+    // Gold sphere (classic metal test) - BIG center piece
+    auto gold_mat = std::make_shared<Metal>(Color(1.0f, 0.85f, 0.3f), 0.1);
+    scene.add_object(std::make_shared<Sphere>(Point3(0, 1.5, -1), 0.7, gold_mat));
 
-    // Silver sphere
-    auto silver_mat = std::make_shared<Metal>(Color3(0.95, 0.95, 0.95), 0.05);
-    silver_mat->name = "Silver";
-    scene.add(std::make_shared<Sphere>(Point3(1.5, 1.2, -1), 0.6, silver_mat));
+    // Silver sphere with noise texture (hammered metal look)
+    auto noise_silver = std::make_shared<NoiseTexture>(
+        Color(0.95f, 0.95f, 0.95f),  // Base silver
+        Color(0.7f, 0.7f, 0.7f),     // Darker silver
+        8.0f                         // Fine noise scale
+    );
+    auto silver_mat = std::make_shared<Lambertian>(noise_silver);  // Lambertian for texture support
+    scene.add_object(std::make_shared<Sphere>(Point3(1.5, 1.2, -1), 0.6, silver_mat));
 
-    // Copper sphere
-    auto copper_mat = std::make_shared<Metal>(Color3(0.9, 0.6, 0.4), 0.15);
-    copper_mat->name = "Copper";
-    scene.add(std::make_shared<Sphere>(Point3(-1.5, 1.2, -1), 0.6, copper_mat));
+    // Copper sphere with stripe texture (looks like metallic bands)
+    auto stripe_copper = std::make_shared<StripeTexture>(
+        Color(0.9f, 0.6f, 0.4f),     // Copper
+        Color(0.7f, 0.4f, 0.2f),     // Dark copper
+        3.0f                         // Stripe width
+    );
+    auto copper_mat = std::make_shared<Lambertian>(stripe_copper);  // Lambertian for texture support
+    scene.add_object(std::make_shared<Sphere>(Point3(-1.5, 1.2, -1), 0.6, copper_mat));
 
-    // Glass sphere (dielectric test)
-    auto glass_mat = std::make_shared<Dielectric>(1.5);
-    glass_mat->name = "Glass";
-    scene.add(std::make_shared<Sphere>(Point3(0, 0.5, -3), 0.5, glass_mat));
+    // Glass sphere (dielectric test) - clear glass
+    auto glass_mat = std::make_shared<Dielectric>(1.5f);
+    scene.add_object(std::make_shared<Sphere>(Point3(0, 0.5, -3), 0.5, glass_mat));
 
-    // Red plastic sphere (dielectric)
-    auto red_plastic_mat = std::make_shared<Lambertian>(Color3(0.8, 0.1, 0.1));
-    red_plastic_mat->name = "Red_Plastic";
-    scene.add(std::make_shared<Sphere>(Point3(3, 0.5, -3), 0.5, red_plastic_mat));
+    // === TEXTURE SHOWCASE SPHERES (Background Row) ===
 
-    // Blue plastic sphere (dielectric)
-    auto blue_plastic_mat = std::make_shared<Lambertian>(Color3(0.1, 0.3, 0.8));
-    blue_plastic_mat->name = "Blue_Plastic";
-    scene.add(std::make_shared<Sphere>(Point3(-3, 0.5, -3), 0.5, blue_plastic_mat));
+    // Red/Blue checkerboard sphere
+    auto checker_red_blue = std::make_shared<CheckerTexture>(
+        std::make_shared<SolidColor>(Color(0.8f, 0.1f, 0.1f)),  // Red
+        std::make_shared<SolidColor>(Color(0.1f, 0.1f, 0.8f)),  // Blue
+        6.0f  // Medium checker pattern
+    );
+    auto red_plastic_mat = std::make_shared<Lambertian>(checker_red_blue);
+    scene.add_object(std::make_shared<Sphere>(Point3(3, 0.5, -3), 0.5, red_plastic_mat));
 
-    // Add a light source
-    scene.add_light(std::make_shared<PointLight>(Point3(0, 15, 0), Color3(1, 1, 1), 1.0));
+    // Noise marble sphere (white with gray veins)
+    auto noise_marble = std::make_shared<NoiseTexture>(
+        Color(1.0f, 1.0f, 1.0f),     // Pure white
+        Color(0.6f, 0.6f, 0.6f),     // Gray
+        12.0f                        // Fine marble veins
+    );
+    auto blue_plastic_mat = std::make_shared<Lambertian>(noise_marble);
+    scene.add_object(std::make_shared<Sphere>(Point3(-3, 0.5, -3), 0.5, blue_plastic_mat));
+
+    // === ADDITIONAL COOL TEXTURES ===
+
+    // Rainbow gradient sphere (diagonal gradient)
+    auto gradient_rainbow = std::make_shared<GradientTexture>(
+        Color(1.0f, 0.0f, 0.0f),     // Red
+        Color(0.0f, 0.0f, 1.0f),     // Blue
+        Vec3(1, 1, 0).normalized(),  // Diagonal gradient
+        0.15f                       // Scale
+    );
+    auto rainbow_mat = std::make_shared<Lambertian>(gradient_rainbow);
+    scene.add_object(std::make_shared<Sphere>(Point3(-5, 0.8, -2), 0.4, rainbow_mat));
+
+    // Stripe texture sphere (zebra pattern)
+    auto stripe_zebra = std::make_shared<StripeTexture>(
+        Color(0.1f, 0.1f, 0.1f),     // Black
+        Color(1.0f, 1.0f, 1.0f),     // White
+        4.0f                         // Narrow stripes
+    );
+    auto zebra_mat = std::make_shared<Lambertian>(stripe_zebra);
+    scene.add_object(std::make_shared<Sphere>(Point3(5, 0.8, -2), 0.4, zebra_mat));
+
+    // Earth-like texture sphere (noise simulating terrain)
+    auto noise_terrain = std::make_shared<NoiseTexture>(
+        Color(0.2f, 0.5f, 0.2f),     // Green (land)
+        Color(0.1f, 0.3f, 0.8f),     // Blue (water)
+        6.0f                         // Continent scale
+    );
+    auto earth_mat = std::make_shared<Lambertian>(noise_terrain);
+    scene.add_object(std::make_shared<Sphere>(Point3(0, 2.5, -4), 0.8, earth_mat));
+
+    // Fire texture sphere (noise with orange/red)
+    auto noise_fire = std::make_shared<NoiseTexture>(
+        Color(1.0f, 0.8f, 0.0f),     // Yellow
+        Color(1.0f, 0.2f, 0.0f),     // Red
+        10.0f                        // Fine fire scale
+    );
+    auto fire_mat = std::make_shared<Lambertian>(noise_fire);
+    scene.add_object(std::make_shared<Sphere>(Point3(-6, 1.0, 0), 0.3, fire_mat));
+
+    // Wood texture sphere (noise with brown tones)
+    auto noise_wood = std::make_shared<NoiseTexture>(
+        Color(0.6f, 0.4f, 0.2f),     // Light brown
+        Color(0.3f, 0.2f, 0.1f),     // Dark brown
+        15.0f                        // Fine wood grain
+    );
+    auto wood_mat = std::make_shared<Lambertian>(noise_wood);
+    scene.add_object(std::make_shared<Sphere>(Point3(6, 1.0, 0), 0.3, wood_mat));
+
+    // Add a main light source
+    scene.add_light(Light(Point3(0, 18.0, 0), Color(1.0f, 1.0f, 1.0f)));
 
     // Optional: Add fill light
-    scene.add_light(std::make_shared<PointLight>(Point3(-10, 10, 10), Color3(0.8, 0.9, 1.0), 0.3));
+    scene.add_light(Light(Point3(-10, 10, 10), Color(0.8f, 0.9f, 1.0f)));
 
     // Optional: Add rim light
-    scene.add_light(std::make_shared<PointLight>(Point3(15, 5, -5), Color3(1.0, 0.9, 0.8), 0.5));
+    scene.add_light(Light(Point3(15, 5, -5), Color(1.0f, 0.9f, 0.8f)));
 }
 
 #endif // PBR_SHOWCASE_H
