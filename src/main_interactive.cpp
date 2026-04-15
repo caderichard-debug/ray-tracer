@@ -102,7 +102,7 @@ bool is_samples_safe(int samples, int width) {
 // Validate current settings are safe, returns true if safe
 bool validate_current_settings(const QualityPreset& preset) {
     if (!is_samples_safe(preset.samples, preset.width)) {
-        std::cout << "\n⚠️  DANGER: Current settings are UNSAFE!\n";
+        std::cout << "\nWARNING: DANGER: Current settings are UNSAFE!\n";
         std::cout << "  Resolution: " << preset.width << "x" << (preset.width * 9 / 16) << "\n";
         std::cout << "  Samples: " << preset.samples << " (must be < 8)\n";
         std::cout << "  This combination may crash the application.\n";
@@ -421,7 +421,7 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(550, window_height - 20);
+        int panel_height = std::min(630, window_height - 20);
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
@@ -768,7 +768,7 @@ public:
         }
 
         // Manually layout debug buttons in 1 row
-        int button_width = 85;
+        int button_width = 80;
         int button_height = 24;
         int button_spacing = 5;
         int start_x = 15;
@@ -1182,7 +1182,7 @@ int main(int argc, char* argv[]) {
                                 int rays = pixels * new_preset.samples;
                                 int memory_mb = estimate_memory_mb(new_preset.width, height, new_preset.samples);
 
-                                std::cout << "\n⚠️  WARNING: High quality setting!\n";
+                                std::cout << "\nWARNING: High quality setting!\n";
                                 std::cout << "  Resolution: " << new_preset.width << "x" << height << "\n";
                                 std::cout << "  Total rays: " << rays << " (" << (rays / 1000000) << " MRays)\n";
                                 std::cout << "  Est. memory: " << memory_mb << " MB\n";
@@ -1252,7 +1252,7 @@ int main(int argc, char* argv[]) {
                                 int height = preset.width * 9 / 16;
                                 int pixels = preset.width * height;
                                 int rays = pixels * new_samples;
-                                std::cout << "\n⚠️  UNSAFE SAMPLES SETTING!\n";
+                                std::cout << "\nWARNING: UNSAFE SAMPLES SETTING!\n";
                                 std::cout << "  Requested: " << new_samples << " samples\n";
                                 std::cout << "  Current resolution: " << preset.width << "x" << height << "\n";
                                 std::cout << "  Total rays would be: " << rays << " (" << (rays / 1000000) << " MRays)\n";
@@ -1300,7 +1300,7 @@ int main(int argc, char* argv[]) {
                         } else if (click_result.resolution_changed) {
                             int new_width = click_result.new_resolution;
                             if (!is_samples_safe(preset.samples, new_width)) {
-                                std::cout << "⚠️  Unsafe resolution for current samples. Please reduce samples first.\n";
+                                std::cout << "WARNING: Unsafe resolution for current samples. Please reduce samples first.\n";
                             } else {
                                 int old_width = image_width;
                                 int old_height = image_height;
@@ -1337,6 +1337,11 @@ int main(int argc, char* argv[]) {
                                     SDL_Quit();
                                     return 1;
                                 }
+
+                                // Resize framebuffer for new resolution
+                                framebuffer.resize(image_width * image_height * 3, 0);
+
+                                // Resize analysis buffers
                                 analysis.resize(image_width, image_height);
                                 std::cout << "Resolution: " << image_width << "x" << image_height << "\n" << std::endl;
                                 need_render = true;
