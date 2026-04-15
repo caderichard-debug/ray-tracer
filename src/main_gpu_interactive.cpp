@@ -1115,7 +1115,6 @@ public:
         glBindVertexArray(0);
 
         initialized = true;
-        std::cout << "OpenGLUI: UI renderer initialized successfully" << std::endl;
         return true;
     }
 
@@ -1143,21 +1142,15 @@ public:
     }
 
     void render_colored_quad(float x, float y, float width, float height, const SDL_Color& color) {
-        std::cout << "OpenGLUI: render_colored_quad(" << x << ", " << y << ", " << width << ", " << height << ")" << std::endl;
-
-        if (!initialized) {
-            std::cout << "OpenGLUI: ERROR - Not initialized!" << std::endl;
-            return;
-        }
+        if (!initialized) return;
 
         // Save current OpenGL state
-        GLint current_program, current_vao, current_array_buffer, current_vertex_array_buffer_binding;
+        GLint current_program, current_vao;
+        GLint depth_test_enabled, blend_enabled;
         glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
-        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &current_array_buffer);
-        glGetIntegerv(GL_VERTEX_ARRAY_BUFFER_BINDING, &current_vertex_array_buffer_binding);
-
-        std::cout << "OpenGLUI: Current state - program=" << current_program << " vao=" << current_vao << std::endl;
+        glGetIntegerv(GL_DEPTH_TEST, &depth_test_enabled);
+        glGetIntegerv(GL_BLEND, &blend_enabled);
 
         float x1 = (x / WIDTH) * 2.0f - 1.0f;
         float y1 = 1.0f - (y / HEIGHT) * 2.0f;
@@ -1171,29 +1164,13 @@ public:
             x2, y2, 1.0f, 1.0f
         };
 
-        std::cout << "OpenGLUI: Using UI program " << ui_program << " (was using " << current_program << ")" << std::endl;
         glUseProgram(ui_program);
-
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            std::cout << "OpenGLUI: ERROR after glUseProgram - " << err << std::endl;
-        }
-
         glBindVertexArray(ui_vao);
         glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
 
         GLint pos_loc = glGetAttribLocation(ui_program, "position");
         GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
-
-        std::cout << "OpenGLUI: pos_loc=" << pos_loc << " tex_loc=" << tex_loc << std::endl;
-
-        if (pos_loc == -1 || tex_loc == -1) {
-            std::cout << "OpenGLUI: ERROR - Failed to get attribute locations!" << std::endl;
-            glUseProgram(current_program); // Restore state
-            glBindVertexArray(current_vao); // Restore state
-            return;
-        }
 
         glEnableVertexAttribArray(pos_loc);
         glVertexAttribPointer(pos_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
@@ -1207,29 +1184,30 @@ public:
         glUniform4f(color_loc, color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
         glUniform1i(use_tex_loc, 0);
 
-        std::cout << "OpenGLUI: Drawing quad" << std::endl;
-        glDisable(GL_BLEND);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        // Disable depth test and enable blending for UI overlays
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        err = glGetError();
-        if (err != GL_NO_ERROR) {
-            std::cout << "OpenGLUI: ERROR after glDrawArrays - " << err << std::endl;
-        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         // Restore OpenGL state
         glUseProgram(current_program);
         glBindVertexArray(current_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, current_vertex_array_buffer_binding);
-
-        std::cout << "OpenGLUI: Restored state - program=" << current_program << " vao=" << current_vao << std::endl;
+        if (depth_test_enabled) glEnable(GL_DEPTH_TEST);
+        if (!blend_enabled) glDisable(GL_BLEND);
     }
 
     void render_text_quad(float x, float y, float width, float height, GLuint texture, const SDL_Color& color) {
         if (texture == 0) return;
 
         // Save current OpenGL state
-        GLint current_program;
+        GLint current_program, current_vao;
+        GLint depth_test_enabled, blend_enabled;
         glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
+        glGetIntegerv(GL_DEPTH_TEST, &depth_test_enabled);
+        glGetIntegerv(GL_BLEND, &blend_enabled);
         GLint current_texture;
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
 
@@ -1253,11 +1231,6 @@ public:
         GLint pos_loc = glGetAttribLocation(ui_program, "position");
         GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
 
-        if (pos_loc == -1 || tex_loc == -1) {
-            glUseProgram(current_program); // Restore state
-            return;
-        }
-
         glEnableVertexAttribArray(pos_loc);
         glVertexAttribPointer(pos_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
 
@@ -1275,15 +1248,19 @@ public:
         glBindTexture(GL_TEXTURE_2D, texture);
         glUniform1i(texture_loc, 0);
 
+        // Disable depth test and enable blending for UI overlays
+        glDisable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        glDisable(GL_BLEND);
 
         // Restore OpenGL state
         glUseProgram(current_program);
         glBindTexture(GL_TEXTURE_2D, current_texture);
-        glBindVertexArray(0);
+        glBindVertexArray(current_vao);
+        if (depth_test_enabled) glEnable(GL_DEPTH_TEST);
+        if (!blend_enabled) glDisable(GL_BLEND);
     }
 
     TTF_Font* get_font() { return font; }
@@ -1312,31 +1289,25 @@ public:
         }
 
         initialized = true;
-        std::cout << "HelpOverlay: OpenGL-based overlay initialized" << std::endl;
         return true;
     }
 
     void toggle() {
         show = !show;
-        std::cout << "HelpOverlay: " << (show ? "SHOWING" : "HIDDEN") << std::endl;
     }
 
     bool is_showing() const { return show; }
 
     void render() {
         if (!show || !initialized || !ui_renderer) {
-            std::cout << "HelpOverlay::render() - skipping: show=" << show << " initialized=" << initialized << " renderer=" << (ui_renderer != nullptr) << std::endl;
             return;
         }
-
-        std::cout << "HelpOverlay::render() - rendering UI" << std::endl;
 
         SDL_Color white = {255, 255, 255, 255};
         SDL_Color bg_color = {20, 20, 30, 230};
         SDL_Color title_color = {255, 200, 100, 255};
 
         // Render semi-transparent background
-        std::cout << "HelpOverlay::render() - rendering background quad" << std::endl;
         ui_renderer->render_colored_quad(50, 50, WIDTH - 100, HEIGHT - 100, bg_color);
 
         // Render help text
@@ -2085,10 +2056,8 @@ int main(int argc, char* argv[]) {
 
     // Main loop
     bool running = true;
-    bool need_render = true;
     SDL_Event event;
 
-    auto start_time = std::chrono::high_resolution_clock::now();
     int frame_count = 0;
     float fps = 0.0f;
     auto last_frame_time = std::chrono::high_resolution_clock::now();
@@ -2101,23 +2070,18 @@ int main(int argc, char* argv[]) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
                     running = false;
                 } else if (event.key.keysym.sym == SDLK_h) {
-                    std::cout << "H key pressed - toggling help overlay" << std::endl;
                     help_overlay.toggle();
                 } else if (event.key.keysym.sym == SDLK_c) {
-                    std::cout << "C key pressed - toggling controls panel" << std::endl;
                     controls_panel.toggle();
                 } else if (event.key.keysym.sym == SDLK_r) {
                     enable_reflections = !enable_reflections;
                     std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
-                    need_render = true;
                 } else if (event.key.keysym.sym == SDLK_p) {
                     lighting_mode = 1 - lighting_mode;  // Toggle between 0 and 1
                     std::cout << "Lighting: " << (lighting_mode == 0 ? "Phong (Legacy)" : "PBR (Physically Based)") << std::endl;
-                    need_render = true;
                 } else if (event.key.keysym.sym == SDLK_l) {
                     num_lights = (num_lights % 3) + 1;  // Cycle 1->2->3->1
                     std::cout << "Lights: " << num_lights << (num_lights == 1 ? " (Single)" : num_lights == 2 ? " (2-point)" : " (3-point)") << std::endl;
-                    need_render = true;
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
@@ -2125,9 +2089,7 @@ int main(int argc, char* argv[]) {
                     if (controls_panel.is_showing()) {
                         int mouse_x, mouse_y;
                         SDL_GetMouseState(&mouse_x, &mouse_y);
-                        if (controls_panel.handle_click(mouse_x, mouse_y)) {
-                            need_render = true; // Re-render when setting changes
-                        }
+                        controls_panel.handle_click(mouse_x, mouse_y);
                     } else {
                         // Normal mouse capture when panel is closed
                         SDL_bool captured = SDL_GetRelativeMouseMode();
@@ -2137,7 +2099,6 @@ int main(int argc, char* argv[]) {
             } else if (event.type == SDL_MOUSEMOTION) {
                 if (SDL_GetRelativeMouseMode()) {
                     camera.rotate(event.motion.xrel * 0.1f, -event.motion.yrel * 0.1f);
-                    need_render = true;
                 }
             }
         }
@@ -2147,39 +2108,29 @@ int main(int argc, char* argv[]) {
 
         if (keystates[SDL_SCANCODE_W]) {
             camera.move_forward(move_speed);
-            need_render = true;
         }
         if (keystates[SDL_SCANCODE_S]) {
             camera.move_forward(-move_speed);
-            need_render = true;
         }
         if (keystates[SDL_SCANCODE_A]) {
             camera.move_right(-move_speed);
-            need_render = true;
         }
         if (keystates[SDL_SCANCODE_D]) {
             camera.move_right(move_speed);
-            need_render = true;
         }
         if (keystates[SDL_SCANCODE_UP]) {
             camera.move_up(move_speed);
-            need_render = true;
         }
         if (keystates[SDL_SCANCODE_DOWN]) {
             camera.move_up(-move_speed);
-            need_render = true;
         }
 
-        // Update time (keep for potential animation)
-        auto current_time = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float>(current_time - start_time).count();
+        // Clear screen every frame
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Render
-        if (need_render) {
-            glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            glUseProgram(program);
+        // Always render scene (GPU is fast enough)
+        glUseProgram(program);
 
             // Set camera uniforms
             glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
@@ -2295,34 +2246,29 @@ int main(int argc, char* argv[]) {
             glBindVertexArray(vao);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-            // Render OpenGL-based overlays BEFORE buffer swap
-            // Both panels can now be visible independently
-            if (help_overlay.is_showing()) {
-                std::cout << "Rendering help overlay (OpenGL)" << std::endl;
-                help_overlay.render();
-            }
-            if (controls_panel.is_showing()) {
-                std::cout << "Rendering controls panel (OpenGL)" << std::endl;
-                controls_panel.render(enable_reflections, lighting_mode, num_lights);
-            }
+        // Render OpenGL-based overlays EVERY FRAME (not just when scene needs render)
+        // Both panels can now be visible independently
+        if (help_overlay.is_showing()) {
+            help_overlay.render();
+        }
+        if (controls_panel.is_showing()) {
+            controls_panel.render(enable_reflections, lighting_mode, num_lights);
+        }
 
-            // Now swap buffers to show everything including UI overlays
-            SDL_GL_SwapWindow(window);
+        // Always swap buffers every frame to show UI overlays
+        SDL_GL_SwapWindow(window);
 
-            // Calculate FPS
-            frame_count++;
-            auto now = std::chrono::high_resolution_clock::now();
-            double elapsed = std::chrono::duration<double>(now - last_frame_time).count();
-            if (elapsed >= 1.0) {
-                fps = frame_count / elapsed;
-                frame_count = 0;
-                last_frame_time = now;
-                std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
-                         << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
-                         << "     " << std::flush;
-            }
-
-            need_render = false;
+        // Calculate FPS
+        frame_count++;
+        auto now = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(now - last_frame_time).count();
+        if (elapsed >= 1.0) {
+            fps = frame_count / elapsed;
+            frame_count = 0;
+            last_frame_time = now;
+            std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
+                     << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
+                     << "     " << std::flush;
         }
     }
 

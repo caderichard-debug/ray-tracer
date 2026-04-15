@@ -427,7 +427,8 @@ public:
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
                 const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
                 bool enable_progressive = false, bool enable_adaptive = false, bool enable_wavefront = false,
-                bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false
+                bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false,
+                bool enable_simd_packets = false
 #ifdef GPU_RENDERING
                 , RendererType current_renderer = RendererType::CPU
 #endif
@@ -1086,6 +1087,52 @@ public:
             SDL_FreeSurface(frustum_text_surface);
         }
 
+        y_offset += 35;
+
+        // Phase 3 Optimizations section
+        label_surface = TTF_RenderText_Blended(font, "Phase 3 Optimizations:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        // SIMD packets toggle button
+        const char* simd_label = enable_simd_packets ? "SIMD: ON" : "SIMD: OFF";
+        int simd_button_width = 120;
+        SDL_Rect simd_button_rect = {15, y_offset, simd_button_width, 24};
+
+        // Store button for click detection (category 14 = simd)
+        buttons.push_back({{simd_button_rect.x + panel_x, simd_button_rect.y + panel_y, simd_button_rect.w, simd_button_rect.h},
+                          "simd_packets", enable_simd_packets ? 1 : 0, 14});
+
+        // Draw SIMD button background
+        Uint32 simd_button_bg = SDL_MapRGBA(content_surface->format,
+            enable_simd_packets ? button_active_color.r : button_color.r,
+            enable_simd_packets ? button_active_color.g : button_color.g,
+            enable_simd_packets ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(content_surface, &simd_button_rect, simd_button_bg);
+
+        // Draw SIMD button border
+        SDL_Rect simd_border = {simd_button_rect.x, simd_button_rect.y, simd_button_rect.w, 2};
+        SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        simd_border = {simd_button_rect.x, simd_button_rect.y + simd_button_rect.h - 2, simd_button_rect.w, 2};
+        SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+
+        // Draw SIMD button text
+        SDL_Surface* simd_text_surface = TTF_RenderText_Blended(font, simd_label, text_color);
+        if (simd_text_surface) {
+            SDL_Rect simd_text_rect = {
+                simd_button_rect.x + (simd_button_width - simd_text_surface->w) / 2,
+                y_offset + (24 - simd_text_surface->h) / 2,
+                simd_text_surface->w, simd_text_surface->h
+            };
+            SDL_BlitSurface(simd_text_surface, nullptr, content_surface, &simd_text_rect);
+            SDL_FreeSurface(simd_text_surface);
+        }
+
         // Add padding at bottom for scrolling
         y_offset += 40;
 
@@ -1170,6 +1217,8 @@ public:
         bool morton_changed;
         bool stratified_changed;
         bool frustum_changed;
+        bool simd_packets_changed;
+        bool new_simd_packets;
         bool button_clicked;
 
         ClickResult() : quality_changed(false), new_quality(0),
@@ -1181,6 +1230,7 @@ public:
                        screenshot_requested(false), progressive_changed(false),
                        adaptive_changed(false), wavefront_changed(false),
                        morton_changed(false), stratified_changed(false), frustum_changed(false),
+                       simd_packets_changed(false), new_simd_packets(false),
                        button_clicked(false) {}
     };
 
@@ -1242,6 +1292,10 @@ public:
                         break;
                     case 13: // Frustum toggle
                         result.frustum_changed = true;
+                        break;
+                    case 14: // SIMD packets toggle
+                        result.simd_packets_changed = true;
+                        result.new_simd_packets = button.value;
                         break;
                 }
                 break;
@@ -1716,6 +1770,11 @@ int main(int argc, char* argv[]) {
                             ray_renderer.enable_frustum = enable_frustum;
                             std::cout << "Frustum culling: " << (enable_frustum ? "ON" : "OFF") << std::endl;
                             need_render = true;
+                        } else if (click_result.simd_packets_changed) {
+                            // Toggle SIMD packet tracing
+                            ray_renderer.enable_simd_packets = click_result.new_simd_packets;
+                            std::cout << "SIMD packets: " << (ray_renderer.enable_simd_packets ? "ON" : "OFF") << std::endl;
+                            need_render = true;
                         } else if (click_result.resolution_changed) {
                             int new_width = click_result.new_resolution;
                             if (!is_samples_safe(preset.samples, new_width)) {
@@ -1966,6 +2025,29 @@ int main(int argc, char* argv[]) {
 
                     std::cout << "Wavefront render complete" << std::endl;
 
+                } else if (ray_renderer.enable_simd_packets) {
+                    // SIMD PACKET RENDERING: AVX2 ray packet tracing
+                    std::cout << "SIMD packet rendering..." << std::endl;
+
+                    std::vector<std::vector<Color>> simd_framebuffer(image_height, std::vector<Color>(image_width));
+                    ray_renderer.render_simd_packets(cam, scene, simd_framebuffer, image_width, image_height, preset.samples);
+
+                    // Convert to SDL framebuffer format
+                    #pragma omp parallel for schedule(dynamic, 4)
+                    for (int j = image_height - 1; j >= 0; --j) {
+                        for (int i = 0; i < image_width; ++i) {
+                            Color pixel_color = simd_framebuffer[j][i];
+
+                            // Write to framebuffer
+                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+                        }
+                    }
+
+                    std::cout << "SIMD packet render complete" << std::endl;
+
                 } else {
                     // STANDARD RENDERING: Original path with optional adaptive sampling
                     std::cout << "CPU rendering..." << std::endl;
@@ -2094,12 +2176,13 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
+                                 ray_renderer.enable_simd_packets,
                                  current_renderer);
 #else
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
-                                 enable_morton, enable_stratified, enable_frustum);
+                                 enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets);
 #endif
         }
 

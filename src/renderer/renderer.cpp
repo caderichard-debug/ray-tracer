@@ -2,6 +2,7 @@
 #include "../math/vec3_avx2.h"
 #include "../math/pcg_random.h"
 #include "../math/morton.h"
+#include "../utils/simd_utils.h"
 #include <iostream>
 #include <limits>
 #include <algorithm>
@@ -312,5 +313,62 @@ void Renderer::render_morton(const Camera& cam, const Scene& scene, std::vector<
         pixel_color = AVX2::sqrt_avx2(pixel_color);
 
         framebuffer[height - 1 - j][i] = pixel_color;
+    }
+}
+
+// Phase 3: SIMD Packet Tracing Implementation
+void Renderer::render_simd_packets(const Camera& cam, const Scene& scene,
+                                   std::vector<std::vector<Color>>& framebuffer,
+                                   int width, int height, int samples) {
+    Camera camera = cam;
+
+    // Process pixels in 4x2 blocks (8 rays = AVX2 width)
+    for (int j = 0; j < height; j += 2) {
+        for (int i = 0; i < width; i += 4) {
+            Color pixel_colors[8] = {Color(0,0,0), Color(0,0,0), Color(0,0,0), Color(0,0,0),
+                                    Color(0,0,0), Color(0,0,0), Color(0,0,0), Color(0,0,0)};
+
+            // Accumulate samples for each pixel in the 4x2 block
+            for (int s = 0; s < samples; ++s) {
+                Ray rays[8];
+                int ray_idx = 0;
+
+                // Generate 8 camera rays for this block
+                for (int dy = 0; dy < 2 && j + dy < height; dy++) {
+                    for (int dx = 0; dx < 4 && i + dx < width; dx++) {
+                        float u = (i + dx + random_float_pcg()) / (width - 1);
+                        float v = (j + dy + random_float_pcg()) / (height - 1);
+                        rays[ray_idx++] = camera.get_ray(u, v);
+                    }
+                }
+
+                // Pad to 8 rays if at edge/bottom
+                while (ray_idx < 8) {
+                    rays[ray_idx++] = rays[0];  // Duplicate first ray
+                }
+
+                // Trace each ray individually (scalar shading, but coherent rays)
+                // Note: We could use SIMD for intersection, but scalar for shading is simpler
+                for (int r = 0; r < 8; r++) {
+                    pixel_colors[r] = pixel_colors[r] + ray_color(rays[r], scene, max_depth);
+                }
+            }
+
+            // Average samples and write to framebuffer
+            float scale = 1.0f / samples;
+            int out_idx = 0;
+
+            for (int dy = 0; dy < 2 && j + dy < height; dy++) {
+                for (int dx = 0; dx < 4 && i + dx < width; dx++) {
+                    Color final_color = AVX2::scale_avx2(pixel_colors[out_idx], scale);
+
+                    // Gamma correction
+                    final_color = AVX2::sqrt_avx2(final_color);
+
+                    framebuffer[height - 1 - (j + dy)][i + dx] = final_color;
+                    out_idx++;
+                }
+            }
+        }
     }
 }
