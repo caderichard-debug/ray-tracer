@@ -52,8 +52,7 @@ ENABLE_SOFT_SHADOWS ?= 0         # Enable soft shadows (Phase 2)
 ENABLE_AMBIENT_OCCLUSION ?= 0    # Enable ambient occlusion (Phase 2)
 
 # GPU scene selection
-GPU_SCENE ?= cornell_box
-# Options: cornell_box, gpu_demo
+GPU_SCENE ?= cornell_box         # Options: cornell_box, gpu_demo
 
 # Threading mode (openmp, pthreads, or none)
 THREADING_MODE ?= openmp
@@ -170,22 +169,10 @@ interactive-gpu: $(BUILD_DIR)
 	@echo "Building Interactive GPU Ray Tracer"
 	@echo "=========================================="
 	@echo "Features: Standalone GPU renderer (GLSL 1.20)"
-	@echo "  PBR: $(ENABLE_GPU_PBR), Lights: $(ENABLE_GPU_MULTIPLE_LIGHTS)"
-	@echo "  Tone Mapping: $(ENABLE_GPU_TONE_MAPPING), Gamma: $(ENABLE_GPU_GAMMA_CORRECTION)"
-	@echo "  Soft Shadows: $(ENABLE_SOFT_SHADOWS), AO: $(ENABLE_AMBIENT_OCCLUSION)"
-	@echo "  Scene: $(GPU_SCENE)"
 	@echo ""
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		-DENABLE_PBR=$(ENABLE_GPU_PBR) \
-		-DENABLE_MULTIPLE_LIGHTS=$(ENABLE_GPU_MULTIPLE_LIGHTS) \
-		-DENABLE_TONE_MAPPING=$(ENABLE_GPU_TONE_MAPPING) \
-		-DENABLE_GAMMA_CORRECTION=$(ENABLE_GPU_GAMMA_CORRECTION) \
-		-DENABLE_SOFT_SHADOWS=$(ENABLE_SOFT_SHADOWS) \
-		-DENABLE_AMBIENT_OCCLUSION=$(ENABLE_AMBIENT_OCCLUSION) \
-		-DSCENE_NAME=\"$(GPU_SCENE)\" \
 		$(INTERACTIVE_GPU_SRC) \
-		-o $(BUILD_DIR)/raytracer_interactive_gpu \
-		$(LDFLAGS) $(SDL_LDFLAGS) -L/usr/local/lib -lGLEW -framework OpenGL
+		-o $(BUILD_DIR)/raytracer_interactive_gpu $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
 	@echo "✓ Interactive GPU built: $(BUILD_DIR)/raytracer_interactive_gpu"
 	@ln -sf $(BUILD_DIR)/raytracer_interactive_gpu raytracer_interactive_gpu
 
@@ -244,62 +231,6 @@ runa: ascii
 	@echo "Starting ASCII Terminal Ray Tracer..."
 	@echo "Controls: Ctrl+C to stop"
 	./raytracer_ascii
-
-# ============================================================================
-# GPU QUALITY PRESET TARGETS
-# ============================================================================
-
-# Fast: Maximum performance, basic features only
-.PHONY: gpu-fast
-gpu-fast: $(BUILD_DIR)
-	@echo "=========================================="
-	@echo "Building GPU (Fast - Maximum Performance)"
-	@echo "=========================================="
-	$(MAKE) interactive-gpu \
-		ENABLE_GPU_PBR=0 \
-		ENABLE_GPU_MULTIPLE_LIGHTS=0 \
-		ENABLE_GPU_TONE_MAPPING=0 \
-		ENABLE_GPU_GAMMA_CORRECTION=0
-
-# Interactive: Balanced quality and performance
-.PHONY: gpu-interactive
-gpu-interactive: $(BUILD_DIR)
-	@echo "=========================================="
-	@echo "Building GPU (Interactive - Balanced)"
-	@echo "=========================================="
-	$(MAKE) interactive-gpu \
-		ENABLE_GPU_PBR=1 \
-		ENABLE_GPU_MULTIPLE_LIGHTS=2 \
-		ENABLE_GPU_TONE_MAPPING=1 \
-		ENABLE_GPU_GAMMA_CORRECTION=1
-
-# Production: High quality for final renders
-.PHONY: gpu-production
-gpu-production: $(BUILD_DIR)
-	@echo "=========================================="
-	@echo "Building GPU (Production - High Quality)"
-	@echo "=========================================="
-	$(MAKE) interactive-gpu \
-		ENABLE_GPU_PBR=1 \
-		ENABLE_GPU_MULTIPLE_LIGHTS=3 \
-		ENABLE_GPU_TONE_MAPPING=1 \
-		ENABLE_GPU_GAMMA_CORRECTION=1 \
-		ENABLE_SOFT_SHADOWS=1
-
-# Showcase: Maximum quality all features enabled
-.PHONY: gpu-showcase
-gpu-showcase: $(BUILD_DIR)
-	@echo "=========================================="
-	@echo "Building GPU (Showcase - Maximum Quality)"
-	@echo "=========================================="
-	$(MAKE) interactive-gpu \
-		ENABLE_GPU_PBR=1 \
-		ENABLE_GPU_MULTIPLE_LIGHTS=3 \
-		ENABLE_GPU_TONE_MAPPING=1 \
-		ENABLE_GPU_GAMMA_CORRECTION=1 \
-		ENABLE_SOFT_SHADOWS=1 \
-		ENABLE_AMBIENT_OCCLUSION=1 \
-		GPU_SCENE=gpu_demo
 
 # ============================================================================
 # PERFORMANCE COMPARISON TARGETS

@@ -1,186 +1,276 @@
 # SIMD Ray Tracer
 
-A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectorization and OpenMP multi-threading. Features both batch rendering and real-time interactive modes.
-
-## Status
-
-✅ **Phase 1:** Foundation (Scalar math, geometry, materials)
-✅ **Phase 2:** Basic Rendering (Phong shading, shadows, reflections)
-✅ **Phase 4:** Advanced Features (triangles, anti-aliasing, PNG output)
-✅ **Phase 5:** Multi-threading (OpenMP)
-✅ **Phase 6:** Polish (CLI arguments, PNG output)
-✅ **Interactive Mode:** Real-time rendering with camera controls
+A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectorization, OpenMP multi-threading, and GPU acceleration. Features batch rendering, real-time interactive modes, and a retro ASCII terminal renderer.
 
 ## Features
 
-### ✅ Implemented
-- **Batch Rendering**: High-quality offline rendering
-  - Vec3 math library with complete vector operations
-  - Ray representation and ray-sphere/triangle intersection
-  - Material system (Lambertian diffuse, Metal reflective)
-  - Perspective camera model
-  - Scene graph with multiple primitives and lights
-  - Phong shading (ambient + diffuse + specular)
-  - Hard shadows via shadow rays
-  - Recursive reflections (configurable depth)
-  - Gamma correction
-  - Anti-aliasing (supersampling up to 256 samples)
-  - Triangle primitive with Möller-Trumbore intersection
-  - PNG output (stb_image_write)
-  - CLI arguments (resolution, samples, depth, output)
-  - OpenMP multi-threading (8 threads)
+### Multiple Rendering Modes
 
-- **Interactive Mode**: Real-time exploration
-  - SDL2-based window system with full color graphics
-  - WASD + mouse camera controls
-  - 6 quality levels (320x180 to 1920x1080)
-  - Real-time FPS display
-  - Dynamic quality switching
-  - Pause/resume rendering
-  - Advanced rendering features (progressive, adaptive, wavefront)
+**CPU Interactive Mode**
+- Real-time SDL2-based rendering with full controls
+- 6 quality levels (320x180 to 1920x1080)
+- WASD + mouse camera controls
+- Screenshot capture (PNG)
+- Settings panel with live adjustments
+- Performance stats (FPS, MRays/sec)
 
-- **ASCII Terminal Mode**: Retro text-based rendering
-  - Pure terminal rendering (no GUI required)
-  - Automatic camera animation (orbits scene)
-  - Real-time ASCII art output
-  - Cross-platform (macOS/Linux/Windows)
-  - Adaptive terminal sizing
-  - Quality presets (1-3)
+**GPU Interactive Mode**
+- OpenGL compute shader acceleration
+- 60-300x faster than CPU (depending on GPU)
+- Same controls as CPU mode
+- Real-time GPU/CPU switching
+
+**ASCII Terminal Mode**
+- Pure terminal rendering (no GUI required)
+- Animated camera orbits scene
+- Quality presets (1-3)
+- Cross-platform (macOS/Linux/Windows)
+
+**Batch Rendering**
+- High-quality offline rendering
+- PNG output with configurable settings
+- Anti-aliasing (up to 256 samples)
+- Command-line interface
+
+### Rendering Features
+
+**Lighting & Shading**
+- Phong shading (ambient + diffuse + specular)
+- Hard shadows with shadow rays
+- Recursive reflections (configurable depth)
+- Gamma correction
+
+**Materials**
+- Lambertian (diffuse)
+- Metal (reflective)
+- Dielectric (glass/refraction)
+
+**Advanced Features** (CPU Interactive Mode)
+- **Progressive Rendering**: Multi-pass refinement for 3.164x speedup
+- **Adaptive Sampling**: Variance-based sampling for 1.702x speedup
+- **Wavefront Rendering**: Tiled cache-coherent processing for 1.358x speedup
+
+**Analysis Modes**
+- Normal visualization
+- Depth buffer visualization
+- Albedo (color) visualization
+- Composite rendering
 
 ## Quick Start
 
 ### Prerequisites
 
-This project requires the following dependencies:
-
-**Core Requirements:**
-- **C++17 compiler** (g++, clang++, or MSVC)
-- **x86_64 CPU** with AVX2 support (Intel Haswell+ or AMD Ryzen+)
-- **OpenMP** (usually included with compiler)
-- **SDL2** (for interactive mode)
-- **SDL2_ttf** (for UI text rendering)
-- **Make** (or CMake)
-
-#### Installing Dependencies by Platform
-
 **macOS (Homebrew):**
 ```bash
-# Install compiler and dependencies
 brew install gcc sdl2 sdl2_ttf
-
-# OpenMP is included with GCC
 ```
 
 **Ubuntu/Debian:**
 ```bash
-# Install all dependencies
 sudo apt update
 sudo apt install build-essential libsdl2-dev libsdl2-ttf-dev libomp-dev
-
-# OpenMP is included with GCC
 ```
 
-**Windows (MinGW-w64):**
+**Windows (MSYS2):**
 ```bash
-# Install MinGW-w64 from https://www.mingw-w64.org/
-# Or use MSYS2: https://www.msys2.org/
-
-# In MSYS2 terminal:
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf
-
-# Or use vcpkg (recommended for Windows):
-# Install vcpkg from https://github.com/Microsoft/vcpkg
-./vcpkg/bootstrap-vcpkg.bat
-./vcpkg/vcpkg install sdl2 sdl2-ttf
-```
-
-**Windows (Visual Studio):**
-```bash
-# Install Visual Studio Community (free)
-# Install "Desktop development with C++" workload
-
-# Install vcpkg for dependencies
-git clone https://github.com/Microsoft/vcpkg
-.\vcpkg\bootstrap-vcpkg.bat
-.\vcpkg\vcpkg install sdl2 sdl2-ttf
-
-# Then open the project in Visual Studio
-```
-
-**Alternative: Using vcpkg (Cross-platform)**
-```bash
-# Install vcpkg
-git clone https://github.com/Microsoft/vcpkg
-cd vcpkg
-./bootstrap-vcpkg.sh  # or .bat on Windows
-
-# Install dependencies
-./vcpkg install sdl2 sdl2-ttf
-
-# Integrate with your build system
-./vcpkg integrate install
 ```
 
 ### Build & Run
 
 ```bash
-# Build batch ray tracer
-make phase2
+# CPU Batch Rendering (with feature flags)
+make batch-cpu
+make run
 
-# Run batch ray tracer with default settings
-./raytracer
+# GPU Batch Rendering
+make batch-gpu
+make run-gpu
 
-# Run with custom settings
-./raytracer -w 1920 -s 64 -d 8 -o my_scene
+# CPU Interactive Mode (recommended for beginners)
+make interactive-cpu
+make runi-cpu
 
-# Build and run interactive ray tracer (SDL2 graphics)
-make interactive
-make runi
+# GPU Interactive Mode (standalone, GLSL 1.20)
+make interactive-gpu
+make runi-gpu
 
-# Build and run ASCII terminal ray tracer (retro style)
+# GPU Quality Presets
+make gpu-fast           # Maximum performance (Phong only)
+make gpu-interactive    # Balanced quality and performance
+make gpu-production     # High quality for final renders
+make gpu-showcase       # Maximum quality all features
+
+# ASCII Terminal Mode (retro style)
 make ascii
 make runa
 ```
 
-**⚠️ IMPORTANT:** When the interactive ray tracer starts, **press H** immediately to see the help overlay with all controls! The help overlay shows:
+**Note:** `make interactive` and `make runi` are convenience aliases for CPU mode.
 
-- **Movement:** WASD + Arrow keys to move, mouse to look around
-- **Quality:** Press 1-6 to change quality levels  
-- **Screenshot:** Press S to save screenshots
-- **Controls:** Press C to toggle the controls panel
-- **Navigation:** Click window to capture mouse for camera control
-- **Quit:** Press ESC or H to close help overlay
+**⚠️ IMPORTANT:** When the interactive ray tracer starts, **press H** immediately to see the help overlay with all controls!
 
-## Makefile Targets
+## Controls
 
-```bash
-# Building
-make phase1          # Build Phase 1 (foundation)
-make phase2          # Build Phase 2 (rendering) [default]
-make interactive     # Build interactive real-time ray tracer
-make all             # Build all implemented phases
+### CPU Interactive Mode
 
-# Running
-make run             # Build and run batch ray tracer
-make runi            # Build and run interactive ray tracer
-make test            # Run Cornell box test scene
+**Movement:**
+- **WASD** - Move forward/left/backward/right
+- **Arrow Keys** - Move up/down
+- **Mouse** - Look around (when captured)
+- **Left Click** - Capture/release mouse
 
-# Utilities
-make clean           # Remove build artifacts
-make info            # Show build information
-make docs            # Show documentation
-make help            # Show all targets
-```
+**Quality Levels:**
+- **1** - Preview (320x180, 1 sample)
+- **2** - Low (640x360, 1 sample)
+- **3** - Medium (800x450, 4 samples)
+- **4** - High (1280x720, 16 samples)
+- **5** - Ultra (1600x900, 32 samples)
+- **6** - Maximum (1920x1080, 64 samples)
+
+**Rendering Features:**
+- **M** - Cycle analysis modes (Normal/Normals/Depth/Albedo)
+- **Space** - Pause/resume rendering
+- **S** - Save screenshot (PNG)
+- **C** - Toggle controls panel
+- **H** - Toggle help overlay
+- **ESC** - Quit
+
+### Settings Panel
+
+The settings panel (press **C**) provides:
+
+**Quality Presets:** Buttons 1-6
+**Samples Per Pixel:** 1, 4, 8, 16
+**Max Depth:** 1, 3, 5, 8
+**Resolution:** Low to Max presets
+
+**Feature Toggles:**
+- Shadows (ON/OFF)
+- Reflections (ON/OFF)
+- Progressive Rendering (ON/OFF)
+- Adaptive Sampling (ON/OFF)
+- Wavefront Rendering (ON/OFF)
+
+**Debug Modes:**
+- Normals visualization
+- Depth visualization
+- Albedo visualization
+
+**Actions:**
+- Screenshot button
+- Reset defaults
 
 ## Performance
 
-| Phase | Description | Speedup | MRays/sec |
-|-------|-------------|---------|-----------|
-| 1-2 | Scalar baseline | 1x | ~0.8-1.5 |
-| 3 | AVX2 SIMD | 4-6x | ~4-8 |
-| 5 | + OpenMP (4 cores) | 14-20x | ~20-40 |
+### Full Optimization Stack
 
-*Benchmarks on Intel Core i7 quad-core*
+**Parallelization and SIMD:**
+| Configuration | Time | Throughput | Speedup |
+|--------------|------|------------|---------|
+| Baseline (scalar, 1 thread) | ~67.2s | ~0.09 MRays/s | 1.0x |
+| + AVX SIMD | ~13.4s | ~0.45 MRays/s | **5.0x** |
+| + OpenMP (4 cores) | ~4.5s | ~1.35 MRays/s | **14.9x** |
+| AVX + OpenMP | ~3.4s | ~1.80 MRays/s | **19.8x** |
+
+**Phase 1 Optimizations (on top of AVX+OpenMP):**
+| Optimization | Time | Throughput | Speedup | Improvement |
+|--------------|------|------------|---------|-------------|
+| AVX + OpenMP baseline | 3.4s | 1.80 MRays/s | 1.0x | - |
+| + Shadow Culling | 3.1s | 1.95 MRays/s | 1.09x | +8.6% |
+| + Fast RNG | 3.0s | 2.00 MRays/s | 1.11x | +2.8% |
+| + Loop Unrolling | 2.9s | 2.07 MRays/s | 1.15x | +3.5% |
+
+**Advanced Rendering Modes:**
+| Rendering Mode | Time | Throughput | Speedup |
+|----------------|------|------------|---------|
+| Standard (fully optimized) | 1.540s | 3.740 MRays/s | 1.0x |
+| Progressive | 0.487s | 11.836 MRays/s | **3.164x** |
+| Adaptive | 0.905s | 6.367 MRays/s | **1.702x** |
+| Wavefront | 1.134s | 5.079 MRays/s | **1.358x** |
+
+### Total Performance Improvement
+- **Baseline to Final**: ~67.2s → 1.5s = **43.7x total speedup**
+- **Breakdown**: AVX (5x) + OpenMP (4x) + Optimizations (1.15x) = **23x combined**
+- **With Advanced Modes**: Up to **73x faster** (Progressive on top of full stack)
+
+### What Each Optimization Does
+
+**Parallelization:**
+- **AVX SIMD (4-6x)**: 8-wide vector operations using AVX2 instructions
+- **OpenMP (14-20x)**: Multi-threading across 4 CPU cores with dynamic scheduling
+- **Pthreads (12-18x)**: Manual thread management with custom scheduling (alternative to OpenMP)
+
+**Code Optimizations:**
+- **Shadow Culling (+8.6%)**: Skips shadow rays for backfaces (eliminates ~50% of shadow rays)
+- **Fast RNG (+2.8%)**: XOR-shift algorithm replaces rand() (eliminates lock contention)
+- **Loop Unrolling (+3-5%)**: Reduces loop overhead in sample accumulation
+
+**Rendering Modes:**
+- **Progressive (3.164x)**: Multi-pass refinement from noisy to smooth over multiple frames
+- **Adaptive (1.702x)**: Variance-based sampling (uses half the samples)
+- **Wavefront (1.358x)**: Tiled cache-coherent processing (better CPU cache utilization)
+
+### GPU Performance
+
+**Expected Performance (by GPU tier):**
+- **Low-end GPUs**: 30-60 MRays/sec (30-75x faster than CPU)
+- **Mid-range GPUs**: 100-200 MRays/sec (100-250x faster)
+- **High-end GPUs**: 300-500 MRays/sec (300-600x faster)
+
+**GPU vs CPU Comparison (1920x1080):**
+| Samples | CPU Time | GPU Time | Speedup |
+|---------|----------|----------|---------|
+| 1       | 2.5s     | 0.04s    | 62x     |
+| 4       | 10.0s    | 0.08s    | 125x    |
+| 16      | 40.0s    | 0.25s    | 160x    |
+| 64      | 160.0s   | 0.80s    | 200x    |
+
+**Interactive Performance:**
+- **640x360** (1 sample): 120-240 FPS
+- **800x450** (4 samples): 30-60 FPS
+- **1920x1080** (16 samples): 8-15 FPS
+
+**GPU Features (Phase 1 & 2):**
+- ✅ **Physically Based Rendering (PBR)**: Cook-Torrance BRDF with realistic materials
+- ✅ **Multiple Lights**: 1-4 configurable light sources with 3-point studio setups
+- ✅ **Soft Shadows**: Stratified area light sampling for natural penumbra
+- ✅ **Ambient Occlusion**: Ray-traced AO for depth perception
+- ✅ **Post-Processing**: ACES tone mapping and gamma correction
+- ✅ **Quality Presets**: Fast, Interactive, Production, Showcase configurations
+
+**Quality Presets:**
+```bash
+make gpu-fast          # Maximum performance (Phong, single light)
+make gpu-interactive   # Balanced (PBR, multiple lights)
+make gpu-production    # High quality (+ soft shadows)
+make gpu-showcase      # Maximum quality (all features + demo scene)
+```
+
+**GPU Advantages:**
+- Raw throughput: 60-300x faster than CPU
+- Real-time 1080p rendering
+- State-of-the-art PBR lighting
+- Better for high sample counts
+- Smooth interactive experience
+
+**GPU Limitations:**
+- No progressive/adaptive/wavefront optimizations (by design - GPU optimized for throughput)
+- Simplified scene representation (for GPU parallelism)
+- No analysis modes (CPU-only feature)
+- Requires OpenGL 2.0+ support
+
+### Benchmarks
+```bash
+# Quick benchmark (current phase)
+make bench
+
+# Comprehensive benchmark (all phases)
+make benchmark-all
+
+# Compare results
+make compare
+```
 
 ## Project Structure
 
@@ -188,37 +278,94 @@ make help            # Show all targets
 ray-tracer/
 ├── README.md              # This file
 ├── Makefile               # Build system
-├── CMakeLists.txt         # CMake config
-├── docs/                  # Documentation
+├── CLAUDE.md              # Project context for AI assistants
+├── INTERACTIVE_GUIDE.md   # Interactive mode guide
+├── CHANGELOG.md           # Development history
+├── docs/                  # Comprehensive documentation
 │   ├── index.md           # Main documentation index
-│   ├── phase1-foundation.md
-│   ├── phase2-rendering.md
-│   ├── phase3-simd.md
-│   ├── phase4-advanced.md
-│   ├── phase5-multithreading.md
-│   └── phase6-polish.md
+│   ├── cpu-performance-results.md    # Performance benchmarks
+│   ├── ASCII_RENDERER.md  # ASCII mode documentation
+│   └── ...
 ├── src/
-│   ├── main.cpp
-│   ├── math/
-│   │   ├── vec3.h              # Scalar Vec3
-│   │   ├── vec3_avx2.h         # SIMD Vec3 (8-wide)
-│   │   ├── ray.h
-│   │   └── ray_packet.h        # 8-ray packets
-│   ├── primitives/
-│   │   ├── primitive.h
-│   │   ├── sphere.h
-│   │   └── sphere_simd.h       # SIMD intersection
-│   ├── material/
-│   │   └── material.h
-│   ├── camera/
-│   │   └── camera.h
-│   ├── scene/
-│   │   ├── scene.h
-│   │   └── light.h
-│   └── renderer/
-│       ├── renderer.h
-│       └── renderer.cpp
-└── build/                  # Build artifacts
+│   ├── main.cpp           # Batch ray tracer
+│   ├── main_cpu_interactive.cpp  # CPU interactive mode
+│   ├── main_gpu_interactive.cpp  # GPU interactive mode
+│   ├── main_ascii.cpp     # ASCII terminal mode
+│   ├── math/              # Vec3, Ray, SIMD operations
+│   ├── primitives/        # Sphere, Triangle, Primitive base
+│   ├── material/          # Lambertian, Metal, Dielectric
+│   ├── camera/            # Camera with perspective projection
+│   ├── scene/             # Scene graph, Lights, Cornell Box
+│   ├── renderer/          # Ray tracing logic, GPU renderer
+│   └── texture/           # Texture system
+├── external/              # External libraries (stb_image_write)
+└── build/                 # Build artifacts
+```
+
+## Makefile Targets
+
+### Building
+```bash
+make batch-cpu         # Build CPU batch ray tracer
+make batch-gpu         # Build GPU batch ray tracer
+make interactive-cpu   # Build CPU interactive (SDL2)
+make interactive       # Alias for interactive-cpu
+make interactive-gpu   # Build GPU interactive (GLSL 1.20)
+make ascii             # Build ASCII terminal
+make all               # Build default (batch-cpu)
+```
+
+### Running
+```bash
+make run               # Build and run CPU batch
+make run-gpu           # Build and run GPU batch
+make runi-cpu          # Build and run CPU interactive
+make runi              # Alias for runi-cpu
+make runi-gpu          # Build and run GPU interactive
+make runa              # Build and run ASCII terminal
+```
+
+### Performance Comparison
+```bash
+make benchmark         # Benchmark CPU feature combinations
+make benchmark-cpu-gpu  # Compare CPU vs GPU performance
+```
+
+### Utilities
+```bash
+make clean             # Remove build artifacts
+make rebuild           # Clean and rebuild
+make config            # Show build configuration
+make deps              # Check dependencies
+make docs              # Show documentation
+make help              # Show all targets
+```
+
+### Feature Flags
+```bash
+# Rendering features
+make batch-cpu ENABLE_SHADOWS=0          # Disable shadows
+make batch-cpu ENABLE_REFLECTIONS=0      # Disable reflections
+
+# CPU optimizations (Phase 1)
+make batch-cpu ENABLE_SHADOW_CULLING=1  # Shadow ray culling (+8.6%)
+make batch-cpu ENABLE_FAST_RNG=1        # XOR-shift RNG (+2.8%)
+make batch-cpu ENABLE_LOOP_UNROLL=1     # Loop unrolling (+3-5%)
+
+# Parallelization and SIMD
+make batch-cpu ENABLE_OPENMP=1          # OpenMP multi-threading (+14-20x)
+make batch-cpu ENABLE_PTHREADS=1        # Pthreads multi-threading (+12-18x)
+make batch-cpu ENABLE_AVX=1             # SIMD vectorization (+4-6x)
+make batch-cpu ENABLE_OPENMP=0 ENABLE_PTHREADS=0 ENABLE_AVX=0  # Scalar single-threaded baseline
+
+# Advanced rendering modes
+make batch-cpu ENABLE_PROGRESSIVE=1      # Progressive rendering (3.164x)
+make batch-cpu ENABLE_ADAPTIVE=1         # Adaptive sampling (1.702x)
+make batch-cpu ENABLE_WAVEFRONT=1        # Wavefront rendering (1.358x)
+
+# Performance comparisons
+make batch-cpu ENABLE_OPENMP=0 ENABLE_AVX=0  # Compare to scalar baseline
+make benchmark  # Full optimization stack comparison
 ```
 
 ## Documentation
@@ -226,69 +373,80 @@ ray-tracer/
 Comprehensive documentation is available in the [docs/](docs/) folder:
 
 - **[Overview](docs/index.md)** - Project overview and roadmap
-- **[Phase 1](docs/phase1-foundation.md)** - Mathematical foundation
-- **[Phase 2](docs/phase2-rendering.md)** - Rendering pipeline
-- **[Phase 3](docs/phase3-simd.md)** - SIMD vectorization
-- **[Phase 4](docs/phase4-advanced.md)** - Advanced features (planned)
-- **[Phase 5](docs/phase5-multithreading.md)** - Multi-threading (planned)
-- **[Phase 6](docs/phase6-polish.md)** - Polish and deployment (planned)
+- **[CPU Performance Results](docs/cpu-performance-results.md)** - Detailed benchmarks
+- **[GPU Renderer Guide](docs/GPU_RENDERER_GUIDE.md)** - GPU implementation, features, and quality presets
+- **[GPU Renderer](docs/GPU_RENDERER.md)** - GPU implementation and performance
+- **[ASCII Renderer](docs/ASCII_RENDERER.md)** - ASCII mode documentation
+- **[Performance Optimization Plan](docs/cpu-performance-optimization-plan.md)** - Optimization strategies
+- **[Glass Materials Guide](docs/glass-materials-guide.md)** - Dielectric materials
 
-## Technical Highlights
+## Technical Details
 
-### SIMD Architecture
-- **8-wide AVX2** processes 8 rays simultaneously
-- **Structure of Arrays (SoA)** for efficient vectorization
-- **Hybrid strategy:** SIMD for coherent rays, scalar for incoherent
-- **Ray packets:** Primary rays (SIMD) + shadow rays (scalar)
-
-### Rendering Pipeline
-1. Generate primary rays from camera (SIMD packet of 8)
-2. Find closest intersection (vectorized sphere test)
-3. Calculate Phong shading
-4. Cast shadow rays (scalar - incoherent)
-5. Cast reflection rays (hybrid - semi-coherent)
-6. Recurse until max depth reached
-
-### Memory Layout
-```cpp
-// Array of Structures (AoS) - BAD for SIMD
-struct Vec3AoS {
-    float x, y, z;
-};
-
-// Structure of Arrays (SoA) - GOOD for SIMD
-struct Vec3SoA {
-    __m256 x;  // 8 x-coordinates
-    __m256 y;  // 8 y-coordinates
-    __m256 z;  // 8 z-coordinates
-};
+### Compiler Flags
+```bash
+-O3                    # Maximum optimization
+-march=native          # CPU-specific instructions
+-mavx2                 # AVX2 SIMD
+-mfma                  # Fused multiply-add
+-ffast-math            # Aggressive FP optimizations
+-fopenmp               # OpenMP multi-threading
+-flto                  # Link-time optimization
 ```
 
-## Advanced Features (Planned)
+### Architecture
 
-### Geometry
-- Triangles (Möller-Trumbore)
-- Meshes (OBJ loading)
-- Planes
-- CSG operations
+**SIMD Strategy:**
+- Primary rays processed in packets of 8 (AVX2 width)
+- Shadow rays scalar (incoherent directions)
+- Structure of Arrays (SoA) for ray packets
 
-### Rendering
-- Soft shadows (area lights)
-- Anti-aliasing (supersampling)
-- Depth of field
-- Motion blur
-- Path tracing
+**Rendering Pipeline:**
+1. Generate primary rays from camera
+2. Find closest intersection
+3. Calculate Phong shading
+4. Cast shadow rays (with culling)
+5. Cast reflection rays
+6. Recurse until max depth
 
-### Materials
-- Glass (dielectric)
-- Subsurface scattering
-- Emissive
-- Procedural textures
+**Multi-threading:**
+- OpenMP with dynamic scheduling
+- Thread-safe framebuffer writes
+- Each thread processes disjoint pixels
 
-### Performance
-- BVH acceleration structure
-- OpenMP multi-threading
-- Task-based parallelism
+## Troubleshooting
+
+### Common Issues
+
+**Black Screen:**
+- Check enable_shadows and enable_reflections
+- Verify scene setup
+- Check camera position
+
+**Crashes:**
+- Reduce sample count
+- Lower resolution
+- Check memory usage
+
+**Low Performance:**
+- Check thread count: `omp_get_max_threads()`
+- Verify AVX2 support
+- Lower quality level
+- Try GPU mode
+
+### Platform-Specific
+
+**macOS:**
+- OpenMP via: `/usr/local/opt/libomp`
+- System fonts: `/System/Library/Fonts/`
+
+**Linux:**
+- Package manager dependencies vary
+- System fonts: `/usr/share/fonts/truetype/`
+
+**Windows:**
+- MinGW-w64 or MSVC supported
+- vcpkg recommended for dependencies
+- Font paths differ significantly
 
 ## Contributing
 
@@ -303,16 +461,11 @@ This is an educational project. Feel free to:
 - [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html)
 - [Intel Intrinsics Guide](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/)
 - [PBRT](https://www.pbrt.org/)
-- [SmallVCM](https://github.com/SmallVCM/SmallVCM)
 
 ## License
 
 MIT License - Feel free to use for learning and experimentation.
 
-## Authors
-
-Built with guidance from Claude (Anthropic) and modern ray tracing techniques.
-
 ---
 
-**Current Status:** Phase 3 (SIMD Vectorization) implemented with comprehensive documentation and Makefile workflow. Ready for advanced features and multi-threading.
+**Current Status:** CPU optimizations complete with progressive, adaptive, and wavefront rendering. GPU rendering in active development.

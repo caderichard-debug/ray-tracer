@@ -368,8 +368,15 @@ private:
     std::vector<Button> buttons;
     int panel_x, panel_y;
 
+    // Scroll functionality
+    int scroll_offset;
+    int max_scroll_offset;
+    int content_height;
+    bool is_scrollable;
+
 public:
-    ControlsPanel() : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0) {
+    ControlsPanel() : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0),
+                      scroll_offset(0), max_scroll_offset(0), content_height(0), is_scrollable(false) {
         text_color = {20, 20, 20, 255};
         background_color = {50, 50, 60, 230};  // Dark blue-gray
         title_color = {100, 200, 255, 255};     // Light blue
@@ -430,29 +437,31 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(850, window_height - 20);  // Increased for Phase 2 optimizations
+        int panel_height = std::min(700, window_height - 20);  // Fixed visible height
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
 
-        SDL_Surface* surface = SDL_CreateRGBSurface(0, overlay_rect.w, overlay_rect.h, 32, 0, 0, 0, 0);
-        if (!surface) return;
+        // Create a larger surface for scrollable content
+        int content_surface_height = 1200;  // Maximum content height
+        SDL_Surface* content_surface = SDL_CreateRGBSurface(0, panel_width, content_surface_height, 32, 0, 0, 0, 0);
+        if (!content_surface) return;
 
-        // Fill background with rounded appearance
-        SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 50, 50, 60, 230));
+        // Fill content background
+        SDL_FillRect(content_surface, nullptr, SDL_MapRGBA(content_surface->format, 50, 50, 60, 230));
 
         // Render title
         const char* title_text = "SETTINGS";
         SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
         if (title_surface) {
             SDL_Rect title_rect = {15, 10, title_surface->w, title_surface->h};
-            SDL_BlitSurface(title_surface, nullptr, surface, &title_rect);
+            SDL_BlitSurface(title_surface, nullptr, content_surface, &title_rect);
             SDL_FreeSurface(title_surface);
         }
 
         // Draw separator line
         SDL_Rect separator = {10, 35, panel_width - 20, 1};
-        SDL_FillRect(surface, &separator, SDL_MapRGBA(surface->format, 100, 100, 120, 255));
+        SDL_FillRect(content_surface, &separator, SDL_MapRGBA(content_surface->format, 100, 100, 120, 255));
 
         int y_offset = 50;
         const int line_height = 28;

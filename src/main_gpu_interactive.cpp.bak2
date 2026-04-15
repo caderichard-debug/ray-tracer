@@ -210,39 +210,13 @@ public:
             "  C           - Toggle controls panel",
             "  ESC         - Quit",
             "",
-            "Phase 1 Features:",
-#if ENABLE_PBR
-            "  ✓ PBR lighting (Cook-Torrance BRDF)",
-#else
-            "  ✗ PBR lighting (Phong mode only)",
-#endif
-#if ENABLE_MULTIPLE_LIGHTS
-            "  ✓ Multiple lights (press L to cycle)",
-#else
-            "  ✗ Multiple lights (single light only)",
-#endif
-#if ENABLE_TONE_MAPPING
-            "  ✓ ACES tone mapping",
-#endif
-#if ENABLE_GAMMA_CORRECTION
-            "  ✓ Gamma correction",
-#endif
-            "",
-            "Phase 2 Features:",
-#if ENABLE_SOFT_SHADOWS
-            "  ✓ Soft shadows (area light sampling)",
-#else
-            "  ✗ Soft shadows (hard shadows)",
-#endif
-#if ENABLE_AMBIENT_OCCLUSION
-            "  ✓ Ambient occlusion (ray-traced)",
-#else
-            "  ✗ Ambient occlusion",
-#endif
-            "",
-            "Performance: 60-500x faster than CPU",
-            "  - Real-time ray tracing at 60+ FPS",
-            "  - GLSL 1.20 (OpenGL 2.0+ compatible)",
+            "Features:",
+            "  - Real-time GPU ray tracing",
+            "  - Exact CPU Cornell Box scene",
+            "  - Phong & PBR lighting modes",
+            "  - Multiple light configurations",
+            "  - Procedural textures",
+            "  - 75+ FPS performance",
             "",
             "Press H to close this help"
         };
