@@ -118,11 +118,11 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
             float diffuse_intensity = dot_product; // Use precomputed dot
             Color diffuse = diffuse_intensity * light.intensity * rec.mat->albedo;
 
-            // Specular component (Phong) - use AVX2 for performance
+            // Specular component (Phong) - use material properties
             Vec3 view_dir = (-light_dir_normalized).normalized();
             Vec3 reflect_dir = AVX2::reflect_avx2(-light_dir_normalized, rec.normal);
-            float spec = std::pow(std::max(0.0f, dot(view_dir, reflect_dir)), 32);
-            Color specular = spec * light.intensity;
+            float spec = std::pow(std::max(0.0f, dot(view_dir, reflect_dir)), rec.mat->shininess);
+            Color specular = rec.mat->specular_intensity * spec * light.intensity;
 
             color = color + diffuse + specular;
         }

@@ -12,9 +12,12 @@
 class Material {
 public:
     Color albedo; // Base color/reflectance
+    float specular_intensity; // Specular highlight strength (0.0 = matte, 1.0 = shiny)
+    float shininess; // Specular exponent (higher = smaller, sharper highlights)
 
-    Material() : albedo(1, 1, 1) {}
-    Material(const Color& a) : albedo(a) {}
+    Material() : albedo(1, 1, 1), specular_intensity(0.0f), shininess(1.0f) {}
+    Material(const Color& a) : albedo(a), specular_intensity(0.0f), shininess(1.0f) {}
+    Material(const Color& a, float spec, float shine) : albedo(a), specular_intensity(spec), shininess(shine) {}
     virtual ~Material() = default;
 
     // Calculate scattered ray and attenuation
@@ -31,11 +34,11 @@ class Lambertian : public Material {
 public:
     std::shared_ptr<Texture> albedo_texture;
 
-    Lambertian(const Color& a) : Material(a) {
+    Lambertian(const Color& a) : Material(a, 0.0f, 1.0f) { // Very matte, no specular
         albedo_texture = std::make_shared<SolidColor>(a);
     }
 
-    Lambertian(std::shared_ptr<Texture> tex) : Material(Color(1,1,1)), albedo_texture(tex) {}
+    Lambertian(std::shared_ptr<Texture> tex) : Material(Color(1,1,1), 0.0f, 1.0f), albedo_texture(tex) {} // Matte
 
     bool scatter(const Ray& r_in, const HitRecord& rec, Color& attenuation, Ray& scattered) const override {
         (void)r_in; // Unused parameter
@@ -58,7 +61,7 @@ class Metal : public Material {
 public:
     float fuzz; // Roughness - 0 is perfect mirror, higher is more fuzzy
 
-    Metal(const Color& a, float f) : Material(a), fuzz(f < 1 ? f : 1) {}
+    Metal(const Color& a, float f) : Material(a, 0.9f, 128.0f), fuzz(f < 1 ? f : 1) {} // High specular, high shininess
 
     bool scatter(const Ray& r_in, const HitRecord& rec, Color& attenuation, Ray& scattered) const override {
         // Reflect the ray around the normal
@@ -73,7 +76,7 @@ class Dielectric : public Material {
 public:
     float ir; // Index of refraction (e.g., 1.5 for glass, 1.0 for air, 2.4 for diamond)
 
-    Dielectric(float index_of_refraction) : Material(Color(1.0, 1.0, 1.0)), ir(index_of_refraction) {}
+    Dielectric(float index_of_refraction) : Material(Color(1.0, 1.0, 1.0), 0.5f, 64.0f), ir(index_of_refraction) {} // Moderate specular like glass
 
     bool scatter(const Ray& r_in, const HitRecord& rec, Color& attenuation, Ray& scattered) const override {
         attenuation = Color(1.0, 1.0, 1.0); // Glass absorbs nothing
