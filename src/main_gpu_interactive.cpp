@@ -39,6 +39,14 @@
 #define ENABLE_GAMMA_CORRECTION 1  // Enable gamma correction
 #endif
 
+#ifndef ENABLE_SOFT_SHADOWS
+#define ENABLE_SOFT_SHADOWS 0  // Enable soft shadows (Phase 2)
+#endif
+
+#ifndef ENABLE_AMBIENT_OCCLUSION
+#define ENABLE_AMBIENT_OCCLUSION 0  // Enable ambient occlusion (Phase 2)
+#endif
+
 // Scene selection (set via Makefile)
 #ifndef SCENE_NAME
 #define SCENE_NAME "cornell_box"  // Default scene
@@ -410,6 +418,8 @@ std::string fragment_shader_source =
     "#define ENABLE_MULTIPLE_LIGHTS " + (ENABLE_MULTIPLE_LIGHTS ? "1" : "0") + "\n" +
     "#define ENABLE_TONE_MAPPING " + (ENABLE_TONE_MAPPING ? "1" : "0") + "\n" +
     "#define ENABLE_GAMMA_CORRECTION " + (ENABLE_GAMMA_CORRECTION ? "1" : "0") + "\n" +
+    "#define ENABLE_SOFT_SHADOWS " + (ENABLE_SOFT_SHADOWS ? "1" : "0") + "\n" +
+    "#define ENABLE_AMBIENT_OCCLUSION " + (ENABLE_AMBIENT_OCCLUSION ? "1" : "0") + "\n" +
     R"(
 
 uniform vec2 resolution;
@@ -453,6 +463,15 @@ uniform int num_lights;                 // Number of active lights
 uniform vec3 light_positions[4];
 uniform vec3 light_colors[4];
 uniform float light_intensities[4];
+
+// Advanced lighting options
+uniform bool enable_soft_shadows;         // Enable soft shadows
+uniform int soft_shadow_samples;          // Samples per light (1-4)
+uniform float light_radius;              // Radius of area light
+
+// Ambient occlusion options
+uniform bool enable_ao;                  // Enable ambient occlusion
+uniform int ao_samples;                  // AO samples (1-16)
 
 // Simple ray-sphere intersection
 bool hit_sphere(vec3 origin, vec3 direction, vec3 center, float radius, inout float t) {
@@ -644,6 +663,141 @@ vec3 phong_shading(vec3 N, vec3 V, vec3 L, vec3 albedo, float specular_power) {
     return albedo * (0.1 + diff * 0.7 + spec * 0.3);
 }
 
+// ============================================================================
+#if ENABLE_SOFT_SHADOWS
+// Soft shadow calculation using stratified area light sampling
+float calculate_soft_shadow(vec3 hit_point, vec3 light_pos, vec3 N, vec3 L, float light_dist) {
+    float shadow = 0.0;
+
+    // Create orthonormal basis around light direction
+    vec3 light_dir = normalize(light_pos - hit_point);
+    vec3 light_tangent = normalize(cross(light_dir, vec3(0, 1, 0)));
+    if (abs(light_tangent.x) < 0.01) {
+        light_tangent = normalize(cross(light_dir, vec3(1, 0, 0)));
+    }
+    vec3 light_bitangent = cross(light_dir, light_tangent);
+
+    // Stratified samples on light surface
+    for (int i = 0; i < soft_shadow_samples; i++) {
+        for (int j = 0; j < soft_shadow_samples; j++) {
+            // Stratified sample positions
+            float u = (float(i) + 0.5) / float(soft_shadow_samples);
+            float v = (float(j) + 0.5) / float(soft_shadow_samples);
+            u = u * 2.0 - 1.0;
+            v = v * 2.0 - 1.0;
+
+            // Point on area light
+            vec3 sample_point = light_pos +
+                light_tangent * u * light_radius +
+                light_bitangent * v * light_radius;
+
+            // Shadow ray to sample point
+            vec3 sample_dir = normalize(sample_point - hit_point);
+            float sample_dist = length(sample_point - hit_point);
+
+            // Check for occluders
+            vec3 shadow_origin = hit_point + N * 0.001;
+            float t_shadow = sample_dist;
+            bool occluded = false;
+
+            // Check spheres
+            for (int k = 0; k < num_spheres; k++) {
+                if (hit_sphere(shadow_origin, sample_dir, sphere_centers[k], sphere_radii[k], t_shadow)) {
+                    if (t_shadow < sample_dist) {
+                        occluded = true;
+                        break;
+                    }
+                }
+            }
+
+            // Check triangles
+            if (!occluded) {
+                for (int k = 0; k < num_triangles; k++) {
+                    if (hit_triangle(shadow_origin, sample_dir, tri_v0[k], tri_v1[k], tri_v2[k],
+                                   tri_normals[k], t_shadow)) {
+                        if (t_shadow < sample_dist) {
+                            occluded = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            shadow += occluded ? 0.0 : 1.0;
+        }
+    }
+
+    return shadow / float(soft_shadow_samples * soft_shadow_samples);
+}
+#endif
+
+// ============================================================================
+#if ENABLE_AMBIENT_OCCLUSION
+// Ray-traced ambient occlusion
+float calculate_ao(vec3 hit_point, vec3 N) {
+    float ao = 0.0;
+
+    for (int i = 0; i < ao_samples; i++) {
+        // Random direction in hemisphere around normal
+        float theta = acos(1.0 - 2.0 * float(i) / float(ao_samples) + 1.0 / float(ao_samples));
+        float phi = 3.14159 * (1.0 + sqrt(5.0)) * float(i);
+
+        float sin_theta = sin(theta);
+        float cos_theta = cos(theta);
+        float sin_phi = sin(phi);
+        float cos_phi = cos(phi);
+
+        vec3 sample_dir = vec3(
+            sin_theta * cos_phi,
+            sin_theta * sin_phi,
+            cos_theta
+        );
+
+        // Align with normal
+        vec3 up = abs(N.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+        vec3 tangent = normalize(cross(up, N));
+        vec3 bitangent = cross(N, tangent);
+        sample_dir = tangent * sample_dir.x + bitangent * sample_dir.y + N * sample_dir.z;
+
+        // Check for nearby occluders
+        vec3 sample_origin = hit_point + N * 0.001;
+        float t_max = 0.5;  // AO radius
+        bool occluded = false;
+
+        // Check spheres
+        for (int j = 0; j < num_spheres; j++) {
+            float t = t_max;
+            if (hit_sphere(sample_origin, sample_dir, sphere_centers[j], sphere_radii[j], t)) {
+                if (t < t_max) {
+                    occluded = true;
+                    break;
+                }
+            }
+        }
+
+        // Check triangles
+        if (!occluded) {
+            for (int j = 0; j < num_triangles; j++) {
+                float t = t_max;
+                if (hit_triangle(sample_origin, sample_dir, tri_v0[j], tri_v1[j], tri_v2[j],
+                               tri_normals[j], t)) {
+                    if (t < t_max) {
+                        occluded = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        ao += occluded ? 1.0 : 0.0;
+    }
+
+    return 1.0 - (ao / ao_samples);
+}
+#endif
+
+// ============================================================================
+
 // Calculate PBR lighting for a point
 vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
                             vec3 albedo, float roughness, float metallic) {
@@ -659,20 +813,50 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
 
         vec3 L = normalize(light_pos - hit_point);
         vec3 H = normalize(V + L);
-
-        // Shadow check (simple ray to light)
-        float shadow = 1.0;
-        vec3 shadow_origin = hit_point + N * 0.001;
-        vec3 shadow_dir = L;
         float light_dist = length(light_pos - hit_point);
 
-        // Check for shadow occluders
+        // Shadow calculation (soft or hard)
+        float shadow = 1.0;
+#if ENABLE_SOFT_SHADOWS
+        if (enable_soft_shadows && soft_shadow_samples > 1) {
+            shadow = calculate_soft_shadow(hit_point, light_pos, N, L, light_dist);
+        } else {
+            // Hard shadow (single sample)
+            vec3 shadow_origin = hit_point + N * 0.001;
+            float t_shadow = light_dist;
+            bool in_shadow = false;
+
+            for (int j = 0; j < num_spheres; j++) {
+                if (hit_sphere(shadow_origin, L, sphere_centers[j], sphere_radii[j], t_shadow)) {
+                    if (t_shadow < light_dist) {
+                        in_shadow = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!in_shadow) {
+                for (int j = 0; j < num_triangles; j++) {
+                    if (hit_triangle(shadow_origin, L, tri_v0[j], tri_v1[j], tri_v2[j],
+                                   tri_normals[j], t_shadow)) {
+                        if (t_shadow < light_dist) {
+                            in_shadow = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            shadow = in_shadow ? 0.0 : 1.0;
+        }
+#else
+        // Hard shadows only (soft shadows disabled at compile time)
+        vec3 shadow_origin = hit_point + N * 0.001;
         float t_shadow = light_dist;
         bool in_shadow = false;
 
-        // Check spheres for shadow
         for (int j = 0; j < num_spheres; j++) {
-            if (hit_sphere(shadow_origin, shadow_dir, sphere_centers[j], sphere_radii[j], t_shadow)) {
+            if (hit_sphere(shadow_origin, L, sphere_centers[j], sphere_radii[j], t_shadow)) {
                 if (t_shadow < light_dist) {
                     in_shadow = true;
                     break;
@@ -680,10 +864,9 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
             }
         }
 
-        // Check triangles for shadow
         if (!in_shadow) {
             for (int j = 0; j < num_triangles; j++) {
-                if (hit_triangle(shadow_origin, shadow_dir, tri_v0[j], tri_v1[j], tri_v2[j],
+                if (hit_triangle(shadow_origin, L, tri_v0[j], tri_v1[j], tri_v2[j],
                                tri_normals[j], t_shadow)) {
                     if (t_shadow < light_dist) {
                         in_shadow = true;
@@ -693,9 +876,8 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
             }
         }
 
-        if (in_shadow) {
-            shadow = 0.0;
-        }
+        shadow = in_shadow ? 0.0 : 1.0;
+#endif
 
         // Cook-Torrance BRDF
         vec3 brdf = cook_torrance_brdf(N, V, L, H, albedo, roughness, metallic);
@@ -729,6 +911,15 @@ vec3 calculate_pbr_lighting(vec3 hit_point, vec3 N, vec3 V,
     vec3 diffuse_ibl = albedo * irradiance * 0.15;
 
     vec3 ibl = diffuse_ibl + specular_ibl;
+
+    // Apply ambient occlusion if enabled
+#if ENABLE_AMBIENT_OCCLUSION
+    float ao = 1.0;
+    if (enable_ao && ao_samples > 0) {
+        ao = calculate_ao(hit_point, N);
+    }
+    ibl *= ao;
+#endif
 
     return Lo + ibl;
 }
@@ -1388,6 +1579,13 @@ int main(int argc, char* argv[]) {
         light_intensities_loc[i] = glGetUniformLocation(program, name.c_str());
     }
 
+    // Phase 2: Advanced lighting uniforms
+    GLint enable_soft_shadows_loc = glGetUniformLocation(program, "enable_soft_shadows");
+    GLint soft_shadow_samples_loc = glGetUniformLocation(program, "soft_shadow_samples");
+    GLint light_radius_loc = glGetUniformLocation(program, "light_radius");
+    GLint enable_ao_loc = glGetUniformLocation(program, "enable_ao");
+    GLint ao_samples_loc = glGetUniformLocation(program, "ao_samples");
+
     // Rendering settings (matching CPU version)
     bool enable_reflections = true;
     int max_depth = 5;
@@ -1417,6 +1615,14 @@ int main(int argc, char* argv[]) {
         0.5f,    // Rim light
         0.0f     // Spare (off)
     };
+
+    // Phase 2: Advanced lighting settings
+    bool enable_soft_shadows = false;  // Disabled by default (performance)
+    int soft_shadow_samples = 2;       // 2x2 = 4 samples per light
+    float light_radius = 2.0;          // Radius of area light
+
+    bool enable_ao = false;            // Disabled by default (performance)
+    int ao_samples = 8;                // AO hemisphere samples
 
     // Setup scene data
     std::vector<SphereData> spheres;
@@ -1568,6 +1774,13 @@ int main(int argc, char* argv[]) {
                 glUniform3f(light_colors_loc[i], light_colors[i][0], light_colors[i][1], light_colors[i][2]);
                 glUniform1f(light_intensities_loc[i], light_intensities[i]);
             }
+
+            // Set Phase 2 lighting uniforms
+            glUniform1i(enable_soft_shadows_loc, enable_soft_shadows ? 1 : 0);
+            glUniform1i(soft_shadow_samples_loc, soft_shadow_samples);
+            glUniform1f(light_radius_loc, light_radius);
+            glUniform1i(enable_ao_loc, enable_ao ? 1 : 0);
+            glUniform1i(ao_samples_loc, ao_samples);
 
             // Set sphere uniforms
             for (size_t i = 0; i < spheres.size(); i++) {
