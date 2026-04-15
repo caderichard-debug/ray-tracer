@@ -32,15 +32,18 @@ public:
     bool enable_wavefront; // Enable wavefront rendering
     int wavefront_size; // Number of rays to process in each wave
 
+    // Cache-friendly rendering state
+    bool enable_morton; // Enable Morton Z-curve ordering
+
     Renderer() : max_depth(5), enable_shadows(true), enable_reflections(true),
                  enable_progressive(false), current_pass(0), max_passes(10),
                  enable_adaptive(false), variance_threshold(0.01f), min_samples(4), max_samples(64),
-                 enable_wavefront(false), wavefront_size(1024) {}
+                 enable_wavefront(false), wavefront_size(1024), enable_morton(false) {}
 
     Renderer(int depth) : max_depth(depth), enable_shadows(true), enable_reflections(true),
                           enable_progressive(false), current_pass(0), max_passes(10),
                           enable_adaptive(false), variance_threshold(0.01f), min_samples(4), max_samples(64),
-                          enable_wavefront(false), wavefront_size(1024) {}
+                          enable_wavefront(false), wavefront_size(1024), enable_morton(false) {}
 
     // Main ray tracing function
     Color ray_color(const Ray& r, const Scene& scene, int depth) const;
@@ -61,6 +64,10 @@ public:
     // Wavefront rendering functions
     void render_wavefront(const Camera& cam, const Scene& scene, std::vector<std::vector<Color>>& framebuffer,
                          int width, int height, int samples);
+
+    // Cache-friendly rendering functions
+    void render_morton(const Camera& cam, const Scene& scene, std::vector<std::vector<Color>>& framebuffer,
+                       int width, int height, int samples);
 };
 
 #endif // RENDERER_H

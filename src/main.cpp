@@ -24,6 +24,7 @@
 #include "renderer/renderer.h"
 #include "renderer/performance.h"
 #include "scene/cornell_box.h"
+#include "math/morton.h"
 
 // Fast XOR-shift random number generator with atomic counter
 inline float random_float() {
@@ -157,7 +158,53 @@ int main(int argc, char* argv[]) {
     std::cerr << "OpenMP threads: " << omp_get_max_threads() << std::endl;
     #endif
 
-    // Render pixels, top to bottom, left to right (parallelized with OpenMP)
+#ifdef ENABLE_MORTON
+    // Use Morton Z-curve ordering for cache-friendly rendering
+    std::cerr << "Using Morton Z-curve ordering for cache optimization" << std::endl;
+
+    // Generate Morton-ordered pixel list
+    auto morton_pixels = Morton::generate_morton_pixels(image_width, image_height);
+
+    // Process pixels in Morton order (Z-curve) for better cache locality
+    #pragma omp parallel for schedule(dynamic, 4)
+    for (size_t idx = 0; idx < morton_pixels.size(); ++idx) {
+        const auto& pixel = morton_pixels[idx];
+        int i = pixel.x;
+        int j = pixel.y;
+
+        if (idx % (image_width * 10) == 0) {
+            #pragma omp critical
+            std::cerr << "\rMorton pixels processed: " << idx << '/' << morton_pixels.size() << ' ' << std::flush;
+        }
+
+        Color pixel_color(0, 0, 0);
+
+        // Sample pixels for anti-aliasing
+        for (int s = 0; s < samples_per_pixel; ++s) {
+            float u = (i + random_float()) / (image_width - 1);
+            float v = (j + random_float()) / (image_height - 1);
+
+            Ray r = cam.get_ray(u, v);
+            pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
+        }
+
+        // Average the samples
+        float scale = 1.0f / samples_per_pixel;
+        pixel_color = pixel_color * scale;
+
+        // Gamma correction (gamma 2)
+        pixel_color.x = std::sqrt(pixel_color.x);
+        pixel_color.y = std::sqrt(pixel_color.y);
+        pixel_color.z = std::sqrt(pixel_color.z);
+
+        // Write to framebuffer (convert to 0-255 range)
+        int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+        framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+        framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+        framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+    }
+#else
+    // Standard scanline rendering (top to bottom, left to right)
     #pragma omp parallel for schedule(dynamic, 4)
     for (int j = image_height - 1; j >= 0; --j) {
         if (j % 10 == 0) {
@@ -192,6 +239,7 @@ int main(int argc, char* argv[]) {
             framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
         }
     }
+#endif
 
     std::cerr << "\n";
 

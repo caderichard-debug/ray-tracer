@@ -40,12 +40,15 @@ ENABLE_AVX ?= 1
 ENABLE_PROGRESSIVE ?= 0
 ENABLE_ADAPTIVE ?= 0
 ENABLE_WAVEFRONT ?= 0
+ENABLE_MORTON ?= 0
 
 # GPU feature flags (for main_gpu_interactive)
 ENABLE_GPU_PBR ?= 1              # Enable PBR lighting
 ENABLE_GPU_MULTIPLE_LIGHTS ?= 1  # Enable multiple light support
 ENABLE_GPU_TONE_MAPPING ?= 1     # Enable ACES tone mapping
 ENABLE_GPU_GAMMA_CORRECTION ?= 1 # Enable gamma correction
+ENABLE_SOFT_SHADOWS ?= 0         # Enable soft shadows (Phase 2)
+ENABLE_AMBIENT_OCCLUSION ?= 0    # Enable ambient occlusion (Phase 2)
 
 # GPU scene selection
 GPU_SCENE ?= cornell_box         # Options: cornell_box, gpu_demo
@@ -65,7 +68,8 @@ FEATURE_DEFINES = -DENABLE_SHADOWS=$(ENABLE_SHADOWS) \
                   -DENABLE_AVX=$(ENABLE_AVX) \
                   -DENABLE_PROGRESSIVE=$(ENABLE_PROGRESSIVE) \
                   -DENABLE_ADAPTIVE=$(ENABLE_ADAPTIVE) \
-                  -DENABLE_WAVEFRONT=$(ENABLE_WAVEFRONT)
+                  -DENABLE_WAVEFRONT=$(ENABLE_WAVEFRONT) \
+                  -DENABLE_MORTON=$(ENABLE_MORTON)
 
 # Compiler flags based on features
 ifeq ($(ENABLE_OPENMP),1)
@@ -110,6 +114,7 @@ batch-cpu: $(BUILD_DIR)
 	@echo "  Progressive:    $(ENABLE_PROGRESSIVE) [3.164x]"
 	@echo "  Adaptive:       $(ENABLE_ADAPTIVE) [1.702x]"
 	@echo "  Wavefront:      $(ENABLE_WAVEFRONT) [1.358x]"
+	@echo "  Morton Order:   $(ENABLE_MORTON) [+10-15%]"
 	@echo ""
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) \
 		$(FEATURE_DEFINES) \

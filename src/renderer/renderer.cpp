@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "../math/vec3_avx2.h"
 #include "../math/pcg_random.h"
+#include "../math/morton.h"
 #include <iostream>
 #include <limits>
 #include <algorithm>
@@ -243,5 +244,73 @@ void Renderer::render_wavefront(const Camera& cam, const Scene& scene, std::vect
                 }
             }
         }
+    }
+}
+
+// Cache-Friendly Morton Z-Curve Rendering
+void Renderer::render_morton(const Camera& cam, const Scene& scene, std::vector<std::vector<Color>>& framebuffer,
+                             int width, int height, int samples) {
+    // Generate Morton-ordered pixel list for cache-friendly traversal
+    std::vector<Morton::MortalPixel> morton_pixels = Morton::generate_morton_pixels(width, height);
+
+    // Process pixels in Morton order (Z-curve) for better cache locality
+    #pragma omp parallel for schedule(dynamic, 4)
+    for (size_t idx = 0; idx < morton_pixels.size(); ++idx) {
+        const auto& pixel = morton_pixels[idx];
+        int i = pixel.x;
+        int j = pixel.y;
+
+        Color pixel_color(0, 0, 0);
+
+#ifdef ENABLE_LOOP_UNROLL
+        // Loop unrolling by 4 for better performance
+        int s = 0;
+        for (; s + 4 <= samples; s += 4) {
+            // Use PCG random number generator (thread-safe, fast)
+            float u0 = (i + random_float_pcg()) / (width - 1);
+            float v0 = (j + random_float_pcg()) / (height - 1);
+            Ray r0 = cam.get_ray(u0, v0);
+            pixel_color = pixel_color + ray_color(r0, scene, max_depth);
+
+            float u1 = (i + random_float_pcg()) / (width - 1);
+            float v1 = (j + random_float_pcg()) / (height - 1);
+            Ray r1 = cam.get_ray(u1, v1);
+            pixel_color = pixel_color + ray_color(r1, scene, max_depth);
+
+            float u2 = (i + random_float_pcg()) / (width - 1);
+            float v2 = (j + random_float_pcg()) / (height - 1);
+            Ray r2 = cam.get_ray(u2, v2);
+            pixel_color = pixel_color + ray_color(r2, scene, max_depth);
+
+            float u3 = (i + random_float_pcg()) / (width - 1);
+            float v3 = (j + random_float_pcg()) / (height - 1);
+            Ray r3 = cam.get_ray(u3, v3);
+            pixel_color = pixel_color + ray_color(r3, scene, max_depth);
+        }
+        // Handle remaining samples
+        for (; s < samples; ++s) {
+            float u = (i + random_float_pcg()) / (width - 1);
+            float v = (j + random_float_pcg()) / (height - 1);
+            Ray r = cam.get_ray(u, v);
+            pixel_color = pixel_color + ray_color(r, scene, max_depth);
+        }
+#else
+        for (int s = 0; s < samples; ++s) {
+            // Use PCG random number generator (thread-safe, fast)
+            float u = (i + random_float_pcg()) / (width - 1);
+            float v = (j + random_float_pcg()) / (height - 1);
+
+            Ray r = cam.get_ray(u, v);
+            pixel_color = pixel_color + ray_color(r, scene, max_depth);
+        }
+#endif
+
+        float scale = 1.0f / samples;
+        pixel_color = AVX2::scale_avx2(pixel_color, scale);
+
+        // Gamma correction using SIMD
+        pixel_color = AVX2::sqrt_avx2(pixel_color);
+
+        framebuffer[height - 1 - j][i] = pixel_color;
     }
 }
