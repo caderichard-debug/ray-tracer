@@ -25,6 +25,13 @@
 #include "scene/cornell_box.h"
 #include "renderer/renderer.h"
 #include "renderer/render_analysis.h"
+#include "renderer/gpu_renderer.h"
+
+// Renderer type selection
+enum class RendererType {
+    CPU,
+    GPU
+};
 
 
 // Quality presets (resolution, samples, max_depth)
@@ -955,10 +962,10 @@ int main(int argc, char* argv[]) {
     bool enable_reflections = true;
 
     // Create window
-    const char* window_title = "Real-time Ray Tracer - CPU (OpenMP)";
+    std::string window_title = "Real-time Ray Tracer - CPU (OpenMP)";
 
     SDL_Window* window = SDL_CreateWindow(
-        window_title,
+        window_title.c_str(),
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
         preset.width,
@@ -1022,6 +1029,25 @@ int main(int argc, char* argv[]) {
     ray_renderer.enable_reflections = enable_reflections;
     std::cout << "CPU Renderer initialized (OpenMP with " << omp_get_max_threads() << " threads)" << std::endl;
 
+    // Initialize GPU renderer
+    RendererType current_renderer = RendererType::CPU;  // Default to CPU
+    std::unique_ptr<GPURenderer> gpu_renderer = nullptr;
+
+    // Try to initialize GPU renderer
+    try {
+        gpu_renderer = std::make_unique<GPURenderer>();
+        if (gpu_renderer->initialize(image_width, image_height)) {
+            gpu_renderer->set_scene(std::make_shared<Scene>(scene));
+            std::cout << "GPU Renderer initialized successfully" << std::endl;
+        } else {
+            std::cout << "GPU Renderer initialization failed, using CPU only" << std::endl;
+            gpu_renderer = nullptr;
+        }
+    } catch (const std::exception& e) {
+        std::cout << "GPU Renderer not available: " << e.what() << std::endl;
+        gpu_renderer = nullptr;
+    }
+
     // Main loop
     bool running = true;
     bool paused = false;
@@ -1070,7 +1096,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  1-6           - Change quality level\n";
     std::cout << "  C             - Toggle interactive controls panel\n";
     std::cout << "  H             - Toggle help overlay\n";
-    std::cout << "  H             - Toggle help overlay\n";
+    std::cout << "  R             - Toggle CPU/GPU renderer\n";
     std::cout << "  Space         - Pause rendering\n";
     std::cout << "  S             - Save screenshot (screenshots/screenshot_*.png)\n";
     std::cout << "  ESC           - Quit\n";
@@ -1103,6 +1129,24 @@ int main(int argc, char* argv[]) {
                         analysis.set_mode(static_cast<AnalysisMode>(mode));
                         std::cout << "Analysis mode: " << analysis.get_mode_name() << std::endl;
                         need_render = true;
+                        break;
+                    }
+                    case SDLK_r: {  // Toggle CPU/GPU renderer
+                        if (gpu_renderer) {
+                            if (current_renderer == RendererType::CPU) {
+                                current_renderer = RendererType::GPU;
+                                window_title = "Real-time Ray Tracer - GPU (Compute Shaders)";
+                                std::cout << "Switched to GPU renderer" << std::endl;
+                            } else {
+                                current_renderer = RendererType::CPU;
+                                window_title = "Real-time Ray Tracer - CPU (OpenMP)";
+                                std::cout << "Switched to CPU renderer" << std::endl;
+                            }
+                            SDL_SetWindowTitle(window, window_title.c_str());
+                            need_render = true;
+                        } else {
+                            std::cout << "GPU renderer not available" << std::endl;
+                        }
                         break;
                     }
                     case SDLK_SPACE:
@@ -1355,8 +1399,52 @@ int main(int argc, char* argv[]) {
             // Get camera from controller
             Camera cam = camera_controller.get_camera();
 
-            // CPU rendering path
-            #pragma omp parallel for schedule(dynamic, 4)
+            // Choose rendering path based on current renderer
+            if (current_renderer == RendererType::GPU && gpu_renderer) {
+                // GPU rendering path
+                std::cout << "GPU rendering..." << std::endl;
+
+                // Resize GPU renderer if needed
+                gpu_renderer->resize(image_width, image_height);
+
+                // Render with GPU
+                std::vector<std::vector<Color>> gpu_framebuffer;
+                gpu_renderer->render(cam, gpu_framebuffer);
+
+                // Convert GPU framebuffer to SDL texture format
+                #pragma omp parallel for schedule(dynamic, 4)
+                for (int j = image_height - 1; j >= 0; --j) {
+                    for (int i = 0; i < image_width; ++i) {
+                        Color color = gpu_framebuffer[image_height - 1 - j][i];
+
+                        // Gamma correction and tone mapping
+                        color.x = sqrt(color.x);
+                        color.y = sqrt(color.y);
+                        color.z = sqrt(color.z);
+
+                        // Convert to 0-255 range
+                        float r = color.x > 1.0f ? 1.0f : (color.x < 0.0f ? 0.0f : color.x);
+                        float g = color.y > 1.0f ? 1.0f : (color.y < 0.0f ? 0.0f : color.y);
+                        float b = color.z > 1.0f ? 1.0f : (color.z < 0.0f ? 0.0f : color.z);
+
+                        int ir = static_cast<int>(255.999 * r);
+                        int ig = static_cast<int>(255.999 * g);
+                        int ib = static_cast<int>(255.999 * b);
+
+                        // Store in framebuffer (SDL texture format: RGB)
+                        size_t pixel_idx = ((image_height - 1 - j) * image_width + i) * 3;
+                        framebuffer[pixel_idx + 0] = ir;
+                        framebuffer[pixel_idx + 1] = ig;
+                        framebuffer[pixel_idx + 2] = ib;
+                    }
+                }
+
+                std::cout << "GPU render complete" << std::endl;
+            } else {
+                // CPU rendering path
+                std::cout << "CPU rendering..." << std::endl;
+
+                #pragma omp parallel for schedule(dynamic, 4)
             for (int j = image_height - 1; j >= 0; --j) {
                 for (int i = 0; i < image_width; ++i) {
                     Color pixel_color(0, 0, 0);
@@ -1420,7 +1508,10 @@ int main(int argc, char* argv[]) {
                     framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(final_color.y, 0.0f, 0.999f));
                     framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(final_color.z, 0.0f, 0.999f));
                 }
-            }
+                }
+
+                std::cout << "CPU render complete" << std::endl;
+            }  // End of CPU/GPU rendering paths
 
             // Update texture
             void* pixels;
