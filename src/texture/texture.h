@@ -59,6 +59,20 @@ public:
     float scale;     // Gradient scale factor
     float offset;    // Offset for positioning the gradient
 
+    // Auto-calibrating constructor - takes bounding box
+    GradientTexture(Color c1, Color c2, Vec3 dir, Point3 bounds_min, Point3 bounds_max)
+        : color1(c1), color2(c2), direction(dir.normalized()) {
+        // Project bounds onto direction to find min/max values along gradient
+        float min_val = dot(bounds_min, direction);
+        float max_val = dot(bounds_max, direction);
+        float range = max_val - min_val;
+
+        // Calculate scale and offset to map [min_val, max_val] to [0, 1]
+        scale = (range > 0.0001f) ? (1.0f / range) : 1.0f;
+        offset = -min_val * scale;
+    }
+
+    // Manual constructor - for backward compatibility or custom gradients
     GradientTexture(Color c1, Color c2, Vec3 dir = Vec3(0, 1, 0), float s = 0.25f, float o = 0.0f)
         : color1(c1), color2(c2), direction(dir.normalized()), scale(s), offset(o) {}
 

@@ -8,6 +8,7 @@
 #include "primitives/triangle.h"
 #include "light.h"
 #include <memory>
+#include <algorithm>
 
 // Shared Cornell Box scene setup
 // Used by both batch renderer and interactive viewer
@@ -99,17 +100,22 @@ inline void setup_cornell_box_scene(Scene& scene) {
     auto material_noise = std::make_shared<Lambertian>(noise_marble);
     scene.add_object(std::make_shared<Sphere>(Point3(-3.5, -2.0, 2.0), 0.8, material_noise));
 
-    // Gradient texture sphere (purple to yellow vertical gradient)
-    // Sphere at Y=-1.5, radius 0.8, spans from Y=-2.3 to Y=-0.7
+    // Gradient texture sphere (purple to yellow vertical gradient) - auto-calibrated
+    // Sphere at (-1.0, -1.5, 2.0) with radius 0.8
+    Point3 sphere_center(-1.0, -1.5, 2.0);
+    float sphere_radius = 0.8;
+    Point3 sphere_bounds_min(sphere_center.x - sphere_radius, sphere_center.y - sphere_radius, sphere_center.z - sphere_radius);
+    Point3 sphere_bounds_max(sphere_center.x + sphere_radius, sphere_center.y + sphere_radius, sphere_center.z + sphere_radius);
+
     auto gradient_purple_yellow = std::make_shared<GradientTexture>(
         Color(0.6f, 0.2f, 0.8f),  // Purple
         Color(0.9f, 0.9f, 0.2f),  // Yellow
         Vec3(0, 1, 0),            // Vertical direction
-        0.625f,                   // Scale (calibrated for sphere position)
-        1.4375f                   // Offset (calibrated for sphere at Y=-2.3 to -0.7)
+        sphere_bounds_min,        // Auto-calibrate from sphere bounds
+        sphere_bounds_max
     );
     auto material_gradient = std::make_shared<Lambertian>(gradient_purple_yellow);
-    scene.add_object(std::make_shared<Sphere>(Point3(-1.0, -1.5, 2.0), 0.8, material_gradient));
+    scene.add_object(std::make_shared<Sphere>(sphere_center, sphere_radius, material_gradient));
 
     // Stripe texture sphere (orange and white horizontal stripes)
     auto stripe_orange_white = std::make_shared<StripeTexture>(
@@ -121,22 +127,34 @@ inline void setup_cornell_box_scene(Scene& scene) {
     auto material_stripe = std::make_shared<Lambertian>(stripe_orange_white);
     scene.add_object(std::make_shared<Sphere>(Point3(0.5, 1.5, 2.0), 0.8, material_stripe));
 
-    // Gradient quad (on right wall) - horizontal gradient from red to blue
-    auto gradient_red_blue = std::make_shared<GradientTexture>(
-        Color(1.0f, 0.0f, 0.0f),  // Pure red
-        Color(0.0f, 0.0f, 1.0f),  // Pure blue
-        Vec3(0, 0, 1),            // Horizontal gradient (along Z axis)
-        0.25f,                    // Scale
-        -0.25f                    // Offset (calibrated for quad at Z=1 to 5)
-    );
-    auto material_quad_gradient = std::make_shared<Lambertian>(gradient_red_blue);
-
-    // Quad made of 2 triangles on the right side
+    // Gradient quad (on right wall) - horizontal gradient from red to blue - auto-calibrated
     Point3 quad_top_left(4.0f, 3.0f, 1.0f);
     Point3 quad_top_right(4.0f, 3.0f, 5.0f);
     Point3 quad_bottom_left(4.0f, -1.0f, 1.0f);
     Point3 quad_bottom_right(4.0f, -1.0f, 5.0f);
 
+    // Calculate quad bounding box
+    Point3 quad_bounds_min(
+        std::min({quad_top_left.x, quad_top_right.x, quad_bottom_left.x, quad_bottom_right.x}),
+        std::min({quad_top_left.y, quad_top_right.y, quad_bottom_left.y, quad_bottom_right.y}),
+        std::min({quad_top_left.z, quad_top_right.z, quad_bottom_left.z, quad_bottom_right.z})
+    );
+    Point3 quad_bounds_max(
+        std::max({quad_top_left.x, quad_top_right.x, quad_bottom_left.x, quad_bottom_right.x}),
+        std::max({quad_top_left.y, quad_top_right.y, quad_bottom_left.y, quad_bottom_right.y}),
+        std::max({quad_top_left.z, quad_top_right.z, quad_bottom_left.z, quad_bottom_right.z})
+    );
+
+    auto gradient_red_blue = std::make_shared<GradientTexture>(
+        Color(1.0f, 0.0f, 0.0f),  // Pure red
+        Color(0.0f, 0.0f, 1.0f),  // Pure blue
+        Vec3(0, 0, 1),            // Horizontal gradient (along Z axis)
+        quad_bounds_min,          // Auto-calibrate from quad bounds
+        quad_bounds_max
+    );
+    auto material_quad_gradient = std::make_shared<Lambertian>(gradient_red_blue);
+
+    // Quad made of 2 triangles on the right side (vertices declared above for bounds calculation)
     scene.add_object(std::make_shared<Triangle>(quad_top_left, quad_top_right, quad_bottom_right, material_quad_gradient));
     scene.add_object(std::make_shared<Triangle>(quad_top_left, quad_bottom_right, quad_bottom_left, material_quad_gradient));
 
