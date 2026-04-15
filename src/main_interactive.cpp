@@ -677,8 +677,8 @@ public:
         float scale_x = window_width / 1920.0f;
         float scale_y = window_height / 1080.0f;
         float scale = std::min(scale_x, scale_y);
-        scale = std::max(scale, 0.5f);  // Minimum scale to prevent too-small UI
-        scale = std::min(scale, 1.5f);  // Maximum scale to prevent too-large UI
+        scale = std::max(scale, 0.6f);  // Minimum scale to prevent too-small UI
+        scale = std::min(scale, 1.3f);  // Maximum scale to prevent too-large UI
 
         // Panel positioned in top-right corner, scales with window size
         int base_panel_width = 420;
@@ -698,30 +698,19 @@ public:
         // Fill background with rounded appearance
         SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 50, 50, 60, 230));
 
-        // Helper lambda to scale and blit text
-        auto render_text_scaled = [&](TTF_Font* font_to_use, const char* text, SDL_Color color, int x, int y) {
+        // Helper lambda to render text without scaling (render at normal size, SDL scales it)
+        auto render_text_simple = [&](TTF_Font* font_to_use, const char* text, SDL_Color color, int x, int y) {
             SDL_Surface* text_surface = TTF_RenderText_Blended(font_to_use, text, color);
             if (!text_surface) return;
 
-            // Scale the text surface
-            float text_scale = scale;
-            int scaled_w = static_cast<int>(text_surface->w * text_scale);
-            int scaled_h = static_cast<int>(text_surface->h * text_scale);
-
-            SDL_Surface* scaled_surface = SDL_CreateRGBSurface(0, scaled_w, scaled_h, 32, 0, 0, 0, 0);
-            if (scaled_surface) {
-                SDL_BlitScaled(text_surface, nullptr, scaled_surface, nullptr);
-
-                SDL_Rect dest_rect = {x, y, scaled_w, scaled_h};
-                SDL_BlitSurface(scaled_surface, nullptr, surface, &dest_rect);
-                SDL_FreeSurface(scaled_surface);
-            }
+            SDL_Rect dest_rect = {x, y, text_surface->w, text_surface->h};
+            SDL_BlitSurface(text_surface, nullptr, surface, &dest_rect);
             SDL_FreeSurface(text_surface);
         };
 
         // Render title
         const char* title_text = "⚙️ INTERACTIVE CONTROLS";
-        render_text_scaled(title_font, title_text, title_color,
+        render_text_simple(title_font, title_text, title_color,
                           static_cast<int>(15 * scale), static_cast<int>(10 * scale));
 
         // Draw separator line
@@ -736,18 +725,16 @@ public:
 
         // Helper lambda to render label-value pairs
         auto render_setting = [&](const char* label, const char* value) {
-            render_text_scaled(font, label, text_color,
+            render_text_simple(font, label, text_color,
                             static_cast<int>(15 * scale), y_offset);
 
             // Get value text width for right alignment
             SDL_Surface* value_surface = TTF_RenderText_Blended(font, value, value_color);
             if (value_surface) {
-                float text_scale = scale;
-                int scaled_w = static_cast<int>(value_surface->w * text_scale);
-                int x_pos = panel_width - scaled_w - static_cast<int>(15 * scale);
+                int x_pos = panel_width - value_surface->w - static_cast<int>(15 * scale);
+                SDL_Rect value_rect = {x_pos, y_offset, value_surface->w, value_surface->h};
+                SDL_BlitSurface(value_surface, nullptr, surface, &value_rect);
                 SDL_FreeSurface(value_surface);
-
-                render_text_scaled(font, value, value_color, x_pos, y_offset);
             }
 
             y_offset += line_height;
@@ -805,22 +792,13 @@ public:
             border = {button_rect.x, button_rect.y + button_rect.h - border_thickness, button_rect.w, border_thickness};
             SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
 
-            // Draw button text (scaled)
+            // Draw button text (not scaled - render at normal size)
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, label, text_color);
             if (text_surface) {
-                float text_scale = scale;
-                int scaled_w = static_cast<int>(text_surface->w * text_scale);
-                int scaled_h = static_cast<int>(text_surface->h * text_scale);
-                int text_x = button_x + (button_width - scaled_w) / 2;
-                int text_y = y_offset + (button_height - scaled_h) / 2;
-
-                SDL_Surface* scaled_text = SDL_CreateRGBSurface(0, scaled_w, scaled_h, 32, 0, 0, 0, 0);
-                if (scaled_text) {
-                    SDL_BlitScaled(text_surface, nullptr, scaled_text, nullptr);
-                    SDL_Rect text_rect = {text_x, text_y, scaled_w, scaled_h};
-                    SDL_BlitSurface(scaled_text, nullptr, surface, &text_rect);
-                    SDL_FreeSurface(scaled_text);
-                }
+                int text_x = button_x + (button_width - text_surface->w) / 2;
+                int text_y = y_offset + (button_height - text_surface->h) / 2;
+                SDL_Rect text_rect = {text_x, text_y, text_surface->w, text_surface->h};
+                SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
                 SDL_FreeSurface(text_surface);
             }
 
@@ -896,7 +874,7 @@ public:
         };
 
         // Quality level buttons
-        render_text_scaled(font, "Quality Level:", title_color,
+        render_text_simple(font, "Quality Level:", title_color,
                           static_cast<int>(15 * scale), y_offset);
         y_offset += static_cast<int>(22 * scale);
 
@@ -908,7 +886,7 @@ public:
         y_offset += static_cast<int>(35 * scale);
 
         // Samples per pixel buttons
-        render_text_scaled(font, "Samples Per Pixel:", title_color,
+        render_text_simple(font, "Samples Per Pixel:", title_color,
                           static_cast<int>(15 * scale), y_offset);
         y_offset += static_cast<int>(22 * scale);
 
@@ -923,7 +901,7 @@ public:
         y_offset += static_cast<int>(35 * scale);
 
         // Max depth buttons
-        render_text_scaled(font, "Max Depth:", title_color,
+        render_text_simple(font, "Max Depth:", title_color,
                           static_cast<int>(15 * scale), y_offset);
         y_offset += static_cast<int>(22 * scale);
 
@@ -939,7 +917,7 @@ public:
         y_offset += static_cast<int>(22 * scale);
 
         // Resolution buttons
-        render_text_scaled(font, "Resolution:", title_color,
+        render_text_simple(font, "Resolution:", title_color,
                           static_cast<int>(15 * scale), y_offset);
         y_offset += static_cast<int>(22 * scale);
 
@@ -962,7 +940,7 @@ public:
         y_offset += static_cast<int>(22 * scale);
 
         // Render Features section
-        render_text_scaled(font, "Render Features:", title_color,
+        render_text_simple(font, "Render Features:", title_color,
                           static_cast<int>(15 * scale), y_offset);
         y_offset += static_cast<int>(22 * scale);
 
@@ -992,7 +970,7 @@ public:
         SDL_FillRect(surface, &shadows_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
 
         // Draw shadows button text (scaled)
-        render_text_scaled(font, shadows_label, text_color,
+        render_text_simple(font, shadows_label, text_color,
                           shadows_button_rect.x + (shadows_button_width - static_cast<int>(strlen(shadows_label) * 8 * scale)) / 2,
                           y_offset + (shadows_button_height - static_cast<int>(14 * scale)) / 2);
 
@@ -1021,14 +999,14 @@ public:
         SDL_FillRect(surface, &reflections_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
 
         // Draw reflections button text (scaled)
-        render_text_scaled(font, reflections_label, text_color,
+        render_text_simple(font, reflections_label, text_color,
                           reflections_button_rect.x + (reflections_button_width - static_cast<int>(strlen(reflections_label) * 8 * scale)) / 2,
                           y_offset + (reflections_button_height - static_cast<int>(14 * scale)) / 2);
 
         y_offset += static_cast<int>(35 * scale);
 
         // Debug features section
-        render_text_scaled(font, "Debug Features:", title_color,
+        render_text_simple(font, "Debug Features:", title_color,
                           static_cast<int>(15 * scale), y_offset);
         y_offset += static_cast<int>(22 * scale);
 
@@ -1083,7 +1061,7 @@ public:
             SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
 
             // Draw button text (scaled)
-            render_text_scaled(font, analysis_modes[i], text_color,
+            render_text_simple(font, analysis_modes[i], text_color,
                               button_rect.x + (button_width - static_cast<int>(strlen(analysis_modes[i]) * 8 * scale)) / 2,
                               y_offset + (button_height - static_cast<int>(14 * scale)) / 2);
         }
@@ -1276,6 +1254,26 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Enforce 16:9 aspect ratio
+    int current_window_width, current_window_height;
+    SDL_GetWindowSize(window, &current_window_width, &current_window_height);
+    float current_aspect = static_cast<float>(current_window_width) / current_window_height;
+    float target_aspect = 16.0f / 9.0f;
+
+    // Only resize if aspect ratio is significantly different
+    if (std::abs(current_aspect - target_aspect) > 0.01f) {
+        int new_height = current_window_height;
+        int new_width = static_cast<int>(new_height * target_aspect);
+
+        // If width would be too small, adjust height instead
+        if (new_width < 640) {
+            new_width = 640;
+            new_height = static_cast<int>(new_width / target_aspect);
+        }
+
+        SDL_SetWindowSize(window, new_width, new_height);
+    }
+
 #ifdef USE_GPU_RENDERER
     // Show the window explicitly
     SDL_ShowWindow(window);
@@ -1451,6 +1449,29 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = false;
+            } else if (event.type == SDL_WINDOWEVENT) {
+                // Maintain 16:9 aspect ratio on resize
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                    int new_width = event.window.data1;
+                    int new_height = event.window.data2;
+                    float target_aspect = 16.0f / 9.0f;
+                    float new_aspect = static_cast<float>(new_width) / new_height;
+
+                    // Only adjust if significantly different
+                    if (std::abs(new_aspect - target_aspect) > 0.01f) {
+                        int adjusted_height = new_height;
+                        int adjusted_width = static_cast<int>(adjusted_height * target_aspect);
+
+                        // Ensure minimum dimensions
+                        if (adjusted_width < 640) {
+                            adjusted_width = 640;
+                            adjusted_height = static_cast<int>(adjusted_width / target_aspect);
+                        }
+
+                        SDL_SetWindowSize(window, adjusted_width, adjusted_height);
+                    }
+                    need_render = true;
+                }
             } else if (event.type == SDL_KEYDOWN) {
                 switch (event.key.keysym.sym) {
                     case SDLK_ESCAPE:
