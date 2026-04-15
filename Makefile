@@ -141,6 +141,17 @@ gpu-working: $(BUILD_DIR)
 	@echo "✓ Working GPU Ray Tracer built: $(BUILD_DIR)/gpu_working"
 	@echo "Run with: ./build/gpu_working"
 
+# Interactive GPU ray tracer (same scene as CPU, with camera controls)
+.PHONY: gpu-interactive
+gpu-interactive: $(BUILD_DIR)
+	@echo "Building Interactive GPU Ray Tracer (Same Scene as CPU + Camera Controls)"
+	@echo "Features: Same scene as CPU, WASD movement, mouse look, real-time rendering"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		src/main_gpu_interactive.cpp \
+		-o $(BUILD_DIR)/gpu_interactive $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ Interactive GPU Ray Tracer built: $(BUILD_DIR)/gpu_interactive"
+	@echo "Run with: ./build/gpu_interactive"
+
 # Simple GPU test - renders a green window to verify OpenGL works
 .PHONY: gpu-test
 gpu-test: $(BUILD_DIR)
@@ -244,6 +255,14 @@ run-gpu-working: gpu-working
 	@echo "Controls: ESC to quit"
 	./build/gpu_working
 
+# Run interactive GPU ray tracer (same scene as CPU, with camera controls)
+.PHONY: run-gpu-interactive
+run-gpu-interactive: gpu-interactive
+	@echo "Starting Interactive GPU Ray Tracer (Same Scene as CPU + Camera Controls)..."
+	@echo "Features: Same scene as CPU renderer, WASD + mouse controls"
+	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, ESC to quit"
+	./build/gpu_interactive
+
 # Run with test scene
 .PHONY: test
 test: phase2
@@ -329,6 +348,7 @@ help:
 	@echo "  make gpu-legacy    - Build GPU ray tracer (OpenGL 2.0+ fragment shaders)"
 	@echo "  make gpu-fragment  - Build GPU ray tracer with full CPU feature parity (OpenGL 3.3+)"
 	@echo "  make gpu-working   - Build WORKING GPU ray tracer (GLSL 1.20 - OpenGL 2.0+)"
+	@echo "  make gpu-interactive - Build INTERACTIVE GPU ray tracer (same scene as CPU + controls)"
 	@echo "  make gpu-infra-test - Build GPU infrastructure test"
 	@echo "  make all           - Build all implemented phases"
 	@echo ""
@@ -338,7 +358,8 @@ help:
 	@echo "  make runi-gpu      - Build and run interactive ray tracer (GPU)"
 	@echo "  make run-gpu-legacy - Build and run legacy GPU ray tracer"
 	@echo "  make run-gpu-fragment - Build and run GPU fragment ray tracer (full CPU parity)"
-	@echo "  make run-gpu-working - Build and run WORKING GPU ray tracer (recommended)"
+	@echo "  make run-gpu-working - Build and run WORKING GPU ray tracer"
+	@echo "  make run-gpu-interactive - Build and run INTERACTIVE GPU (same scene as CPU, recommended)"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
 	@echo "Testing:"

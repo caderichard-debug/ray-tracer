@@ -1644,77 +1644,205 @@ int main(int argc, char* argv[]) {
             } else
 #endif
             {
-                // CPU rendering path
-                std::cout << "CPU rendering..." << std::endl;
+                // CPU rendering path with advanced features
+                if (ray_renderer.enable_progressive) {
+                    // PROGRESSIVE RENDERING: Multi-pass refinement
+                    std::cout << "Progressive rendering..." << std::endl;
 
-                #pragma omp parallel for schedule(dynamic, 4)
-            for (int j = image_height - 1; j >= 0; --j) {
-                for (int i = 0; i < image_width; ++i) {
-                    Color pixel_color(0, 0, 0);
-                    float total_depth = 0.0f;
-                    Color pixel_normal(0, 0, 0);
-                    Color pixel_albedo(0, 0, 0);
-                    int shadow_rays = 0;
-                    int total_rays = 0;
+                    // Initialize progressive buffers on first pass or after camera change
+                    static int last_width = 0;
+                    static int last_height = 0;
+                    static Point3 last_camera_pos(0, 0, 0);
+                    Point3 current_camera_pos = camera_controller.get_position();
 
-                    for (int s = 0; s < preset.samples; ++s) {
-                        float u = (i + random_float()) / (image_width - 1);
-                        float v = (j + random_float()) / (image_height - 1);
+                    bool need_reset = (last_width != image_width || last_height != image_height ||
+                                     last_camera_pos.x != current_camera_pos.x ||
+                                     last_camera_pos.y != current_camera_pos.y ||
+                                     last_camera_pos.z != current_camera_pos.z);
 
-                        Ray r = cam.get_ray(u, v);
-                        Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
-                        pixel_color = pixel_color + sample_color;
-                        total_rays += ray_renderer.max_depth;
+                    if (need_reset) {
+                        ray_renderer.initialize_progressive(image_width, image_height);
+                        last_width = image_width;
+                        last_height = image_height;
+                        last_camera_pos = current_camera_pos;
+                        std::cout << "Progressive rendering initialized" << std::endl;
+                    }
 
-                        // Get hit info for analysis (simple approximation)
-                        HitRecord rec;
-                        if (scene.hit(r, 0.001f, 1000.0f, rec)) {
-                            total_depth += rec.t;
-                            pixel_normal = pixel_normal + Color(rec.normal.x, rec.normal.y, rec.normal.z);
-                            if (rec.mat) {
-                                pixel_albedo = pixel_albedo + rec.mat->albedo;
-                            }
+                    // Render one pass
+                    int samples_per_pass = std::max(1, preset.samples / ray_renderer.max_passes);
+                    if (samples_per_pass < 1) samples_per_pass = 1;
 
-                            // Count shadow rays for this hit point
-                            if (enable_shadows) {
-                                for (const auto& light : scene.lights) {
-                                    Vec3 light_dir = light.position - rec.p;
-                                    Ray shadow_ray(rec.p, light_dir.normalized());
-                                    if (!scene.is_shadowed(shadow_ray, light_dir.length())) {
-                                        shadow_rays++;
-                                    }
+                    #pragma omp parallel for schedule(dynamic, 4)
+                    for (int j = image_height - 1; j >= 0; --j) {
+                        for (int i = 0; i < image_width; ++i) {
+                            // Render samples for this pass
+                            for (int s = 0; s < samples_per_pass; ++s) {
+                                float u = (i + random_float()) / (image_width - 1);
+                                float v = (j + random_float()) / (image_height - 1);
+
+                                Ray r = cam.get_ray(u, v);
+                                Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+
+                                // Accumulate sample
+                                #pragma omp critical
+                                {
+                                    ray_renderer.accumulation_buffer[j][i] = ray_renderer.accumulation_buffer[j][i] + sample_color;
+                                    ray_renderer.sample_count[j][i]++;
                                 }
                             }
+
+                            // Get current progressive color
+                            Color pixel_color = ray_renderer.get_progressive_color(i, j);
+
+                            // Gamma correction
+                            pixel_color.x = std::sqrt(pixel_color.x);
+                            pixel_color.y = std::sqrt(pixel_color.y);
+                            pixel_color.z = std::sqrt(pixel_color.z);
+
+                            // Write to framebuffer
+                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
                         }
                     }
 
-                    float scale = 1.0f / preset.samples;
-                    pixel_color = pixel_color * scale;
-                    pixel_normal = pixel_normal * scale;
-                    pixel_albedo = pixel_albedo * scale;
-                    total_depth *= scale;
+                    ray_renderer.current_pass++;
+                    std::cout << "Progressive pass " << ray_renderer.current_pass << "/" << ray_renderer.max_passes << " complete" << std::endl;
 
-                    // Record analysis data
-                    analysis.record_pixel(i, image_height - 1 - j, shadow_rays, total_rays, total_depth, pixel_normal, pixel_albedo);
+                    // Continue rendering if not complete
+                    if (!ray_renderer.is_progressive_complete()) {
+                        need_render = true; // Trigger another pass
+                    }
 
-                    // Apply analysis mode if active
-                    Color final_color = analysis.get_analysis_color(i, image_height - 1 - j, pixel_color);
+                } else if (ray_renderer.enable_wavefront) {
+                    // WAVEFRONT RENDERING: Tiled cache-coherent rendering
+                    std::cout << "Wavefront rendering..." << std::endl;
 
-                    // Gamma correction
-                    final_color.x = std::sqrt(final_color.x);
-                    final_color.y = std::sqrt(final_color.y);
-                    final_color.z = std::sqrt(final_color.z);
+                    // Use wavefront rendering function
+                    std::vector<std::vector<Color>> wavefront_framebuffer(image_height, std::vector<Color>(image_width));
+                    ray_renderer.render_wavefront(cam, scene, wavefront_framebuffer, image_width, image_height, preset.samples);
 
-                    // Write to framebuffer
-                    int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-                    framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(final_color.x, 0.0f, 0.999f));
-                    framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(final_color.y, 0.0f, 0.999f));
-                    framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(final_color.z, 0.0f, 0.999f));
-                }
-                }
+                    // Convert to SDL framebuffer format
+                    #pragma omp parallel for schedule(dynamic, 4)
+                    for (int j = image_height - 1; j >= 0; --j) {
+                        for (int i = 0; i < image_width; ++i) {
+                            Color pixel_color = wavefront_framebuffer[j][i];
 
-                std::cout << "CPU render complete" << std::endl;
-            }  // End of CPU/GPU rendering paths
+                            // Write to framebuffer
+                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+                        }
+                    }
+
+                    std::cout << "Wavefront render complete" << std::endl;
+
+                } else {
+                    // STANDARD RENDERING: Original path with optional adaptive sampling
+                    std::cout << "CPU rendering..." << std::endl;
+
+                    #pragma omp parallel for schedule(dynamic, 4)
+                for (int j = image_height - 1; j >= 0; --j) {
+                for (int i = 0; i < image_width; ++i) {
+                            Color pixel_color(0, 0, 0);
+                            float total_depth = 0.0f;
+                            Color pixel_normal(0, 0, 0);
+                            Color pixel_albedo(0, 0, 0);
+                            int shadow_rays = 0;
+                            int total_rays = 0;
+
+                            // Adaptive sampling or standard sampling
+                            int actual_samples = preset.samples;
+                            std::vector<Color> sample_storage;
+
+                            if (ray_renderer.enable_adaptive) {
+                                // Adaptive sampling: collect samples and check variance
+                                sample_storage.reserve(preset.samples);
+
+                                while (actual_samples <= preset.samples &&
+                                       ray_renderer.should_continue_sampling(i, j, sample_storage)) {
+                                    float u = (i + random_float()) / (image_width - 1);
+                                    float v = (j + random_float()) / (image_height - 1);
+
+                                    Ray r = cam.get_ray(u, v);
+                                    Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+                                    sample_storage.push_back(sample_color);
+                                    pixel_color = pixel_color + sample_color;
+                                    actual_samples++;
+
+                                    total_rays += ray_renderer.max_depth;
+                                }
+
+                                // Average the samples
+                                if (actual_samples > 0) {
+                                    pixel_color = pixel_color / actual_samples;
+                                }
+                            } else {
+                                // Standard sampling
+                                for (int s = 0; s < preset.samples; ++s) {
+                                    float u = (i + random_float()) / (image_width - 1);
+                                    float v = (j + random_float()) / (image_height - 1);
+
+                                    Ray r = cam.get_ray(u, v);
+                                    Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+                                    pixel_color = pixel_color + sample_color;
+                                    total_rays += ray_renderer.max_depth;
+
+                                    // Get hit info for analysis (simple approximation)
+                                    HitRecord rec;
+                                    if (scene.hit(r, 0.001f, 1000.0f, rec)) {
+                                        total_depth += rec.t;
+                                        pixel_normal = pixel_normal + Color(rec.normal.x, rec.normal.y, rec.normal.z);
+                                        if (rec.mat) {
+                                            pixel_albedo = pixel_albedo + rec.mat->albedo;
+                                        }
+
+                                        // Count shadow rays for this hit point
+                                        if (enable_shadows) {
+                                            for (const auto& light : scene.lights) {
+                                                Vec3 light_dir = light.position - rec.p;
+                                                Ray shadow_ray(rec.p, light_dir.normalized());
+                                                if (!scene.is_shadowed(shadow_ray, light_dir.length())) {
+                                                    shadow_rays++;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                float scale = 1.0f / preset.samples;
+                                pixel_color = pixel_color * scale;
+                                pixel_normal = pixel_normal * scale;
+                                pixel_albedo = pixel_albedo * scale;
+                                total_depth *= scale;
+                            }
+
+                            // Record analysis data (only for standard rendering)
+                            if (!ray_renderer.enable_adaptive) {
+                                analysis.record_pixel(i, image_height - 1 - j, shadow_rays, total_rays, total_depth, pixel_normal, pixel_albedo);
+                            }
+
+                            // Apply analysis mode if active
+                            Color final_color = analysis.get_analysis_color(i, image_height - 1 - j, pixel_color);
+
+                            // Gamma correction
+                            final_color.x = std::sqrt(final_color.x);
+                            final_color.y = std::sqrt(final_color.y);
+                            final_color.z = std::sqrt(final_color.z);
+
+                            // Write to framebuffer
+                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(final_color.x, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(final_color.y, 0.0f, 0.999f));
+                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(final_color.z, 0.0f, 0.999f));
+                        }
+                        }
+
+                        std::cout << "CPU render complete" << std::endl;
+                    }
+                }  // End of CPU/GPU rendering paths
 
             // Update texture
             void* pixels;
