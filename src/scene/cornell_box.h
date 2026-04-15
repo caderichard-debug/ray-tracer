@@ -65,14 +65,19 @@ inline void setup_cornell_box_scene(Scene& scene) {
     Point3 pyramid_base2(-3.0f, 2.0f, -1.0f);
     Point3 pyramid_base3(-2.0f, 2.0f, 1.0f);
 
-    // Give pyramid a solid gray color
-    auto material_pyramid = std::make_shared<Lambertian>(Color(0.5f, 0.5f, 0.5f));
+    // Give pyramid a checkerboard texture (black and white)
+    auto checker_pyramid = std::make_shared<CheckerTexture>(
+        std::make_shared<SolidColor>(Color(0.1f, 0.1f, 0.1f)),  // Black
+        std::make_shared<SolidColor>(Color(0.9f, 0.9f, 0.9f)),  // White
+        6.0f  // Scale (checker size)
+    );
+    auto material_pyramid = std::make_shared<Lambertian>(checker_pyramid);
 
     // 4 triangles forming a pyramid
     scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base1, pyramid_base2, material_pyramid));
     scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base2, pyramid_base3, material_pyramid));
     scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base3, pyramid_base1, material_pyramid));
-    scene.add_object(std::make_shared<Triangle>(pyramid_base1, pyramid_base3, pyramid_base2, material_gray));
+    scene.add_object(std::make_shared<Triangle>(pyramid_base1, pyramid_base3, pyramid_base2, material_pyramid));
 
     // Small spheres in the back (moved closer to camera near pyramid)
     scene.add_object(std::make_shared<Sphere>(Point3(-0.5f, 2.5f, 0.0f), 0.2, material_metal));
