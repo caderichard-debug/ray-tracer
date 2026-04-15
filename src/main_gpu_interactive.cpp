@@ -179,50 +179,46 @@ public:
 
     void toggle() {
         show = !show;
-        std::cout << "HelpOverlay toggled: " << (show ? "SHOWING" : "HIDDEN") << std::endl;
+        if (show) {
+            render_to_console();
+        }
     }
     bool is_showing() const { return show; }
 
+    void render_to_console() {
+        std::cout << "\n========================================" << std::endl;
+        std::cout << "=== GPU Ray Tracer Help ===" << std::endl;
+        std::cout << "========================================" << std::endl;
+        std::cout << "\nControls:" << std::endl;
+        std::cout << "  WASD/Arrows - Move camera" << std::endl;
+        std::cout << "  Mouse       - Look around (click to capture)" << std::endl;
+        std::cout << "  R           - Toggle reflections" << std::endl;
+        std::cout << "  P           - Toggle Phong/PBR lighting" << std::endl;
+        std::cout << "  L           - Cycle light configurations" << std::endl;
+        std::cout << "  H           - Toggle this help" << std::endl;
+        std::cout << "  C           - Toggle controls panel" << std::endl;
+        std::cout << "  ESC         - Quit" << std::endl;
+        std::cout << "\nPhase 1 Features:" << std::endl;
+        std::cout << "  " << (ENABLE_PBR ? "✓" : "✗") << " PBR lighting (Cook-Torrance BRDF)" << std::endl;
+        std::cout << "  " << (ENABLE_MULTIPLE_LIGHTS ? "✓" : "✗") << " Multiple lights (press L to cycle)" << std::endl;
+        std::cout << "  " << (ENABLE_TONE_MAPPING ? "✓" : "✗") << " ACES tone mapping" << std::endl;
+        std::cout << "  " << (ENABLE_GAMMA_CORRECTION ? "✓" : "✗") << " Gamma correction" << std::endl;
+        std::cout << "\nPhase 2 Features:" << std::endl;
+        std::cout << "  " << (ENABLE_SOFT_SHADOWS ? "✓" : "✗") << " Soft shadows (area light sampling)" << std::endl;
+        std::cout << "  " << (ENABLE_AMBIENT_OCCLUSION ? "✓" : "✗") << " Ambient occlusion (ray-traced)" << std::endl;
+        std::cout << "\nPerformance: 60-500x faster than CPU" << std::endl;
+        std::cout << "  - Real-time ray tracing at 60+ FPS" << std::endl;
+        std::cout << "  - GLSL 1.20 (OpenGL 2.0+ compatible)" << std::endl;
+        std::cout << "\nPress H to close this help\n" << std::endl;
+    }
+
     void render(SDL_Window* window, SDL_Renderer* renderer) {
-        if (!show || !initialized) return;
-        if (!renderer) {
-            std::cerr << "HelpOverlay: No renderer provided" << std::endl;
-            return;
+        // Console-based rendering - no graphical overlay
+        if (show && initialized) {
+            render_to_console();
         }
-
-        int width, height;
-        SDL_GetWindowSize(window, &width, &height);
-
-        std::cout << "HelpOverlay::render() called - window: " << width << "x" << height << std::endl;
-
-        // Semi-transparent background
-        SDL_Rect bg_rect = {50, 50, width - 100, height - 100};
-        SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
-        SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
-
-        SDL_Texture* bg_texture = SDL_CreateTextureFromSurface(renderer, bg_surface);
-        SDL_RenderCopy(renderer, bg_texture, nullptr, &bg_rect);
-        SDL_DestroyTexture(bg_texture);
-        SDL_FreeSurface(bg_surface);
-
-        // Render help text
-        const char* help_lines[] = {
-            "=== GPU Ray Tracer Help ===",
-            "",
-            "Controls:",
-            "  WASD/Arrows - Move camera",
-            "  Mouse       - Look around",
-            "  R           - Toggle reflections",
-            "  P           - Toggle Phong/PBR lighting",
-            "  L           - Cycle light configurations",
-            "  H           - Toggle this help",
-            "  C           - Toggle controls panel",
-            "  ESC         - Quit",
-            "",
-            "Phase 1 Features:",
-#if ENABLE_PBR
-            "  ✓ PBR lighting (Cook-Torrance BRDF)",
-#else
+    }
+};
             "  ✗ PBR lighting (Phong mode only)",
 #endif
 #if ENABLE_MULTIPLE_LIGHTS
@@ -275,90 +271,21 @@ public:
     }
 };
 
-// Comprehensive settings panel with interactive buttons
+// Console-based settings panel (no GUI to avoid OpenGL conflicts)
 class ControlsPanel {
 private:
     bool show;
     bool initialized;
-    TTF_Font* font;
-    TTF_Font* title_font;
-    SDL_Color text_color;
-    SDL_Color background_color;
-    SDL_Color title_color;
-    SDL_Color button_color;
-    SDL_Color button_hover_color;
-    SDL_Color button_active_color;
-    SDL_Color button_text_color;
-
-    // Button structure
-    struct Button {
-        SDL_Rect rect;
-        std::string label;
-        std::string category;
-        bool* toggle_ptr;
-        int button_type; // 0: toggle, 1: cycle
-        int* value_ptr;
-        int min_value;
-        int max_value;
-        std::vector<std::string> value_labels;
-    };
-    std::vector<Button> buttons;
-    int panel_x, panel_y;
-    int panel_width, panel_height;
 
 public:
-    ControlsPanel() : show(false), initialized(false), font(nullptr), title_font(nullptr),
-                      panel_x(0), panel_y(0), panel_width(320), panel_height(600) {
-        text_color = {220, 220, 220, 255};
-        background_color = {40, 44, 52, 240};  // Dark gray-blue
-        title_color = {255, 200, 100, 255};     // Orange
-        button_color = {60, 64, 72, 255};
-        button_hover_color = {80, 84, 92, 255};
-        button_active_color = {100, 160, 120, 255}; // Green when active
-        button_text_color = {200, 200, 200, 255};
-    }
+    ControlsPanel() : show(false), initialized(false) {}
 
     ~ControlsPanel() {
-        if (font) TTF_CloseFont(font);
-        if (title_font) TTF_CloseFont(title_font);
-        // Don't call TTF_Quit() here - multiple panels use TTF
-        // TTF_Quit() will be called at program exit
+        // No resources to clean up
     }
 
     bool init() {
         if (initialized) return true;
-
-        if (TTF_Init() == -1) {
-            std::cerr << "ControlsPanel: TTF_Init failed: " << TTF_GetError() << std::endl;
-            return false;
-        }
-
-        // Try to load system fonts
-        const char* font_paths[] = {
-            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
-            "/System/Library/Fonts/Menlo.ttc",
-            "/System/Library/Fonts/Courier.dfont",
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "C:\\Windows\\Fonts\\consola.ttf",
-            nullptr
-        };
-
-        for (int i = 0; font_paths[i] != nullptr; ++i) {
-            font = TTF_OpenFont(font_paths[i], 13);
-            if (font) break;
-        }
-
-        for (int i = 0; font_paths[i] != nullptr; ++i) {
-            title_font = TTF_OpenFont(font_paths[i], 16);
-            if (title_font) break;
-        }
-
-        if (!font || !title_font) {
-            std::cerr << "ControlsPanel: Failed to load fonts" << std::endl;
-            return false;
-        }
-
         initialized = true;
         std::cout << "ControlsPanel initialized successfully" << std::endl;
         return true;
@@ -366,322 +293,44 @@ public:
 
     void toggle() {
         show = !show;
-        std::cout << "ControlsPanel toggled: " << (show ? "SHOWING" : "HIDDEN") << std::endl;
+        if (show) {
+            render_to_console();
+        }
     }
     bool is_showing() const { return show; }
 
-    void setup_buttons(bool& enable_reflections, int& lighting_mode, int& num_lights) {
-        if (!buttons.empty()) return; // Already setup
-
-        int y = 80;
-        int x = 15;
-        int button_width = 130;
-        int button_height = 28;
-        int spacing = 8;
-
-        // Phase 1: Lighting Features section
-        // Note: PBR and multiple lights are compile-time toggles, so we show current status
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "PBR Mode",
-            "Lighting",
-            nullptr,
-            1, &lighting_mode, 0, 1,
-            {"Phong", "PBR"}
-        });
-        y += button_height + spacing;
-
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Light Count",
-            "Lighting",
-            nullptr,
-            1, &num_lights, 1, 4,
-            {"1", "2", "3", "4"}
-        });
-        y += button_height + spacing * 2;
-
-        // Runtime toggles
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Reflections",
-            "Features",
-            &enable_reflections,
-            0, nullptr, 0, 1,
-            {}
-        });
-        y += button_height + spacing * 2;
-
-        // Phase 2 compile-time features (informational)
-        #if ENABLE_SOFT_SHADOWS
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Soft Shadows",
-            "Advanced",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"Enabled"}
-        });
-        #else
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Soft Shadows",
-            "Advanced",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"Disabled"}
-        });
-        #endif
-        y += button_height + spacing;
-
-        #if ENABLE_AMBIENT_OCCLUSION
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Ambient Occl.",
-            "Advanced",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"Enabled"}
-        });
-        #else
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Ambient Occl.",
-            "Advanced",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"Disabled"}
-        });
-        #endif
-        y += button_height + spacing * 2;
-
-        // Tone mapping and gamma (informational)
-        #if ENABLE_TONE_MAPPING
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Tone Mapping",
-            "Post-Process",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"ACES"}
-        });
-        #else
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Tone Mapping",
-            "Post-Process",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"Off"}
-        });
-        #endif
-        y += button_height + spacing;
-
-        #if ENABLE_GAMMA_CORRECTION
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Gamma Correct",
-            "Post-Process",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"On"}
-        });
-        #else
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Gamma Correct",
-            "Post-Process",
-            nullptr,
-            2, nullptr, 0, 1,
-            {"Off"}
-        });
-        #endif
+    void render_to_console() {
+        std::cout << "\n========================================" << std::endl;
+        std::cout << "=== GPU Settings Panel ===" << std::endl;
+        std::cout << "========================================" << std::endl;
+        std::cout << "\nRuntime Controls:" << std::endl;
+        std::cout << "  R - Toggle reflections" << std::endl;
+        std::cout << "  P - Toggle Phong/PBR lighting" << std::endl;
+        std::cout << "  L - Cycle light count (1→2→3→4)" << std::endl;
+        std::cout << "\nCompile-time Features:" << std::endl;
+        std::cout << "  " << (ENABLE_PBR ? "✓" : "✗") << " PBR Lighting" << std::endl;
+        std::cout << "  " << (ENABLE_MULTIPLE_LIGHTS ? "✓" : "✗") << " Multiple Lights" << std::endl;
+        std::cout << "  " << (ENABLE_SOFT_SHADOWS ? "✓" : "✗") << " Soft Shadows" << std::endl;
+        std::cout << "  " << (ENABLE_AMBIENT_OCCLUSION ? "✓" : "✗") << " Ambient Occlusion" << std::endl;
+        std::cout << "  " << (ENABLE_TONE_MAPPING ? "✓" : "✗") << " ACES Tone Mapping" << std::endl;
+        std::cout << "  " << (ENABLE_GAMMA_CORRECTION ? "✓" : "✗") << " Gamma Correction" << std::endl;
+        std::cout << "\nQuality Presets:" << std::endl;
+        std::cout << "  make gpu-fast          - Maximum performance" << std::endl;
+        std::cout << "  make gpu-interactive   - Balanced quality" << std::endl;
+        std::cout << "  make gpu-production    - High quality" << std::endl;
+        std::cout << "  make gpu-showcase      - Maximum quality" << std::endl;
+        std::cout << "\nPress C to close this panel\n" << std::endl;
     }
 
-    bool handle_click(int mouse_x, int mouse_y, int window_width, int window_height) {
-        if (!show || !initialized) return false;
-
-        // Adjust for panel position
-        int panel_start_x = window_width - panel_width - 10;
-        int panel_start_y = 10;
-
-        for (auto& button : buttons) {
-            SDL_Rect adjusted_rect = {
-                panel_start_x + button.rect.x,
-                panel_start_y + button.rect.y,
-                button.rect.w,
-                button.rect.h
-            };
-
-            if (mouse_x >= adjusted_rect.x && mouse_x <= adjusted_rect.x + adjusted_rect.w &&
-                mouse_y >= adjusted_rect.y && mouse_y <= adjusted_rect.y + adjusted_rect.h) {
-                
-                if (button.button_type == 0 && button.toggle_ptr) {
-                    *button.toggle_ptr = !(*button.toggle_ptr);
-                    return true;
-                } else if (button.button_type == 1 && button.value_ptr) {
-                    *button.value_ptr = *button.value_ptr + 1;
-                    if (*button.value_ptr > button.max_value) {
-                        *button.value_ptr = button.min_value;
-                    }
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
 
     void render(SDL_Window* window, SDL_Renderer* renderer, bool enable_reflections, int lighting_mode, int num_lights) {
-        if (!show || !initialized) return;
-        if (!renderer) {
-            std::cerr << "ControlsPanel: No renderer provided" << std::endl;
-            return;
+        // Console-based rendering - show current settings
+        if (show && initialized) {
+            std::cout << "\n=== Current Settings ===" << std::endl;
+            std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
+            std::cout << "Lighting: " << (lighting_mode == 0 ? "Phong" : "PBR") << std::endl;
+            std::cout << "Lights: " << num_lights << std::endl;
         }
-
-        std::cout << "ControlsPanel::render() called" << std::endl;
-
-        setup_buttons(const_cast<bool&>(enable_reflections),
-                     const_cast<int&>(lighting_mode),
-                     const_cast<int&>(num_lights));
-
-        int width, height;
-        SDL_GetWindowSize(window, &width, &height);
-
-        int panel_x = width - panel_width - 10;
-        int panel_y = 10;
-
-        // Background
-        SDL_Rect bg_rect = {panel_x, panel_y, panel_width, panel_height};
-        SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
-        SDL_FillRect(bg_surface, nullptr,
-                     SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g,
-                                background_color.b, background_color.a));
-
-        SDL_Texture* bg_texture = SDL_CreateTextureFromSurface(renderer, bg_surface);
-        SDL_RenderCopy(renderer, bg_texture, nullptr, &bg_rect);
-        SDL_DestroyTexture(bg_texture);
-        SDL_FreeSurface(bg_surface);
-
-        // Title
-        const char* title = "GPU Settings";
-        SDL_Surface* surface = TTF_RenderText_Blended(title_font, title, title_color);
-        if (surface) {
-            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-            if (texture) {
-                SDL_Rect dest_rect = {panel_x + 15, panel_y + 15, surface->w, surface->h};
-                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
-                SDL_DestroyTexture(texture);
-            }
-            SDL_FreeSurface(surface);
-        }
-
-        // Render buttons
-        int current_mouse_x, current_mouse_y;
-        SDL_GetMouseState(&current_mouse_x, &current_mouse_y);
-
-        std::string current_category = "";
-        for (const auto& button : buttons) {
-            // Draw category header if changed
-            if (button.category != current_category) {
-                current_category = button.category;
-                SDL_Surface* cat_surface = TTF_RenderText_Blended(font, current_category.c_str(),
-                                                                   {150, 180, 200, 255});
-                if (cat_surface) {
-                    SDL_Texture* cat_texture = SDL_CreateTextureFromSurface(renderer, cat_surface);
-                    if (cat_texture) {
-                        SDL_Rect cat_rect = {panel_x + 15, panel_y + button.rect.y - 5,
-                                            cat_surface->w, cat_surface->h};
-                        SDL_RenderCopy(renderer, cat_texture, nullptr, &cat_rect);
-                        SDL_DestroyTexture(cat_texture);
-                    }
-                    SDL_FreeSurface(cat_surface);
-                }
-            }
-
-            SDL_Rect button_rect = {
-                panel_x + button.rect.x,
-                panel_y + button.rect.y,
-                button.rect.w,
-                button.rect.h
-            };
-
-            // Determine button color
-            SDL_Color current_button_color = button_color;
-            bool is_hovered = (current_mouse_x >= button_rect.x && 
-                             current_mouse_x <= button_rect.x + button_rect.w &&
-                             current_mouse_y >= button_rect.y && 
-                             current_mouse_y <= button_rect.y + button_rect.h);
-
-            if (is_hovered) {
-                current_button_color = button_hover_color;
-            }
-
-            // Check if toggle is active
-            if (button.button_type == 0 && button.toggle_ptr && *button.toggle_ptr) {
-                current_button_color = button_active_color;
-            }
-
-            // Draw button background
-            SDL_Surface* btn_surface = SDL_CreateRGBSurface(0, button_rect.w, button_rect.h, 32, 0, 0, 0, 0);
-            SDL_FillRect(btn_surface, nullptr,
-                        SDL_MapRGBA(btn_surface->format, current_button_color.r,
-                                   current_button_color.g, current_button_color.b, 255));
-
-            SDL_Texture* btn_texture = SDL_CreateTextureFromSurface(renderer, btn_surface);
-            SDL_RenderCopy(renderer, btn_texture, nullptr, &button_rect);
-            SDL_DestroyTexture(btn_texture);
-            SDL_FreeSurface(btn_surface);
-
-            // Button text
-            std::string button_text = button.label;
-            if (button.button_type == 1 && button.value_ptr) {
-                int idx = *button.value_ptr - button.min_value;
-                if (idx >= 0 && idx < (int)button.value_labels.size()) {
-                    button_text += ": " + button.value_labels[idx];
-                }
-            } else if (button.button_type == 0 && button.toggle_ptr) {
-                button_text += *button.toggle_ptr ? ": ON" : ": OFF";
-            } else if (button.button_type == 2 && !button.value_labels.empty()) {
-                button_text += ": " + button.value_labels[0];
-            }
-
-            SDL_Surface* text_surface = TTF_RenderText_Blended(font, button_text.c_str(),
-                                                               button_text_color);
-            if (text_surface) {
-                SDL_Texture* text_texture = SDL_CreateTextureFromSurface(renderer, text_surface);
-                if (text_texture) {
-                    SDL_Rect text_rect = {
-                        button_rect.x + 8,
-                        button_rect.y + (button_rect.h - text_surface->h) / 2,
-                        text_surface->w,
-                        text_surface->h
-                    };
-                    SDL_RenderCopy(renderer, text_texture, nullptr, &text_rect);
-                    SDL_DestroyTexture(text_texture);
-                }
-                SDL_FreeSurface(text_surface);
-            }
-        }
-
-        // Instructions at bottom
-        const char* instructions = "Press 'C' to close";
-        SDL_Surface* inst_surface = TTF_RenderText_Blended(font, instructions, {150, 150, 150, 255});
-        if (inst_surface) {
-            SDL_Texture* inst_texture = SDL_CreateTextureFromSurface(renderer, inst_surface);
-            if (inst_texture) {
-                SDL_Rect inst_rect = {
-                    panel_x + 15,
-                    panel_y + panel_height - 30,
-                    inst_surface->w,
-                    inst_surface->h
-                };
-                SDL_RenderCopy(renderer, inst_texture, nullptr, &inst_rect);
-                SDL_DestroyTexture(inst_texture);
-            }
-            SDL_FreeSurface(inst_surface);
-        }
-
-        SDL_RenderPresent(renderer);
     }
 };
 
@@ -1787,16 +1436,6 @@ int main(int argc, char* argv[]) {
     const GLubyte* shader_version = glGetString(GL_SHADING_LANGUAGE_VERSION);
     std::cout << "GLSL Version: " << shader_version << std::endl;
 
-    // Create SDL2 renderer for UI panels (must be done after OpenGL context)
-    SDL_Renderer* sdl_renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    if (!sdl_renderer) {
-        std::cerr << "Failed to create SDL2 renderer: " << SDL_GetError() << std::endl;
-        std::cerr << "UI panels will not be available" << std::endl;
-        // Continue without UI panels
-    } else {
-        std::cout << "✓ SDL2 renderer created for UI panels" << std::endl;
-    }
-
     // Compile shaders
     std::cout << "Compiling shaders..." << std::endl;
     GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
@@ -2012,20 +1651,8 @@ int main(int argc, char* argv[]) {
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
-                    // Check if settings panel is showing and handle button clicks
-                    if (controls_panel.is_showing()) {
-                        int mouse_x, mouse_y;
-                        SDL_GetMouseState(&mouse_x, &mouse_y);
-                        int width, height;
-                        SDL_GetWindowSize(window, &width, &height);
-                        if (controls_panel.handle_click(mouse_x, mouse_y, width, height)) {
-                            need_render = true; // Re-render when setting changes
-                        }
-                    } else {
-                        // Normal mouse capture when panel is closed
-                        SDL_bool captured = SDL_GetRelativeMouseMode();
-                        SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
-                    }
+                    SDL_bool captured = SDL_GetRelativeMouseMode();
+                    SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
                 }
             } else if (event.type == SDL_MOUSEMOTION) {
                 if (SDL_GetRelativeMouseMode()) {
@@ -2188,15 +1815,13 @@ int main(int argc, char* argv[]) {
             glBindVertexArray(vao);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-            // Render overlays using the shared SDL2 renderer
+            // Render overlays (console-based)
             // Both panels can now be visible independently
             if (help_overlay.is_showing()) {
-                std::cout << "Rendering help overlay" << std::endl;
-                help_overlay.render(window, sdl_renderer);
+                help_overlay.render(window, nullptr);
             }
             if (controls_panel.is_showing()) {
-                std::cout << "Rendering controls panel" << std::endl;
-                controls_panel.render(window, sdl_renderer, enable_reflections, lighting_mode, num_lights);
+                controls_panel.render(window, nullptr, enable_reflections, lighting_mode, num_lights);
             }
 
             SDL_GL_SwapWindow(window);
@@ -2226,11 +1851,6 @@ int main(int argc, char* argv[]) {
     glDeleteShader(fragment_shader);
     glDeleteVertexArrays(1, &vao);
     glDeleteBuffers(1, &vbo);
-
-    // Destroy SDL2 renderer if it was created
-    if (sdl_renderer) {
-        SDL_DestroyRenderer(sdl_renderer);
-    }
 
     SDL_GL_DeleteContext(context);
     SDL_DestroyWindow(window);

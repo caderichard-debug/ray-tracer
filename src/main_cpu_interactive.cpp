@@ -437,7 +437,7 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(700, window_height - 20);  // Fixed visible height
+        int panel_height = std::min(600, window_height - 20);  // Fixed visible height
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
@@ -1086,12 +1086,60 @@ public:
             SDL_FreeSurface(frustum_text_surface);
         }
 
-        // Convert surface to texture
+        // Calculate actual content height and scrolling
+        content_height = y_offset + 20;  // Add padding
+        is_scrollable = (content_height > panel_height);
+        max_scroll_offset = is_scrollable ? (content_height - panel_height) : 0;
+        scroll_offset = std::min(scroll_offset, max_scroll_offset);  // Clamp scroll offset
 
         // Convert surface to texture
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, content_surface);
         if (texture) {
-            SDL_RenderCopy(renderer, texture, nullptr, &overlay_rect);
+            // Source rect: only show the visible portion based on scroll_offset
+            SDL_Rect src_rect = {0, scroll_offset, panel_width, panel_height};
+
+            // If content is shorter than panel, show all content
+            if (!is_scrollable) {
+                src_rect.h = content_height;
+            }
+
+            SDL_RenderCopy(renderer, texture, &src_rect, &overlay_rect);
+
+            // Draw scrollbar if scrollable
+            if (is_scrollable) {
+                int scrollbar_width = 10;
+                int scrollbar_x = panel_width - scrollbar_width - 5;
+                int scrollbar_height = panel_height;
+                float thumb_ratio = static_cast<float>(panel_height) / content_height;
+                int thumb_height = static_cast<int>(thumb_ratio * scrollbar_height);
+                int thumb_y = static_cast<float>(scroll_offset) / max_scroll_offset * (scrollbar_height - thumb_height);
+
+                // Draw scrollbar background
+                SDL_Rect scrollbar_bg = {scrollbar_x, 0, scrollbar_width, scrollbar_height};
+                Uint32 scrollbar_bg_color = SDL_MapRGBA(content_surface->format, 40, 40, 50, 200);
+                SDL_FillRect(content_surface, &scrollbar_bg, scrollbar_bg_color);
+
+                // Draw thumb
+                SDL_Rect thumb = {scrollbar_x, thumb_y, scrollbar_width, thumb_height};
+                Uint32 thumb_color = SDL_MapRGBA(content_surface->format, 100, 150, 200, 255);
+                SDL_FillRect(content_surface, &thumb, thumb_color);
+
+                // Convert scrollbar to texture and render
+                SDL_Surface* scrollbar_surface = SDL_CreateRGBSurface(0, scrollbar_width, scrollbar_height, 32, 0, 0, 0, 0);
+                if (scrollbar_surface) {
+                    SDL_FillRect(scrollbar_surface, nullptr, SDL_MapRGBA(scrollbar_surface->format, 40, 40, 50, 200));
+                    SDL_FillRect(scrollbar_surface, &thumb, SDL_MapRGBA(scrollbar_surface->format, 100, 150, 200, 255));
+
+                    SDL_Texture* scrollbar_texture = SDL_CreateTextureFromSurface(renderer, scrollbar_surface);
+                    if (scrollbar_texture) {
+                        SDL_Rect scrollbar_dest = {panel_x + scrollbar_x, panel_y, scrollbar_width, scrollbar_height};
+                        SDL_RenderCopy(renderer, scrollbar_texture, nullptr, &scrollbar_dest);
+                        SDL_DestroyTexture(scrollbar_texture);
+                    }
+                    SDL_FreeSurface(scrollbar_surface);
+                }
+            }
+
             SDL_DestroyTexture(texture);
         }
 
@@ -1135,9 +1183,12 @@ public:
 
     ClickResult handle_click(int mouse_x, int mouse_y) {
         ClickResult result;
+        // Adjust mouse_y for scroll offset
+        int adjusted_mouse_y = mouse_y + scroll_offset;
+
         for (const auto& button : buttons) {
             if (mouse_x >= button.rect.x && mouse_x < button.rect.x + button.rect.w &&
-                mouse_y >= button.rect.y && mouse_y < button.rect.y + button.rect.h) {
+                adjusted_mouse_y >= button.rect.y && adjusted_mouse_y < button.rect.y + button.rect.h) {
 
                 result.button_clicked = true;
 
@@ -1194,6 +1245,14 @@ public:
             }
         }
         return result;
+    }
+
+    // Adjust scroll offset by delta (positive = scroll down, negative = scroll up)
+    void scroll(int delta) {
+        if (!is_scrollable) return;
+        scroll_offset -= delta;
+        // Clamp scroll offset
+        scroll_offset = std::max(0, std::min(scroll_offset, max_scroll_offset));
     }
 
     ~ControlsPanel() {
@@ -1543,6 +1602,12 @@ int main(int argc, char* argv[]) {
                         }
                         break;
                     }
+                }
+            } else if (event.type == SDL_MOUSEWHEEL) {
+                // Handle mouse wheel scrolling for controls panel
+                if (show_controls) {
+                    int scroll_delta = event.wheel.y * 30;  // Scroll 30 pixels per wheel click
+                    controls_panel.scroll(scroll_delta);
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
