@@ -4,6 +4,9 @@
 #include <iostream>
 #include <cerrno>
 
+// Include OpenGL/GLEW headers in the implementation file only
+#include <GL/glew.h>
+
 ShaderManager::ShaderManager() {
 }
 

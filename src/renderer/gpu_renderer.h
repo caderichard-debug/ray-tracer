@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <GL/glew.h>
 #include "scene/scene.h"
 #include "camera/camera.h"
 #include "renderer/performance.h"
@@ -31,7 +32,7 @@ public:
     bool is_available() const { return initialized; }
 
     // Get performance statistics
-    const PerformanceTracker& get_performance() const { return performance; }
+    const PerformanceTracker& get_performance() const { return *performance; }
 
     // Resize render target
     void resize(int width, int height);
@@ -78,7 +79,7 @@ private:
     std::unique_ptr<ShaderManager> shader_manager;
 
     // Performance tracking
-    PerformanceTracker performance;
+    std::unique_ptr<PerformanceTracker> performance;
 
     // Timer queries for GPU timing
     GLuint timer_queries[2];

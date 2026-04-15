@@ -25,6 +25,9 @@ MAIN_SRC = src/main.cpp
 # Only .cpp files, headers are included automatically
 ALL_SRCS = $(MAIN_SRC) src/renderer/renderer.cpp
 
+# GPU renderer sources
+GPU_RENDERER_SRC = src/renderer/gpu_renderer.cpp src/renderer/shader_manager.cpp
+
 # Output
 BINARY = raytracer
 BUILD_DIR = build
@@ -67,6 +70,30 @@ interactive: $(BUILD_DIR)
 		-o $(BUILD_DIR)/raytracer_interactive $(LDFLAGS) $(SDL_LDFLAGS)
 	@echo "✓ Interactive built: $(BUILD_DIR)/raytracer_interactive"
 	@ln -sf $(BUILD_DIR)/raytracer_interactive raytracer_interactive
+
+# Interactive real-time ray tracer with GPU support
+# Features: GPU-accelerated rendering, Camera movement, Quality switching
+.PHONY: interactive-gpu
+interactive-gpu: $(BUILD_DIR)
+	@echo "Building Interactive Real-time Ray Tracer (GPU)"
+	@echo "Features: OpenGL compute shaders, SDL2 window, Camera controls, Quality levels 1-3"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		src/main_interactive.cpp src/renderer/renderer.cpp $(GPU_RENDERER_SRC) \
+		-o $(BUILD_DIR)/raytracer_interactive_gpu $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ Interactive GPU built: $(BUILD_DIR)/raytracer_interactive_gpu"
+	@ln -sf $(BUILD_DIR)/raytracer_interactive_gpu raytracer_interactive_gpu
+
+# Simple GPU infrastructure test
+.PHONY: gpu-infra-test
+gpu-infra-test: $(BUILD_DIR)
+	@echo "Building GPU Infrastructure Test"
+	@echo "This tests OpenGL context creation and shader compilation"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		-DGPU_INFRASTRUCTURE_TEST \
+		src/renderer/gpu_renderer.cpp src/renderer/shader_manager.cpp \
+		-o $(BUILD_DIR)/gpu_infra_test $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ GPU Infrastructure Test built: $(BUILD_DIR)/gpu_infra_test"
+	@echo "Run with: ./build/gpu_infra_test"
 
 # Simple GPU test - renders a green window to verify OpenGL works
 .PHONY: gpu-test
@@ -217,7 +244,9 @@ help:
 	@echo "Building:"
 	@echo "  make phase1        - Build Phase 1 (scalar foundation)"
 	@echo "  make phase2        - Build Phase 2 (basic rendering) [default]"
-	@echo "  make interactive   - Build real-time interactive ray tracer"
+	@echo "  make interactive   - Build real-time interactive ray tracer (CPU)"
+	@echo "  make interactive-gpu - Build real-time interactive ray tracer (GPU)"
+	@echo "  make gpu-infra-test - Build GPU infrastructure test"
 	@echo "  make all           - Build all implemented phases"
 	@echo ""
 	@echo "Running:"

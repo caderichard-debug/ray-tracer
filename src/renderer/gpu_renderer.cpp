@@ -104,8 +104,10 @@ bool GPURenderer::init_opengl() {
         return false;
     }
 
-    // Check compute shader support
-    GLint max_compute_work_group_count[3];
+    std::cout << "✓ OpenGL 4.3+ detected" << std::endl;
+
+    // Check compute shader support (optional, for information only)
+    GLint max_compute_work_group_count[3] = {0, 0, 0};
     glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &max_compute_work_group_count[0]);
     glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &max_compute_work_group_count[1]);
     glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &max_compute_work_group_count[2]);
@@ -119,9 +121,37 @@ bool GPURenderer::init_opengl() {
 }
 
 bool GPURenderer::init_shaders() {
-    // TODO: Load actual shader files once created
-    // For now, create a placeholder
-    std::cout << "Shader loading not yet implemented" << std::endl;
+    std::cout << "Loading shaders..." << std::endl;
+
+    // Load compute shader
+    compute_program = shader_manager->load_compute_program("src/shaders/raytrace.comp");
+    if (compute_program == 0) {
+        std::cerr << "Failed to load compute shader" << std::endl;
+        return false;
+    }
+
+    // Load render shaders for screen quad
+    vertex_program = shader_manager->load_shader(GL_VERTEX_SHADER, "src/shaders/quad.vert");
+    if (vertex_program == 0) {
+        std::cerr << "Failed to load vertex shader" << std::endl;
+        return false;
+    }
+
+    GLuint fragment_shader = shader_manager->load_shader(GL_FRAGMENT_SHADER, "src/shaders/quad.frag");
+    if (fragment_shader == 0) {
+        std::cerr << "Failed to load fragment shader" << std::endl;
+        return false;
+    }
+
+    // Link render program
+    std::vector<GLuint> render_shaders = {vertex_program, fragment_shader};
+    fragment_program = shader_manager->link_program(render_shaders, "quad");
+    if (fragment_program == 0) {
+        std::cerr << "Failed to link render program" << std::endl;
+        return false;
+    }
+
+    std::cout << "✓ Shaders loaded successfully" << std::endl;
     return true;
 }
 
@@ -171,29 +201,23 @@ void GPURenderer::upload_camera(const Camera& camera) {
     GPUCamera gpu_camera;
 
     // Copy camera data
-    Vec3 pos = camera.get_origin();
-    Vec3 look = camera.get_target();
-    Vec3 up = camera.get_up();
-    float vfov = camera.get_vfov();
-    float aspect = camera.get_aspect();
-
-    gpu_camera.position[0] = pos.x();
-    gpu_camera.position[1] = pos.y();
-    gpu_camera.position[2] = pos.z();
+    gpu_camera.position[0] = camera.origin.x;
+    gpu_camera.position[1] = camera.origin.y;
+    gpu_camera.position[2] = camera.origin.z;
     gpu_camera.position[3] = 1.0f;
 
-    gpu_camera.lookat[0] = look.x();
-    gpu_camera.lookat[1] = look.y();
-    gpu_camera.lookat[2] = look.z();
+    gpu_camera.lookat[0] = camera.lookat.x;
+    gpu_camera.lookat[1] = camera.lookat.y;
+    gpu_camera.lookat[2] = camera.lookat.z;
     gpu_camera.lookat[3] = 1.0f;
 
-    gpu_camera.vup[0] = up.x();
-    gpu_camera.vup[1] = up.y();
-    gpu_camera.vup[2] = up.z();
+    gpu_camera.vup[0] = camera.vup.x;
+    gpu_camera.vup[1] = camera.vup.y;
+    gpu_camera.vup[2] = camera.vup.z;
     gpu_camera.vup[3] = 1.0f;
 
-    gpu_camera.vfov = vfov;
-    gpu_camera.aspect_ratio = aspect;
+    gpu_camera.vfov = camera.vfov;
+    gpu_camera.aspect_ratio = camera.aspect_ratio;
     gpu_camera.padding[0] = 0.0f;
     gpu_camera.padding[1] = 0.0f;
 
@@ -213,8 +237,8 @@ void GPURenderer::render(const Camera& camera, std::vector<std::vector<Color>>& 
         return;
     }
 
-    // Start performance tracking
-    performance.start_render();
+    // Create performance tracker for this render
+    performance = std::make_unique<PerformanceTracker>("GPU Render", width, height);
 
     // Upload scene if needed
     if (!scene_uploaded) {
@@ -245,27 +269,55 @@ void GPURenderer::render(const Camera& camera, std::vector<std::vector<Color>>& 
     double gpu_time_ms = gpu_time_ns / 1e6;
 
     // Stop performance tracking
-    performance.stop_render(width * height, gpu_time_ms);
+    performance->stop();
 
     std::cout << "GPU render time: " << gpu_time_ms << " ms" << std::endl;
 }
 
 void GPURenderer::dispatch_compute() {
-    // TODO: Implement actual compute shader dispatch
-    // This will be implemented once we have the compute shader
-    std::cout << "Compute dispatch not yet implemented" << std::endl;
+    // Use compute shader
+    glUseProgram(compute_program);
+
+    // Set uniforms
+    GLint resolution_loc = glGetUniformLocation(compute_program, "resolution");
+    glUniform2f(resolution_loc, (float)width, (float)height);
+
+    GLint frame_count_loc = glGetUniformLocation(compute_program, "frame_count");
+    glUniform1ui(frame_count_loc, 0);
+
+    // Bind output texture as image
+    glBindImageTexture(5, output_texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+
+    // Dispatch compute shader
+    int work_groups_x = (width + 15) / 16;
+    int work_groups_y = (height + 15) / 16;
+    glDispatchCompute(work_groups_x, work_groups_y, 1);
+
+    // Wait for compute shader to finish
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    glUseProgram(0);
 }
 
 void GPURenderer::read_framebuffer(std::vector<std::vector<Color>>& framebuffer) {
     // Resize framebuffer if needed
     if (framebuffer.size() != static_cast<size_t>(height) ||
-        framebuffer[0].size() != static_cast<size_t>(width)) {
+        (framebuffer.size() > 0 && framebuffer[0].size() != static_cast<size_t>(width))) {
         framebuffer.resize(height, std::vector<Color>(width));
     }
 
-    // TODO: Read back from GPU texture
-    // This will be implemented once we have the compute shader
-    std::cout << "Framebuffer readback not yet implemented" << std::endl;
+    // Read back from GPU texture
+    std::vector<float> pixels(width * height * 4);
+    glBindTexture(GL_TEXTURE_2D, output_texture);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Convert to Color format
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int idx = (y * width + x) * 4;
+            framebuffer[y][x] = Color(pixels[idx], pixels[idx + 1], pixels[idx + 2]);
+        }
+    }
 }
 
 void GPURenderer::resize(int w, int h) {

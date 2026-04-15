@@ -3,7 +3,10 @@
 
 #include <string>
 #include <vector>
-#include <OpenGL/gl3.h>
+
+// Include GLEW properly to avoid conflicts with system OpenGL headers
+#define GL_GLEW_PROTOTYPES 1
+#include <GL/glew.h>
 
 class ShaderManager {
 public:
