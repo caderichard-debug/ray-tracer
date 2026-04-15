@@ -154,37 +154,46 @@ public:
 
     ~HelpOverlay() {
         if (font) TTF_CloseFont(font);
-        if (initialized) TTF_Quit();
+        // Don't call TTF_Quit() here - multiple panels use TTF
+        // TTF_Quit() will be called at program exit
     }
 
     bool init() {
+        if (initialized) return true;
+
         if (TTF_Init() == -1) {
-            std::cerr << "TTF_Init failed: " << TTF_GetError() << std::endl;
+            std::cerr << "HelpOverlay: TTF_Init failed: " << TTF_GetError() << std::endl;
             return false;
         }
 
         font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Arial.ttf", 16);
         if (!font) {
-            std::cerr << "Failed to load font: " << TTF_GetError() << std::endl;
+            std::cerr << "HelpOverlay: Failed to load font: " << TTF_GetError() << std::endl;
             return false;
         }
 
         initialized = true;
+        std::cout << "HelpOverlay initialized successfully" << std::endl;
         return true;
     }
 
-    void toggle() { show = !show; }
+    void toggle() {
+        show = !show;
+        std::cout << "HelpOverlay toggled: " << (show ? "SHOWING" : "HIDDEN") << std::endl;
+    }
     bool is_showing() const { return show; }
 
-    void render(SDL_Window* window) {
+    void render(SDL_Window* window, SDL_Renderer* renderer) {
         if (!show || !initialized) return;
+        if (!renderer) {
+            std::cerr << "HelpOverlay: No renderer provided" << std::endl;
+            return;
+        }
 
         int width, height;
         SDL_GetWindowSize(window, &width, &height);
 
-        // Create renderer for this window
-        SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-        if (!renderer) return;
+        std::cout << "HelpOverlay::render() called - window: " << width << "x" << height << std::endl;
 
         // Semi-transparent background
         SDL_Rect bg_rect = {50, 50, width - 100, height - 100};
@@ -263,7 +272,6 @@ public:
         }
 
         SDL_RenderPresent(renderer);
-        SDL_DestroyRenderer(renderer);
     }
 };
 
@@ -313,14 +321,15 @@ public:
     ~ControlsPanel() {
         if (font) TTF_CloseFont(font);
         if (title_font) TTF_CloseFont(title_font);
-        if (initialized) TTF_Quit();
+        // Don't call TTF_Quit() here - multiple panels use TTF
+        // TTF_Quit() will be called at program exit
     }
 
     bool init() {
         if (initialized) return true;
 
         if (TTF_Init() == -1) {
-            std::cerr << "TTF_Init failed: " << TTF_GetError() << std::endl;
+            std::cerr << "ControlsPanel: TTF_Init failed: " << TTF_GetError() << std::endl;
             return false;
         }
 
@@ -346,15 +355,19 @@ public:
         }
 
         if (!font || !title_font) {
-            std::cerr << "Failed to load fonts" << std::endl;
+            std::cerr << "ControlsPanel: Failed to load fonts" << std::endl;
             return false;
         }
 
         initialized = true;
+        std::cout << "ControlsPanel initialized successfully" << std::endl;
         return true;
     }
 
-    void toggle() { show = !show; }
+    void toggle() {
+        show = !show;
+        std::cout << "ControlsPanel toggled: " << (show ? "SHOWING" : "HIDDEN") << std::endl;
+    }
     bool is_showing() const { return show; }
 
     void setup_buttons(bool& enable_reflections, int& lighting_mode, int& num_lights) {
@@ -518,8 +531,14 @@ public:
         return false;
     }
 
-    void render(SDL_Window* window, bool enable_reflections, int lighting_mode, int num_lights) {
+    void render(SDL_Window* window, SDL_Renderer* renderer, bool enable_reflections, int lighting_mode, int num_lights) {
         if (!show || !initialized) return;
+        if (!renderer) {
+            std::cerr << "ControlsPanel: No renderer provided" << std::endl;
+            return;
+        }
+
+        std::cout << "ControlsPanel::render() called" << std::endl;
 
         setup_buttons(const_cast<bool&>(enable_reflections),
                      const_cast<int&>(lighting_mode),
@@ -527,9 +546,6 @@ public:
 
         int width, height;
         SDL_GetWindowSize(window, &width, &height);
-
-        SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-        if (!renderer) return;
 
         int panel_x = width - panel_width - 10;
         int panel_y = 10;
@@ -666,7 +682,6 @@ public:
         }
 
         SDL_RenderPresent(renderer);
-        SDL_DestroyRenderer(renderer);
     }
 };
 
@@ -1772,6 +1787,16 @@ int main(int argc, char* argv[]) {
     const GLubyte* shader_version = glGetString(GL_SHADING_LANGUAGE_VERSION);
     std::cout << "GLSL Version: " << shader_version << std::endl;
 
+    // Create SDL2 renderer for UI panels (must be done after OpenGL context)
+    SDL_Renderer* sdl_renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!sdl_renderer) {
+        std::cerr << "Failed to create SDL2 renderer: " << SDL_GetError() << std::endl;
+        std::cerr << "UI panels will not be available" << std::endl;
+        // Continue without UI panels
+    } else {
+        std::cout << "✓ SDL2 renderer created for UI panels" << std::endl;
+    }
+
     // Compile shaders
     std::cout << "Compiling shaders..." << std::endl;
     GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
@@ -1967,8 +1992,10 @@ int main(int argc, char* argv[]) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
                     running = false;
                 } else if (event.key.keysym.sym == SDLK_h) {
+                    std::cout << "H key pressed - toggling help overlay" << std::endl;
                     help_overlay.toggle();
                 } else if (event.key.keysym.sym == SDLK_c) {
+                    std::cout << "C key pressed - toggling controls panel" << std::endl;
                     controls_panel.toggle();
                 } else if (event.key.keysym.sym == SDLK_r) {
                     enable_reflections = !enable_reflections;
@@ -2161,11 +2188,15 @@ int main(int argc, char* argv[]) {
             glBindVertexArray(vao);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-            // Render overlays (need to temporarily switch from OpenGL to SDL2 rendering)
+            // Render overlays using the shared SDL2 renderer
+            // Both panels can now be visible independently
             if (help_overlay.is_showing()) {
-                help_overlay.render(window);
-            } else if (controls_panel.is_showing()) {
-                controls_panel.render(window, enable_reflections, lighting_mode, num_lights);
+                std::cout << "Rendering help overlay" << std::endl;
+                help_overlay.render(window, sdl_renderer);
+            }
+            if (controls_panel.is_showing()) {
+                std::cout << "Rendering controls panel" << std::endl;
+                controls_panel.render(window, sdl_renderer, enable_reflections, lighting_mode, num_lights);
             }
 
             SDL_GL_SwapWindow(window);
@@ -2195,6 +2226,11 @@ int main(int argc, char* argv[]) {
     glDeleteShader(fragment_shader);
     glDeleteVertexArrays(1, &vao);
     glDeleteBuffers(1, &vbo);
+
+    // Destroy SDL2 renderer if it was created
+    if (sdl_renderer) {
+        SDL_DestroyRenderer(sdl_renderer);
+    }
 
     SDL_GL_DeleteContext(context);
     SDL_DestroyWindow(window);

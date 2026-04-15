@@ -472,14 +472,14 @@ public:
             SDL_Surface* label_surface = TTF_RenderText_Blended(font, label, text_color);
             if (label_surface) {
                 SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-                SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+                SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
                 SDL_FreeSurface(label_surface);
             }
 
             SDL_Surface* value_surface = TTF_RenderText_Blended(font, value, value_color);
             if (value_surface) {
                 SDL_Rect value_rect = {panel_width - value_surface->w - 15, y_offset, value_surface->w, value_surface->h};
-                SDL_BlitSurface(value_surface, nullptr, surface, &value_rect);
+                SDL_BlitSurface(value_surface, nullptr, content_surface, &value_rect);
                 SDL_FreeSurface(value_surface);
             }
 
@@ -549,17 +549,17 @@ public:
             // Draw button background
             Uint32 button_bg;
             if (is_active) {
-                button_bg = SDL_MapRGBA(surface->format, 100, 150, 200, 255);
+                button_bg = SDL_MapRGBA(content_surface->format, 100, 150, 200, 255);
             } else {
-                button_bg = SDL_MapRGBA(surface->format, 70, 70, 90, 255);
+                button_bg = SDL_MapRGBA(content_surface->format, 70, 70, 90, 255);
             }
-            SDL_FillRect(surface, &button_rect, button_bg);
+            SDL_FillRect(content_surface, &button_rect, button_bg);
 
             // Draw button border
             SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
-            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
             border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
-            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
             // Draw button text
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, label, text_color);
@@ -569,7 +569,7 @@ public:
                     y_offset + (button_height - text_surface->h) / 2,
                     text_surface->w, text_surface->h
                 };
-                SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
+                SDL_BlitSurface(text_surface, nullptr, content_surface, &text_rect);
                 SDL_FreeSurface(text_surface);
             }
 
@@ -587,7 +587,7 @@ public:
         SDL_Surface* label_surface = TTF_RenderText_Blended(font, "Quality Level:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -603,7 +603,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Samples Per Pixel:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -626,7 +626,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Max Depth:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -644,7 +644,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Resolution:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -662,7 +662,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Render Features:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -677,18 +677,18 @@ public:
                           "shadows", enable_shadows ? 1 : 0, 3});
 
         // Draw shadows button background
-        Uint32 shadows_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 shadows_button_bg = SDL_MapRGBA(content_surface->format,
             enable_shadows ? button_active_color.r : button_color.r,
             enable_shadows ? button_active_color.g : button_color.g,
             enable_shadows ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &shadows_button_rect, shadows_button_bg);
+        SDL_FillRect(content_surface, &shadows_button_rect, shadows_button_bg);
 
         // Draw shadows button border
         SDL_Rect shadows_border = {shadows_button_rect.x, shadows_button_rect.y, shadows_button_rect.w, 2};
-        SDL_FillRect(surface, &shadows_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &shadows_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         shadows_border = {shadows_button_rect.x, shadows_button_rect.y + shadows_button_rect.h - 2, shadows_button_rect.w, 2};
-        SDL_FillRect(surface, &shadows_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &shadows_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw shadows button text
         SDL_Surface* shadows_text_surface = TTF_RenderText_Blended(font, shadows_label, text_color);
@@ -698,7 +698,7 @@ public:
                 y_offset + (24 - shadows_text_surface->h) / 2,
                 shadows_text_surface->w, shadows_text_surface->h
             };
-            SDL_BlitSurface(shadows_text_surface, nullptr, surface, &shadows_text_rect);
+            SDL_BlitSurface(shadows_text_surface, nullptr, content_surface, &shadows_text_rect);
             SDL_FreeSurface(shadows_text_surface);
         }
 
@@ -712,18 +712,18 @@ public:
                           "reflections", enable_reflections ? 1 : 0, 4});
 
         // Draw reflections button background
-        Uint32 reflections_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 reflections_button_bg = SDL_MapRGBA(content_surface->format,
             enable_reflections ? button_active_color.r : button_color.r,
             enable_reflections ? button_active_color.g : button_color.g,
             enable_reflections ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &reflections_button_rect, reflections_button_bg);
+        SDL_FillRect(content_surface, &reflections_button_rect, reflections_button_bg);
 
         // Draw reflections button border
         SDL_Rect reflections_border = {reflections_button_rect.x, reflections_button_rect.y, reflections_button_rect.w, 2};
-        SDL_FillRect(surface, &reflections_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &reflections_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         reflections_border = {reflections_button_rect.x, reflections_button_rect.y + reflections_button_rect.h - 2, reflections_button_rect.w, 2};
-        SDL_FillRect(surface, &reflections_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &reflections_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw reflections button text
         SDL_Surface* reflections_text_surface = TTF_RenderText_Blended(font, reflections_label, text_color);
@@ -733,7 +733,7 @@ public:
                 y_offset + (24 - reflections_text_surface->h) / 2,
                 reflections_text_surface->w, reflections_text_surface->h
             };
-            SDL_BlitSurface(reflections_text_surface, nullptr, surface, &reflections_text_rect);
+            SDL_BlitSurface(reflections_text_surface, nullptr, content_surface, &reflections_text_rect);
             SDL_FreeSurface(reflections_text_surface);
         }
 
@@ -743,7 +743,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Screenshot:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -757,14 +757,14 @@ public:
                           "screenshot", 1, 7});
 
         // Draw screenshot button background (make it brighter like the "on" toggle state)
-        Uint32 screenshot_button_bg = SDL_MapRGBA(surface->format, button_active_color.r, button_active_color.g, button_active_color.b, 255);
-        SDL_FillRect(surface, &screenshot_button_rect, screenshot_button_bg);
+        Uint32 screenshot_button_bg = SDL_MapRGBA(content_surface->format, button_active_color.r, button_active_color.g, button_active_color.b, 255);
+        SDL_FillRect(content_surface, &screenshot_button_rect, screenshot_button_bg);
 
         // Draw screenshot button border
         SDL_Rect screenshot_border = {screenshot_button_rect.x, screenshot_button_rect.y, screenshot_button_rect.w, 2};
-        SDL_FillRect(surface, &screenshot_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &screenshot_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         screenshot_border = {screenshot_button_rect.x, screenshot_button_rect.y + screenshot_button_rect.h - 2, screenshot_button_rect.w, 2};
-        SDL_FillRect(surface, &screenshot_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &screenshot_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw screenshot button text
         SDL_Surface* screenshot_text_surface = TTF_RenderText_Blended(font, screenshot_label, text_color);
@@ -774,7 +774,7 @@ public:
                 y_offset + (24 - screenshot_text_surface->h) / 2,
                 screenshot_text_surface->w, screenshot_text_surface->h
             };
-            SDL_BlitSurface(screenshot_text_surface, nullptr, surface, &screenshot_text_rect);
+            SDL_BlitSurface(screenshot_text_surface, nullptr, content_surface, &screenshot_text_rect);
             SDL_FreeSurface(screenshot_text_surface);
         }
 
@@ -784,7 +784,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Debug Features:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -825,18 +825,18 @@ public:
                               analysis_modes[i], static_cast<int>(modes[i]), 6});
 
             // Draw button background
-            Uint32 button_bg = SDL_MapRGBA(surface->format,
+            Uint32 button_bg = SDL_MapRGBA(content_surface->format,
                 is_active ? button_active_color.r : button_color.r,
                 is_active ? button_active_color.g : button_color.g,
                 is_active ? button_active_color.b : button_color.b,
                 255);
-            SDL_FillRect(surface, &button_rect, button_bg);
+            SDL_FillRect(content_surface, &button_rect, button_bg);
 
             // Draw button border
             SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
-            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
             border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
-            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
             // Draw button text
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, analysis_modes[i], text_color);
@@ -846,7 +846,7 @@ public:
                     y_offset + (button_height - text_surface->h) / 2,
                     text_surface->w, text_surface->h
                 };
-                SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
+                SDL_BlitSurface(text_surface, nullptr, content_surface, &text_rect);
                 SDL_FreeSurface(text_surface);
             }
         }
@@ -856,7 +856,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Advanced Rendering:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -871,18 +871,18 @@ public:
                           "progressive", enable_progressive ? 1 : 0, 8});
 
         // Draw progressive button background
-        Uint32 progressive_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 progressive_button_bg = SDL_MapRGBA(content_surface->format,
             enable_progressive ? button_active_color.r : button_color.r,
             enable_progressive ? button_active_color.g : button_color.g,
             enable_progressive ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &progressive_button_rect, progressive_button_bg);
+        SDL_FillRect(content_surface, &progressive_button_rect, progressive_button_bg);
 
         // Draw progressive button border
         SDL_Rect progressive_border = {progressive_button_rect.x, progressive_button_rect.y, progressive_button_rect.w, 2};
-        SDL_FillRect(surface, &progressive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &progressive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         progressive_border = {progressive_button_rect.x, progressive_button_rect.y + progressive_button_rect.h - 2, progressive_button_rect.w, 2};
-        SDL_FillRect(surface, &progressive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &progressive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw progressive button text
         SDL_Surface* progressive_text_surface = TTF_RenderText_Blended(font, progressive_label, text_color);
@@ -892,7 +892,7 @@ public:
                 y_offset + (24 - progressive_text_surface->h) / 2,
                 progressive_text_surface->w, progressive_text_surface->h
             };
-            SDL_BlitSurface(progressive_text_surface, nullptr, surface, &progressive_text_rect);
+            SDL_BlitSurface(progressive_text_surface, nullptr, content_surface, &progressive_text_rect);
             SDL_FreeSurface(progressive_text_surface);
         }
 
@@ -906,18 +906,18 @@ public:
                           "adaptive", enable_adaptive ? 1 : 0, 9});
 
         // Draw adaptive button background
-        Uint32 adaptive_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 adaptive_button_bg = SDL_MapRGBA(content_surface->format,
             enable_adaptive ? button_active_color.r : button_color.r,
             enable_adaptive ? button_active_color.g : button_color.g,
             enable_adaptive ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &adaptive_button_rect, adaptive_button_bg);
+        SDL_FillRect(content_surface, &adaptive_button_rect, adaptive_button_bg);
 
         // Draw adaptive button border
         SDL_Rect adaptive_border = {adaptive_button_rect.x, adaptive_button_rect.y, adaptive_button_rect.w, 2};
-        SDL_FillRect(surface, &adaptive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &adaptive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         adaptive_border = {adaptive_button_rect.x, adaptive_button_rect.y + adaptive_button_rect.h - 2, adaptive_button_rect.w, 2};
-        SDL_FillRect(surface, &adaptive_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &adaptive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw adaptive button text
         SDL_Surface* adaptive_text_surface = TTF_RenderText_Blended(font, adaptive_label, text_color);
@@ -927,7 +927,7 @@ public:
                 y_offset + (24 - adaptive_text_surface->h) / 2,
                 adaptive_text_surface->w, adaptive_text_surface->h
             };
-            SDL_BlitSurface(adaptive_text_surface, nullptr, surface, &adaptive_text_rect);
+            SDL_BlitSurface(adaptive_text_surface, nullptr, content_surface, &adaptive_text_rect);
             SDL_FreeSurface(adaptive_text_surface);
         }
 
@@ -943,18 +943,18 @@ public:
                           "wavefront", enable_wavefront ? 1 : 0, 10});
 
         // Draw wavefront button background
-        Uint32 wavefront_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 wavefront_button_bg = SDL_MapRGBA(content_surface->format,
             enable_wavefront ? button_active_color.r : button_color.r,
             enable_wavefront ? button_active_color.g : button_color.g,
             enable_wavefront ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &wavefront_button_rect, wavefront_button_bg);
+        SDL_FillRect(content_surface, &wavefront_button_rect, wavefront_button_bg);
 
         // Draw wavefront button border
         SDL_Rect wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y, wavefront_button_rect.w, 2};
-        SDL_FillRect(surface, &wavefront_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y + wavefront_button_rect.h - 2, wavefront_button_rect.w, 2};
-        SDL_FillRect(surface, &wavefront_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw wavefront button text
         SDL_Surface* wavefront_text_surface = TTF_RenderText_Blended(font, wavefront_label, text_color);
@@ -964,7 +964,7 @@ public:
                 y_offset + (24 - wavefront_text_surface->h) / 2,
                 wavefront_text_surface->w, wavefront_text_surface->h
             };
-            SDL_BlitSurface(wavefront_text_surface, nullptr, surface, &wavefront_text_rect);
+            SDL_BlitSurface(wavefront_text_surface, nullptr, content_surface, &wavefront_text_rect);
             SDL_FreeSurface(wavefront_text_surface);
         }
 
@@ -974,7 +974,7 @@ public:
         label_surface = TTF_RenderText_Blended(font, "Phase 2 Optimizations:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
             SDL_FreeSurface(label_surface);
         }
         y_offset += 22;
@@ -989,18 +989,18 @@ public:
                           "morton", enable_morton ? 1 : 0, 11});
 
         // Draw morton button background
-        Uint32 morton_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 morton_button_bg = SDL_MapRGBA(content_surface->format,
             enable_morton ? button_active_color.r : button_color.r,
             enable_morton ? button_active_color.g : button_color.g,
             enable_morton ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &morton_button_rect, morton_button_bg);
+        SDL_FillRect(content_surface, &morton_button_rect, morton_button_bg);
 
         // Draw morton button border
         SDL_Rect morton_border = {morton_button_rect.x, morton_button_rect.y, morton_button_rect.w, 2};
-        SDL_FillRect(surface, &morton_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &morton_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         morton_border = {morton_button_rect.x, morton_button_rect.y + morton_button_rect.h - 2, morton_button_rect.w, 2};
-        SDL_FillRect(surface, &morton_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &morton_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw morton button text
         SDL_Surface* morton_text_surface = TTF_RenderText_Blended(font, morton_label, text_color);
@@ -1010,7 +1010,7 @@ public:
                 y_offset + (24 - morton_text_surface->h) / 2,
                 morton_text_surface->w, morton_text_surface->h
             };
-            SDL_BlitSurface(morton_text_surface, nullptr, surface, &morton_text_rect);
+            SDL_BlitSurface(morton_text_surface, nullptr, content_surface, &morton_text_rect);
             SDL_FreeSurface(morton_text_surface);
         }
 
@@ -1024,18 +1024,18 @@ public:
                           "stratified", enable_stratified ? 1 : 0, 12});
 
         // Draw stratified button background
-        Uint32 stratified_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 stratified_button_bg = SDL_MapRGBA(content_surface->format,
             enable_stratified ? button_active_color.r : button_color.r,
             enable_stratified ? button_active_color.g : button_color.g,
             enable_stratified ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &stratified_button_rect, stratified_button_bg);
+        SDL_FillRect(content_surface, &stratified_button_rect, stratified_button_bg);
 
         // Draw stratified button border
         SDL_Rect stratified_border = {stratified_button_rect.x, stratified_button_rect.y, stratified_button_rect.w, 2};
-        SDL_FillRect(surface, &stratified_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &stratified_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         stratified_border = {stratified_button_rect.x, stratified_button_rect.y + stratified_button_rect.h - 2, stratified_button_rect.w, 2};
-        SDL_FillRect(surface, &stratified_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &stratified_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw stratified button text
         SDL_Surface* stratified_text_surface = TTF_RenderText_Blended(font, stratified_label, text_color);
@@ -1045,7 +1045,7 @@ public:
                 y_offset + (24 - stratified_text_surface->h) / 2,
                 stratified_text_surface->w, stratified_text_surface->h
             };
-            SDL_BlitSurface(stratified_text_surface, nullptr, surface, &stratified_text_rect);
+            SDL_BlitSurface(stratified_text_surface, nullptr, content_surface, &stratified_text_rect);
             SDL_FreeSurface(stratified_text_surface);
         }
 
@@ -1061,18 +1061,18 @@ public:
                           "frustum", enable_frustum ? 1 : 0, 13});
 
         // Draw frustum button background
-        Uint32 frustum_button_bg = SDL_MapRGBA(surface->format,
+        Uint32 frustum_button_bg = SDL_MapRGBA(content_surface->format,
             enable_frustum ? button_active_color.r : button_color.r,
             enable_frustum ? button_active_color.g : button_color.g,
             enable_frustum ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(surface, &frustum_button_rect, frustum_button_bg);
+        SDL_FillRect(content_surface, &frustum_button_rect, frustum_button_bg);
 
         // Draw frustum button border
         SDL_Rect frustum_border = {frustum_button_rect.x, frustum_button_rect.y, frustum_button_rect.w, 2};
-        SDL_FillRect(surface, &frustum_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         frustum_border = {frustum_button_rect.x, frustum_button_rect.y + frustum_button_rect.h - 2, frustum_button_rect.w, 2};
-        SDL_FillRect(surface, &frustum_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
         // Draw frustum button text
         SDL_Surface* frustum_text_surface = TTF_RenderText_Blended(font, frustum_label, text_color);
@@ -1082,20 +1082,20 @@ public:
                 y_offset + (24 - frustum_text_surface->h) / 2,
                 frustum_text_surface->w, frustum_text_surface->h
             };
-            SDL_BlitSurface(frustum_text_surface, nullptr, surface, &frustum_text_rect);
+            SDL_BlitSurface(frustum_text_surface, nullptr, content_surface, &frustum_text_rect);
             SDL_FreeSurface(frustum_text_surface);
         }
 
         // Convert surface to texture
 
         // Convert surface to texture
-        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, content_surface);
         if (texture) {
             SDL_RenderCopy(renderer, texture, nullptr, &overlay_rect);
             SDL_DestroyTexture(texture);
         }
 
-        SDL_FreeSurface(surface);
+        SDL_FreeSurface(content_surface);
     }
 
     // Handle mouse clicks, returns true if a setting was changed
