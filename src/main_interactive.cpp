@@ -558,9 +558,9 @@ public:
         // Create smaller semi-transparent background
         SDL_Rect overlay_rect = {
             (window_width - 400) / 2,
-            (window_height - 320) / 2,
+            (window_height - 360) / 2,
             400,
-            320
+            360
         };
 
         SDL_Surface* surface = SDL_CreateRGBSurface(0, overlay_rect.w, overlay_rect.h, 32, 0, 0, 0, 0);
@@ -580,9 +580,10 @@ public:
 
         // Render controls text (condensed)
         const char* controls_text[] = {
+            "Click window to capture mouse for looking around",
             "MOVE: WASD + Arrows | LOOK: Mouse",
             "1-6: Quality | M: Analysis | SPACE: Pause",
-            "C: Controls | H: Help | ESC: Quit"
+            "S: Screenshot | C: Controls Panel | H: Help | ESC: Quit"
         };
 
         int y_offset = 50;
@@ -702,7 +703,7 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(455, window_height - 20);
+        int panel_height = std::min(536, window_height - 20);
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
@@ -1046,6 +1047,47 @@ public:
 
         y_offset += 35;
 
+        // Screenshot button (new row)
+        label_surface = TTF_RenderText_Blended(font, "Screenshot:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        const char* screenshot_label = "Save Screenshot";
+        int screenshot_button_width = 120;
+        SDL_Rect screenshot_button_rect = {15, y_offset, screenshot_button_width, 24};
+
+        // Store button for click detection (category 7 = screenshot)
+        buttons.push_back({{screenshot_button_rect.x + panel_x, screenshot_button_rect.y + panel_y, screenshot_button_rect.w, screenshot_button_rect.h},
+                          "screenshot", 1, 7});
+
+        // Draw screenshot button background
+        Uint32 screenshot_button_bg = SDL_MapRGBA(surface->format, button_color.r, button_color.g, button_color.b, 255);
+        SDL_FillRect(surface, &screenshot_button_rect, screenshot_button_bg);
+
+        // Draw screenshot button border
+        SDL_Rect screenshot_border = {screenshot_button_rect.x, screenshot_button_rect.y, screenshot_button_rect.w, 2};
+        SDL_FillRect(surface, &screenshot_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        screenshot_border = {screenshot_button_rect.x, screenshot_button_rect.y + screenshot_button_rect.h - 2, screenshot_button_rect.w, 2};
+        SDL_FillRect(surface, &screenshot_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw screenshot button text
+        SDL_Surface* screenshot_text_surface = TTF_RenderText_Blended(font, screenshot_label, text_color);
+        if (screenshot_text_surface) {
+            SDL_Rect screenshot_text_rect = {
+                screenshot_button_rect.x + (screenshot_button_width - screenshot_text_surface->w) / 2,
+                y_offset + (24 - screenshot_text_surface->h) / 2,
+                screenshot_text_surface->w, screenshot_text_surface->h
+            };
+            SDL_BlitSurface(screenshot_text_surface, nullptr, surface, &screenshot_text_rect);
+            SDL_FreeSurface(screenshot_text_surface);
+        }
+
+        y_offset += 35;
+
         // Debug features section
         label_surface = TTF_RenderText_Blended(font, "Debug Features:", title_color);
         if (label_surface) {
@@ -1143,6 +1185,7 @@ public:
         bool reflections_changed;
         bool analysis_mode_changed;
         int new_analysis_mode;
+        bool screenshot_requested;
         bool button_clicked;
 
         ClickResult() : quality_changed(false), new_quality(0),
@@ -1151,7 +1194,7 @@ public:
                        resolution_changed(false), new_resolution(0),
                        shadows_changed(false), reflections_changed(false),
                        analysis_mode_changed(false), new_analysis_mode(0),
-                       button_clicked(false) {}
+                       screenshot_requested(false), button_clicked(false) {}
     };
 
     ClickResult handle_click(int mouse_x, int mouse_y) {
@@ -1188,6 +1231,9 @@ public:
                     case 6: // Analysis mode
                         result.analysis_mode_changed = true;
                         result.new_analysis_mode = button.value;
+                        break;
+                    case 7: // Screenshot
+                        result.screenshot_requested = true;
                         break;
                 }
                 break;
@@ -1654,6 +1700,18 @@ int main(int argc, char* argv[]) {
                                 std::cout << "Analysis mode: " << analysis.get_mode_name() << std::endl;
                                 need_render = true;
                             }
+                        } else if (click_result.screenshot_requested) {
+                            // Handle screenshot request
+                            system("mkdir -p screenshots");
+                            auto now = std::chrono::system_clock::now();
+                            auto time = std::chrono::system_clock::to_time_t(now);
+                            std::stringstream ss;
+                            ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
+#ifdef USE_GPU_RENDERER
+                            save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
+#else
+                            save_cpu_screenshot(renderer, texture, image_width, image_height, ss.str().c_str());
+#endif
                         } else if (click_result.resolution_changed) {
                             int new_width = click_result.new_resolution;
                             if (!is_samples_safe(preset.samples, new_width)) {
