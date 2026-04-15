@@ -49,6 +49,7 @@ ENABLE_ADAPTIVE ?= 0
 ENABLE_WAVEFRONT ?= 0
 ENABLE_MORTON ?= 0
 ENABLE_STRATIFIED ?= 0
+ENABLE_FRUSTUM ?= 0
 
 # GPU feature flags (for main_gpu_interactive)
 ENABLE_GPU_PBR ?= 1              # Enable PBR lighting
@@ -78,7 +79,8 @@ FEATURE_DEFINES = -DENABLE_SHADOWS=$(ENABLE_SHADOWS) \
                   -DENABLE_ADAPTIVE=$(ENABLE_ADAPTIVE) \
                   -DENABLE_WAVEFRONT=$(ENABLE_WAVEFRONT) \
                   -DENABLE_MORTON=$(ENABLE_MORTON) \
-                  -DENABLE_STRATIFIED=$(ENABLE_STRATIFIED)
+                  -DENABLE_STRATIFIED=$(ENABLE_STRATIFIED) \
+                  -DENABLE_FRUSTUM=$(ENABLE_FRUSTUM)
 
 # Compiler flags based on features
 ifeq ($(ENABLE_OPENMP),1)
@@ -125,6 +127,7 @@ batch-cpu: $(BUILD_DIR)
 	@echo "  Wavefront:      $(ENABLE_WAVEFRONT) [1.358x]"
 	@echo "  Morton Order:   $(ENABLE_MORTON) [+10-15%]"
 	@echo "  Stratified:     $(ENABLE_STRATIFIED) [2x convergence]"
+	@echo "  Frustum Cull:   $(ENABLE_FRUSTUM) [+5-10%]"
 	@echo ""
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) \
 		$(FEATURE_DEFINES) \
