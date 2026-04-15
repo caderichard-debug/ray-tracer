@@ -47,6 +47,10 @@
 #define ENABLE_AMBIENT_OCCLUSION 0  // Enable ambient occlusion (Phase 2)
 #endif
 
+#ifndef ENABLE_GI
+#define ENABLE_GI 0  // Enable global illumination (Phase 3)
+#endif
+
 // Scene selection (set via Makefile)
 #ifndef SCENE_NAME
 #define SCENE_NAME "cornell_box"  // Default scene
@@ -137,6 +141,254 @@ public:
     }
 };
 
+// Simple help overlay with text rendering
+class HelpOverlay {
+private:
+    bool show;
+    bool initialized;
+    TTF_Font* font;
+    SDL_Color text_color;
+    SDL_Color background_color;
+
+public:
+    HelpOverlay() : show(false), initialized(false), font(nullptr) {
+        text_color = {255, 255, 255, 255};
+        background_color = {0, 0, 0, 180};
+    }
+
+    ~HelpOverlay() {
+        if (font) TTF_CloseFont(font);
+        if (initialized) TTF_Quit();
+    }
+
+    bool init() {
+        if (TTF_Init() == -1) {
+            std::cerr << "TTF_Init failed: " << TTF_GetError() << std::endl;
+            return false;
+        }
+
+        font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Arial.ttf", 16);
+        if (!font) {
+            std::cerr << "Failed to load font: " << TTF_GetError() << std::endl;
+            return false;
+        }
+
+        initialized = true;
+        return true;
+    }
+
+    void toggle() { show = !show; }
+    bool is_showing() const { return show; }
+
+    void render(SDL_Window* window) {
+        if (!show || !initialized) return;
+
+        int width, height;
+        SDL_GetWindowSize(window, &width, &height);
+
+        // Create renderer for this window
+        SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        if (!renderer) return;
+
+        // Semi-transparent background
+        SDL_Rect bg_rect = {50, 50, width - 100, height - 100};
+        SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
+        SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
+
+        SDL_Texture* bg_texture = SDL_CreateTextureFromSurface(renderer, bg_surface);
+        SDL_RenderCopy(renderer, bg_texture, nullptr, &bg_rect);
+        SDL_DestroyTexture(bg_texture);
+        SDL_FreeSurface(bg_surface);
+
+        // Render help text
+        const char* help_lines[] = {
+            "=== GPU Ray Tracer Help ===",
+            "",
+            "Controls:",
+            "  WASD/Arrows - Move camera",
+            "  Mouse       - Look around",
+            "  R           - Toggle reflections",
+            "  P           - Toggle Phong/PBR lighting",
+            "  L           - Cycle light configurations",
+            "  H           - Toggle this help",
+            "  C           - Toggle controls panel",
+            "  ESC         - Quit",
+            "",
+            "Features:",
+            "  - Real-time GPU ray tracing",
+            "  - Exact CPU Cornell Box scene",
+            "  - Phong & PBR lighting modes",
+            "  - Multiple light configurations",
+            "  - Procedural textures",
+            "  - 75+ FPS performance",
+            "",
+            "Press H to close this help"
+        };
+
+        int y_offset = 70;
+        for (size_t i = 0; i < sizeof(help_lines) / sizeof(help_lines[0]); i++) {
+            SDL_Surface* surface = TTF_RenderText_Blended(font, help_lines[i], text_color);
+            if (surface) {
+                SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+                if (texture) {
+                    SDL_Rect dest_rect = {70, y_offset, surface->w, surface->h};
+                    SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                    SDL_DestroyTexture(texture);
+                }
+                SDL_FreeSurface(surface);
+                y_offset += 25;
+            }
+        }
+
+        SDL_RenderPresent(renderer);
+        SDL_DestroyRenderer(renderer);
+    }
+};
+
+// Simple settings panel
+class ControlsPanel {
+private:
+    bool show;
+    bool initialized;
+    TTF_Font* font;
+    SDL_Color text_color;
+    SDL_Color background_color;
+    SDL_Color title_color;
+
+public:
+    ControlsPanel() : show(false), initialized(false), font(nullptr) {
+        text_color = {255, 255, 255, 255};
+        background_color = {0, 0, 0, 180};
+        title_color = {255, 200, 100, 255};
+    }
+
+    ~ControlsPanel() {
+        if (font) TTF_CloseFont(font);
+        if (initialized) TTF_Quit();
+    }
+
+    bool init() {
+        if (TTF_Init() == -1) {
+            return false;
+        }
+
+        font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Arial.ttf", 16);
+        if (!font) {
+            return false;
+        }
+
+        initialized = true;
+        return true;
+    }
+
+    void toggle() { show = !show; }
+    bool is_showing() const { return show; }
+
+    void render(SDL_Window* window, bool reflections_enabled, int lighting_mode, int num_lights) {
+        if (!show || !initialized) return;
+
+        int width, height;
+        SDL_GetWindowSize(window, &width, &height);
+
+        // Create renderer for this window
+        SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        if (!renderer) return;
+
+        // Semi-transparent background
+        SDL_Rect bg_rect = {width - 300, 50, 250, 250};
+        SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
+        SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
+
+        SDL_Texture* bg_texture = SDL_CreateTextureFromSurface(renderer, bg_surface);
+        SDL_RenderCopy(renderer, bg_texture, nullptr, &bg_rect);
+        SDL_DestroyTexture(bg_texture);
+        SDL_FreeSurface(bg_surface);
+
+        // Render settings text
+        const char* title = "=== Settings ===";
+        SDL_Surface* surface = TTF_RenderText_Blended(font, title, title_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, 70, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+        }
+
+        int y_offset = 110;
+        char settings_text[256];
+
+        sprintf(settings_text, "Reflections: %s", reflections_enabled ? "ON" : "OFF");
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Lighting: %s", lighting_mode == 0 ? "Phong" : "PBR");
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Lights: %d", num_lights);
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Max Depth: %d", 5);
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Objects: %d spheres, %d tris", 13, 16);
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+        }
+
+        SDL_RenderPresent(renderer);
+        SDL_DestroyRenderer(renderer);
+    }
+};
+
 // Scene data (matching CPU Cornell Box exactly)
 struct SphereData {
     float center[3];
@@ -172,6 +424,7 @@ std::string fragment_shader_source =
     "#define ENABLE_GAMMA_CORRECTION " + (ENABLE_GAMMA_CORRECTION ? "1" : "0") + "\n" +
     "#define ENABLE_SOFT_SHADOWS " + (ENABLE_SOFT_SHADOWS ? "1" : "0") + "\n" +
     "#define ENABLE_AMBIENT_OCCLUSION " + (ENABLE_AMBIENT_OCCLUSION ? "1" : "0") + "\n" +
+    "#define ENABLE_GI " + (ENABLE_GI ? "1" : "0") + "\n" +
     R"(
 
 uniform vec2 resolution;
@@ -224,6 +477,11 @@ uniform float light_radius;              // Radius of area light
 // Ambient occlusion options
 uniform bool enable_ao;                  // Enable ambient occlusion
 uniform int ao_samples;                  // AO samples (1-16)
+
+// Global illumination options
+uniform bool enable_gi;                  // Enable global illumination
+uniform int gi_samples;                  // GI samples (1-8)
+uniform float gi_intensity;              // GI intensity (0.0-1.0)
 
 // Simple ray-sphere intersection
 bool hit_sphere(vec3 origin, vec3 direction, vec3 center, float radius, inout float t) {
@@ -548,6 +806,74 @@ float calculate_ao(vec3 hit_point, vec3 N) {
 }
 #endif
 
+#if ENABLE_GI
+// Global Illumination - Indirect lighting via hemisphere sampling
+vec3 calculate_gi(vec3 hit_point, vec3 N, vec3 albedo) {
+    vec3 gi_color = vec3(0.0);
+
+    // Build orthonormal basis around normal
+    vec3 tangent = normalize(abs(N.x) > abs(N.y) ? vec3(-N.z, 0.0, N.x) : vec3(0.0, -N.z, N.y));
+    vec3 bitangent = cross(N, tangent);
+
+    for (int i = 0; i < gi_samples; i++) {
+        // Stratified hemisphere sampling
+        float u = (float(i) + 0.5) / float(gi_samples);
+        float v = fract(sin(float(i) * 12.9898) * 43758.5453);  // Random-ish
+
+        // Uniform hemisphere sampling
+        float cos_theta = 1.0 - u;
+        float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+        float phi = 2.0 * 3.14159 * v;
+
+        // Direction in hemisphere space
+        vec3 sample_dir;
+        sample_dir.x = cos(phi) * sin_theta;
+        sample_dir.y = sin(phi) * sin_theta;
+        sample_dir.z = cos_theta;
+
+        // Transform to world space
+        sample_dir = tangent * sample_dir.x + bitangent * sample_dir.y + N * sample_dir.z;
+
+        // Cast indirect ray
+        vec3 sample_origin = hit_point + N * 0.001;
+        float t_min = 50.0;  // GI search radius
+        bool hit = false;
+        vec3 hit_color = vec3(0.0);
+
+        // Check spheres
+        for (int j = 0; j < num_spheres; j++) {
+            if (hit_sphere(sample_origin, sample_dir, sphere_centers[j], sphere_radii[j], t_min)) {
+                hit = true;
+                hit_color = sphere_colors[j];
+                break;
+            }
+        }
+
+        // Check triangles
+        if (!hit) {
+            for (int j = 0; j < num_triangles; j++) {
+                if (hit_triangle(sample_origin, sample_dir, tri_v0[j], tri_v1[j], tri_v2[j],
+                               tri_normals[j], t_min)) {
+                    hit = true;
+                    hit_color = tri_colors[j];
+                    break;
+                }
+            }
+        }
+
+        // Accumulate indirect lighting
+        if (hit) {
+            gi_color += hit_color * albedo;
+        } else {
+            // No hit, use environment approximation
+            gi_color += mix(vec3(0.1), vec3(0.5, 0.7, 1.0), max(sample_dir.y, 0.0)) * albedo;
+        }
+    }
+
+    return gi_color * (gi_intensity / float(gi_samples));
+}
+#endif
+
 // ============================================================================
 
 // Calculate PBR lighting for a point
@@ -839,6 +1165,14 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                     color = phong_shading(normal, V, L, albedo, 32.0);
                 }
 #endif
+
+                // Add Global Illumination (indirect lighting)
+#if ENABLE_GI
+                if (enable_gi && gi_samples > 0) {
+                    vec3 gi_color = calculate_gi(hit_point, normal, albedo);
+                    color += gi_color;
+                }
+#endif
             } else {
                 color = albedo;  // Self-illuminated
             }
@@ -997,667 +1331,6 @@ GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
 
     return program;
 }
-
-// ============================================================================
-// OpenGL UI SYSTEM - Pure OpenGL rendering for panels
-// ============================================================================
-
-// Simple OpenGL UI Renderer for panels
-class OpenGLUIRenderer {
-private:
-    GLuint ui_program;
-    GLuint ui_vao, ui_vbo;
-    GLint pos_attrib_loc, tex_attrib_loc;
-    TTF_Font* font;
-    bool initialized;
-
-public:
-    OpenGLUIRenderer() : ui_program(0), ui_vao(0), ui_vbo(0), pos_attrib_loc(-1), tex_attrib_loc(-1), font(nullptr), initialized(false) {}
-
-    ~OpenGLUIRenderer() {
-        if (font) TTF_CloseFont(font);
-        if (ui_program) glDeleteProgram(ui_program);
-        if (ui_vao) glDeleteVertexArrays(1, &ui_vao);
-        if (ui_vbo) glDeleteBuffers(1, &ui_vbo);
-    }
-
-    bool init() {
-        if (initialized) return true;
-
-        // Initialize SDL_ttf for text rendering
-        if (TTF_Init() == -1) {
-            std::cerr << "OpenGLUI: TTF_Init failed: " << TTF_GetError() << std::endl;
-            return false;
-        }
-
-        // Load font
-        font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Arial.ttf", 14);
-        if (!font) {
-            std::cerr << "OpenGLUI: Failed to load font" << std::endl;
-            return false;
-        }
-
-        // Simple 2D UI shader
-        const char* vertex_shader_src = R"(
-            #version 120
-            attribute vec2 position;
-            attribute vec2 tex_coord;
-            varying vec2 v_tex_coord;
-            void main() {
-                gl_Position = vec4(position, 0.0, 1.0);
-                v_tex_coord = tex_coord;
-            }
-        )";
-
-        const char* fragment_shader_src = R"(
-            #version 120
-            varying vec2 v_tex_coord;
-            uniform sampler2D ui_texture;
-            uniform vec4 ui_color;
-            uniform int use_texture;
-            void main() {
-                if (use_texture == 1) {
-                    vec4 tex_color = texture2D(ui_texture, v_tex_coord);
-                    // For text: just use the texture color directly
-                    gl_FragColor = tex_color;
-                } else {
-                    gl_FragColor = ui_color;
-                }
-            }
-        )";
-
-        GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_shader_src);
-        GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_shader_src);
-
-        if (!vertex_shader || !fragment_shader) {
-            std::cerr << "OpenGLUI: Failed to compile shaders" << std::endl;
-            return false;
-        }
-
-        ui_program = glCreateProgram();
-        glAttachShader(ui_program, vertex_shader);
-        glAttachShader(ui_program, fragment_shader);
-        glLinkProgram(ui_program);
-
-        // Check link status
-        GLint link_status;
-        glGetProgramiv(ui_program, GL_LINK_STATUS, &link_status);
-        if (link_status != GL_TRUE) {
-            GLint log_length;
-            glGetProgramiv(ui_program, GL_INFO_LOG_LENGTH, &log_length);
-            std::vector<char> log(log_length);
-            glGetProgramInfoLog(ui_program, log_length, nullptr, log.data());
-            std::cerr << "OpenGLUI: Failed to link UI program:" << std::endl;
-            std::cerr << log.data() << std::endl;
-            glDeleteProgram(ui_program);
-            ui_program = 0;
-            return false;
-        }
-
-        glDeleteShader(vertex_shader);
-        glDeleteShader(fragment_shader);
-
-        std::cout << "OpenGLUI: UI program linked successfully" << std::endl;
-
-        // Create VAO/VBO for UI rendering
-        glGenVertexArrays(1, &ui_vao);
-        glGenBuffers(1, &ui_vbo);
-
-        // Set up VAO once with vertex attribute pointers
-        glBindVertexArray(ui_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
-
-        // Get attribute locations
-        pos_attrib_loc = glGetAttribLocation(ui_program, "position");
-        tex_attrib_loc = glGetAttribLocation(ui_program, "tex_coord");
-
-        // Set up vertex attribute pointers (will stay with VAO)
-        glEnableVertexAttribArray(pos_attrib_loc);
-        glVertexAttribPointer(pos_attrib_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-
-        glEnableVertexAttribArray(tex_attrib_loc);
-        glVertexAttribPointer(tex_attrib_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-
-        glBindVertexArray(0);
-
-        initialized = true;
-        return true;
-    }
-
-    GLuint create_text_texture(const std::string& text, SDL_Color color) {
-        if (!font) return 0;
-
-        SDL_Surface* text_surface = TTF_RenderText_Blended(font, text.c_str(), color);
-        if (!text_surface) return 0;
-
-        GLuint texture_id;
-        glGenTextures(1, &texture_id);
-        glBindTexture(GL_TEXTURE_2D, texture_id);
-
-        // Upload texture data
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, text_surface->w, text_surface->h,
-                     0, GL_RGBA, GL_UNSIGNED_BYTE, text_surface->pixels);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-        SDL_FreeSurface(text_surface);
-        return texture_id;
-    }
-
-    void render_colored_quad(float x, float y, float width, float height, const SDL_Color& color) {
-        if (!initialized) return;
-
-        // Save current OpenGL state
-        GLint current_program, current_vao, current_array_buffer;
-        GLint depth_test_enabled, blend_enabled;
-        GLint blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha;
-
-        glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
-        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
-        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &current_array_buffer);
-        glGetIntegerv(GL_DEPTH_TEST, &depth_test_enabled);
-        glGetIntegerv(GL_BLEND, &blend_enabled);
-        glGetIntegerv(GL_BLEND_SRC_RGB, &blend_src_rgb);
-        glGetIntegerv(GL_BLEND_DST_RGB, &blend_dst_rgb);
-        glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src_alpha);
-        glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst_alpha);
-
-        float x1 = (x / WIDTH) * 2.0f - 1.0f;
-        float y1 = 1.0f - (y / HEIGHT) * 2.0f;
-        float x2 = ((x + width) / WIDTH) * 2.0f - 1.0f;
-        float y2 = 1.0f - ((y + height) / HEIGHT) * 2.0f;
-
-        float vertices[] = {
-            x1, y1, 0.0f, 0.0f,
-            x2, y1, 1.0f, 0.0f,
-            x1, y2, 0.0f, 1.0f,
-            x2, y2, 1.0f, 1.0f
-        };
-
-        glUseProgram(ui_program);
-        glBindVertexArray(ui_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
-
-        // VAO is already set up with vertex attribute pointers
-        GLint color_loc = glGetUniformLocation(ui_program, "ui_color");
-        GLint use_tex_loc = glGetUniformLocation(ui_program, "use_texture");
-
-        glUniform4f(color_loc, color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
-        glUniform1i(use_tex_loc, 0);
-
-        // Disable depth test and enable blending for UI overlays
-        glDisable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        // Restore OpenGL state completely
-        glUseProgram(current_program);
-        glBindVertexArray(current_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, current_array_buffer);
-        if (depth_test_enabled) glEnable(GL_DEPTH_TEST);
-        if (!blend_enabled) {
-            glDisable(GL_BLEND);
-        } else {
-            glBlendFunc(blend_src_rgb, blend_dst_rgb);
-            if (blend_src_alpha != blend_src_rgb || blend_dst_alpha != blend_dst_rgb) {
-                glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
-            }
-        }
-    }
-
-    void render_text_quad(float x, float y, float width, float height, GLuint texture, const SDL_Color& color) {
-        if (texture == 0) return;
-
-        // Save current OpenGL state
-        GLint current_program, current_vao, current_array_buffer;
-        GLint depth_test_enabled, blend_enabled;
-        GLint blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha;
-        GLint active_texture, current_texture;
-
-        glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
-        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
-        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &current_array_buffer);
-        glGetIntegerv(GL_DEPTH_TEST, &depth_test_enabled);
-        glGetIntegerv(GL_BLEND, &blend_enabled);
-        glGetIntegerv(GL_BLEND_SRC_RGB, &blend_src_rgb);
-        glGetIntegerv(GL_BLEND_DST_RGB, &blend_dst_rgb);
-        glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src_alpha);
-        glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst_alpha);
-        glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
-        glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
-
-        float x1 = (x / WIDTH) * 2.0f - 1.0f;
-        float y1 = 1.0f - (y / HEIGHT) * 2.0f;
-        float x2 = ((x + width) / WIDTH) * 2.0f - 1.0f;
-        float y2 = 1.0f - ((y + height) / HEIGHT) * 2.0f;
-
-        float vertices[] = {
-            x1, y1, 0.0f, 0.0f,
-            x2, y1, 1.0f, 0.0f,
-            x1, y2, 0.0f, 1.0f,
-            x2, y2, 1.0f, 1.0f
-        };
-
-        glUseProgram(ui_program);
-        glBindVertexArray(ui_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
-
-        // VAO is already set up with vertex attribute pointers
-        GLint color_loc = glGetUniformLocation(ui_program, "ui_color");
-        GLint texture_loc = glGetUniformLocation(ui_program, "ui_texture");
-        GLint use_tex_loc = glGetUniformLocation(ui_program, "use_texture");
-
-        // For text, use pure white color so texture shows true colors
-        glUniform4f(color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
-        glUniform1i(use_tex_loc, 1);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glUniform1i(texture_loc, 0);
-
-        // Disable depth test and enable blending for UI overlays
-        glDisable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        // Restore OpenGL state completely
-        glUseProgram(current_program);
-        glBindVertexArray(current_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, current_array_buffer);
-        glActiveTexture(active_texture);
-        glBindTexture(GL_TEXTURE_2D, current_texture);
-        if (depth_test_enabled) glEnable(GL_DEPTH_TEST);
-        if (!blend_enabled) {
-            glDisable(GL_BLEND);
-        } else {
-            glBlendFunc(blend_src_rgb, blend_dst_rgb);
-            if (blend_src_alpha != blend_src_rgb || blend_dst_alpha != blend_dst_rgb) {
-                glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
-            }
-        }
-    }
-
-    TTF_Font* get_font() { return font; }
-};
-
-// OpenGL-based help overlay
-class HelpOverlay {
-private:
-    bool show;
-    bool initialized;
-    OpenGLUIRenderer* ui_renderer;
-
-public:
-    HelpOverlay() : show(false), initialized(false), ui_renderer(nullptr) {}
-
-    ~HelpOverlay() {
-        delete ui_renderer;
-    }
-
-    bool init() {
-        if (initialized) return true;
-
-        ui_renderer = new OpenGLUIRenderer();
-        if (!ui_renderer->init()) {
-            return false;
-        }
-
-        initialized = true;
-        return true;
-    }
-
-    void toggle() {
-        show = !show;
-    }
-
-    bool is_showing() const { return show; }
-
-    void render() {
-        if (!show || !initialized || !ui_renderer) {
-            return;
-        }
-
-        SDL_Color white = {255, 255, 255, 255};
-        SDL_Color bg_color = {20, 20, 30, 230};
-        SDL_Color title_color = {255, 200, 100, 255};
-
-        // Render semi-transparent background
-        ui_renderer->render_colored_quad(50, 50, WIDTH - 100, HEIGHT - 100, bg_color);
-
-        // Render help text
-        std::vector<std::string> help_lines = {
-            "=== GPU Ray Tracer Help ===",
-            "",
-            "Controls:",
-            "  WASD/Arrows - Move camera",
-            "  Mouse       - Look around (click to capture)",
-            "  R           - Toggle reflections",
-            "  P           - Toggle Phong/PBR lighting",
-            "  L           - Cycle light configurations",
-            "  H           - Toggle this help",
-            "  C           - Toggle controls panel",
-            "  ESC         - Quit",
-            "",
-            "Phase 1 Features:",
-#if ENABLE_PBR
-            "  [✓] PBR lighting (Cook-Torrance BRDF)",
-#else
-            "  [✗] PBR lighting (Phong mode only)",
-#endif
-#if ENABLE_MULTIPLE_LIGHTS
-            "  [✓] Multiple lights (press L to cycle)",
-#else
-            "  [✗] Multiple lights (single light only)",
-#endif
-#if ENABLE_TONE_MAPPING
-            "  [✓] ACES tone mapping",
-#endif
-#if ENABLE_GAMMA_CORRECTION
-            "  [✓] Gamma correction",
-#endif
-            "",
-            "Phase 2 Features:",
-#if ENABLE_SOFT_SHADOWS
-            "  [✓] Soft shadows (area light sampling)",
-#else
-            "  [✗] Soft shadows (hard shadows)",
-#endif
-#if ENABLE_AMBIENT_OCCLUSION
-            "  [✓] Ambient occlusion (ray-traced)",
-#else
-            "  [✗] Ambient occlusion",
-#endif
-            "",
-            "Performance: 60-500x faster than CPU",
-            "  - Real-time ray tracing at 60+ FPS",
-            "  - GLSL 1.20 (OpenGL 2.0+ compatible)",
-            "",
-            "Press H to close this help"
-        };
-
-        int y_offset = 80;
-        for (const auto& line : help_lines) {
-            GLuint text_texture = ui_renderer->create_text_texture(line, white);
-            if (text_texture) {
-                // Get texture dimensions (approximate)
-                int text_width = line.length() * 8;
-                int text_height = 16;
-
-                SDL_Color line_color = white;
-                if (line.find("===") != std::string::npos) {
-                    line_color = title_color;
-                } else if (line.find("[✓]") != std::string::npos) {
-                    line_color = {100, 255, 100, 255};
-                } else if (line.find("[✗]") != std::string::npos) {
-                    line_color = {255, 100, 100, 255};
-                }
-
-                ui_renderer->render_text_quad(70, y_offset, text_width, text_height, text_texture, line_color);
-                glDeleteTextures(1, &text_texture);
-                y_offset += 20;
-            }
-        }
-    }
-};
-
-// OpenGL-based settings panel with buttons
-class ControlsPanel {
-private:
-    bool show;
-    bool initialized;
-    OpenGLUIRenderer* ui_renderer;
-
-    struct Button {
-        SDL_Rect rect;
-        std::string label;
-        bool* toggle_ptr;
-        int* value_ptr;
-        int button_type; // 0: toggle, 1: cycle, 2: info
-        int min_value, max_value;
-        std::vector<std::string> value_labels;
-        GLuint texture;
-    };
-    std::vector<Button> buttons;
-
-public:
-    ControlsPanel() : show(false), initialized(false), ui_renderer(nullptr) {}
-
-    ~ControlsPanel() {
-        // Clean up button textures
-        for (auto& button : buttons) {
-            if (button.texture) glDeleteTextures(1, &button.texture);
-        }
-        delete ui_renderer;
-    }
-
-    bool init() {
-        if (initialized) return true;
-
-        ui_renderer = new OpenGLUIRenderer();
-        if (!ui_renderer->init()) {
-            return false;
-        }
-
-        initialized = true;
-        std::cout << "ControlsPanel: OpenGL-based panel initialized" << std::endl;
-        return true;
-    }
-
-    void toggle() {
-        show = !show;
-        std::cout << "ControlsPanel: " << (show ? "SHOWING" : "HIDDEN") << std::endl;
-    }
-
-    bool is_showing() const { return show; }
-
-    void setup_buttons(bool& enable_reflections, int& lighting_mode, int& num_lights) {
-        if (!buttons.empty()) return; // Already setup
-
-        int y = 80;
-        int x = WIDTH - 280;
-        int button_width = 130;
-        int button_height = 28;
-        int spacing = 8;
-
-        // Runtime toggles
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Reflections",
-            &enable_reflections,
-            nullptr,
-            0, 0, 1, {},
-            0
-        });
-        y += button_height + spacing;
-
-        // Lighting mode
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "PBR Mode",
-            nullptr,
-            &lighting_mode,
-            1, 0, 1,
-            {"Phong", "PBR"},
-            0
-        });
-        y += button_height + spacing;
-
-        // Light count
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Light Count",
-            nullptr,
-            &num_lights,
-            1, 1, 4,
-            {"1", "2", "3", "4"},
-            0
-        });
-        y += button_height + spacing * 2;
-
-        // Compile-time features (informational)
-        SDL_Color white = {255, 255, 255, 255};
-
-#if ENABLE_SOFT_SHADOWS
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Soft Shadows: ON",
-            nullptr,
-            nullptr,
-            2, 0, 1,
-            {},
-            0
-        });
-#else
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Soft Shadows: OFF",
-            nullptr,
-            nullptr,
-            2, 0, 1,
-            {},
-            0
-        });
-#endif
-        y += button_height + spacing;
-
-#if ENABLE_AMBIENT_OCCLUSION
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Ambient Occl: ON",
-            nullptr,
-            nullptr,
-            2, 0, 1,
-            {},
-            0
-        });
-#else
-        buttons.push_back({
-            {x, y, button_width, button_height},
-            "Ambient Occl: OFF",
-            nullptr,
-            nullptr,
-            2, 0, 1,
-            {},
-            0
-        });
-#endif
-        y += button_height + spacing;
-
-        // Create textures for all buttons
-        for (auto& button : buttons) {
-            button.texture = ui_renderer->create_text_texture(button.label, white);
-        }
-    }
-
-    bool handle_click(int mouse_x, int mouse_y) {
-        if (!show || !initialized) return false;
-
-        for (auto& button : buttons) {
-            if (mouse_x >= button.rect.x && mouse_x <= button.rect.x + button.rect.w &&
-                mouse_y >= button.rect.y && mouse_y <= button.rect.y + button.rect.h) {
-
-                if (button.button_type == 0 && button.toggle_ptr) {
-                    *button.toggle_ptr = !(*button.toggle_ptr);
-                    return true;
-                } else if (button.button_type == 1 && button.value_ptr) {
-                    *button.value_ptr = *button.value_ptr + 1;
-                    if (*button.value_ptr > button.max_value) {
-                        *button.value_ptr = button.min_value;
-                    }
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    void render(bool enable_reflections, int lighting_mode, int num_lights) {
-        if (!show || !initialized || !ui_renderer) return;
-
-        setup_buttons(const_cast<bool&>(enable_reflections),
-                     const_cast<int&>(lighting_mode),
-                     const_cast<int&>(num_lights));
-
-        SDL_Color bg_color = {40, 44, 52, 240};
-        SDL_Color title_color = {255, 200, 100, 255};
-        SDL_Color button_color = {60, 64, 72, 255};
-        SDL_Color button_hover_color = {80, 84, 92, 255};
-        SDL_Color button_active_color = {100, 160, 120, 255};
-        SDL_Color text_color = {200, 200, 200, 255};
-
-        // Panel background
-        ui_renderer->render_colored_quad(WIDTH - 300, 50, 250, 400, bg_color);
-
-        // Title
-        GLuint title_texture = ui_renderer->create_text_texture("GPU Settings", title_color);
-        if (title_texture) {
-            ui_renderer->render_text_quad(WIDTH - 280, 70, 120, 20, title_texture, title_color);
-            glDeleteTextures(1, &title_texture);
-        }
-
-        // Get current mouse position for hover effects
-        int mouse_x, mouse_y;
-        SDL_GetMouseState(&mouse_x, &mouse_y);
-
-        // Render buttons
-        for (const auto& button : buttons) {
-            SDL_Color current_button_color = button_color;
-
-            // Check hover
-            bool is_hovered = (mouse_x >= button.rect.x && mouse_x <= button.rect.x + button.rect.w &&
-                             mouse_y >= button.rect.y && mouse_y <= button.rect.y + button.rect.h);
-            if (is_hovered) {
-                current_button_color = button_hover_color;
-            }
-
-            // Check active state
-            if (button.button_type == 0 && button.toggle_ptr && *button.toggle_ptr) {
-                current_button_color = button_active_color;
-            }
-
-            // Button background
-            ui_renderer->render_colored_quad(button.rect.x, button.rect.y,
-                                           button.rect.w, button.rect.h, current_button_color);
-
-            // Button text
-            std::string button_text = button.label;
-            if (button.button_type == 1 && button.value_ptr) {
-                int idx = *button.value_ptr - button.min_value;
-                if (idx >= 0 && idx < (int)button.value_labels.size()) {
-                    button_text += ": " + button.value_labels[idx];
-                }
-            }
-
-            GLuint text_texture = ui_renderer->create_text_texture(button_text, text_color);
-            if (text_texture) {
-                ui_renderer->render_text_quad(button.rect.x + 5, button.rect.y + 5,
-                                             button.rect.w - 10, button.rect.h - 10,
-                                             text_texture, text_color);
-                glDeleteTextures(1, &text_texture);
-            }
-        }
-
-        // Instructions
-        GLuint inst_texture = ui_renderer->create_text_texture("Press 'C' to close", {150, 150, 150, 255});
-        if (inst_texture) {
-            ui_renderer->render_text_quad(WIDTH - 280, 420, 150, 16, inst_texture, {150, 150, 150, 255});
-            glDeleteTextures(1, &inst_texture);
-        }
-    }
-};
-
-// ============================================================================
-// END OF OpenGL UI SYSTEM
-// ============================================================================
 
 // Setup scene data using the same CPU scene setup code
 void setup_scene_data(
@@ -2037,6 +1710,11 @@ int main(int argc, char* argv[]) {
     bool enable_ao = false;            // Disabled by default (performance)
     int ao_samples = 8;                // AO hemisphere samples
 
+    // Phase 3: Global Illumination settings
+    bool enable_gi = false;            // Disabled by default (performance)
+    int gi_samples = 4;                // GI hemisphere samples
+    float gi_intensity = 0.3f;         // GI intensity (0.0-1.0)
+
     // Setup scene data
     std::vector<SphereData> spheres;
     std::vector<TriangleData> triangles;
@@ -2079,8 +1757,10 @@ int main(int argc, char* argv[]) {
 
     // Main loop
     bool running = true;
+    bool need_render = true;
     SDL_Event event;
 
+    auto start_time = std::chrono::high_resolution_clock::now();
     int frame_count = 0;
     float fps = 0.0f;
     auto last_frame_time = std::chrono::high_resolution_clock::now();
@@ -2099,29 +1779,25 @@ int main(int argc, char* argv[]) {
                 } else if (event.key.keysym.sym == SDLK_r) {
                     enable_reflections = !enable_reflections;
                     std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
+                    need_render = true;
                 } else if (event.key.keysym.sym == SDLK_p) {
                     lighting_mode = 1 - lighting_mode;  // Toggle between 0 and 1
                     std::cout << "Lighting: " << (lighting_mode == 0 ? "Phong (Legacy)" : "PBR (Physically Based)") << std::endl;
+                    need_render = true;
                 } else if (event.key.keysym.sym == SDLK_l) {
                     num_lights = (num_lights % 3) + 1;  // Cycle 1->2->3->1
                     std::cout << "Lights: " << num_lights << (num_lights == 1 ? " (Single)" : num_lights == 2 ? " (2-point)" : " (3-point)") << std::endl;
+                    need_render = true;
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
-                    // Check if settings panel is showing and handle button clicks
-                    if (controls_panel.is_showing()) {
-                        int mouse_x, mouse_y;
-                        SDL_GetMouseState(&mouse_x, &mouse_y);
-                        controls_panel.handle_click(mouse_x, mouse_y);
-                    } else {
-                        // Normal mouse capture when panel is closed
-                        SDL_bool captured = SDL_GetRelativeMouseMode();
-                        SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
-                    }
+                    SDL_bool captured = SDL_GetRelativeMouseMode();
+                    SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
                 }
             } else if (event.type == SDL_MOUSEMOTION) {
                 if (SDL_GetRelativeMouseMode()) {
                     camera.rotate(event.motion.xrel * 0.1f, -event.motion.yrel * 0.1f);
+                    need_render = true;
                 }
             }
         }
@@ -2131,29 +1807,39 @@ int main(int argc, char* argv[]) {
 
         if (keystates[SDL_SCANCODE_W]) {
             camera.move_forward(move_speed);
+            need_render = true;
         }
         if (keystates[SDL_SCANCODE_S]) {
             camera.move_forward(-move_speed);
+            need_render = true;
         }
         if (keystates[SDL_SCANCODE_A]) {
             camera.move_right(-move_speed);
+            need_render = true;
         }
         if (keystates[SDL_SCANCODE_D]) {
             camera.move_right(move_speed);
+            need_render = true;
         }
         if (keystates[SDL_SCANCODE_UP]) {
             camera.move_up(move_speed);
+            need_render = true;
         }
         if (keystates[SDL_SCANCODE_DOWN]) {
             camera.move_up(-move_speed);
+            need_render = true;
         }
 
-        // Clear screen every frame
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        // Update time (keep for potential animation)
+        auto current_time = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float>(current_time - start_time).count();
 
-        // Always render scene (GPU is fast enough)
-        glUseProgram(program);
+        // Render
+        if (need_render) {
+            glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            glUseProgram(program);
 
             // Set camera uniforms
             glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
@@ -2269,34 +1955,29 @@ int main(int argc, char* argv[]) {
             glBindVertexArray(vao);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        // Render OpenGL-based overlays EVERY FRAME (not just when scene needs render)
-        // Both panels can now be visible independently
-        if (help_overlay.is_showing()) {
-            help_overlay.render();
-        }
-        if (controls_panel.is_showing()) {
-            controls_panel.render(enable_reflections, lighting_mode, num_lights);
-        }
+            // Render overlays (need to temporarily switch from OpenGL to SDL2 rendering)
+            if (help_overlay.is_showing()) {
+                help_overlay.render(window);
+            } else if (controls_panel.is_showing()) {
+                controls_panel.render(window, enable_reflections, lighting_mode, num_lights);
+            }
 
-        // Ensure clean state after UI rendering
-        glDisable(GL_BLEND);
-        glEnable(GL_DEPTH_TEST);
-        glUseProgram(program);
+            SDL_GL_SwapWindow(window);
 
-        // Always swap buffers every frame to show UI overlays
-        SDL_GL_SwapWindow(window);
+            // Calculate FPS
+            frame_count++;
+            auto now = std::chrono::high_resolution_clock::now();
+            double elapsed = std::chrono::duration<double>(now - last_frame_time).count();
+            if (elapsed >= 1.0) {
+                fps = frame_count / elapsed;
+                frame_count = 0;
+                last_frame_time = now;
+                std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
+                         << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
+                         << "     " << std::flush;
+            }
 
-        // Calculate FPS
-        frame_count++;
-        auto now = std::chrono::high_resolution_clock::now();
-        double elapsed = std::chrono::duration<double>(now - last_frame_time).count();
-        if (elapsed >= 1.0) {
-            fps = frame_count / elapsed;
-            frame_count = 0;
-            last_frame_time = now;
-            std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
-                     << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
-                     << "     " << std::flush;
+            need_render = false;
         }
     }
 

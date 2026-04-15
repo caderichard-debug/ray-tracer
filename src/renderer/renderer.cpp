@@ -324,8 +324,11 @@ void Renderer::render_simd_packets(const Camera& cam, const Scene& scene,
     Camera camera = cam;
 
     // Process pixels in 4x2 blocks (8 rays = AVX2 width)
-    for (int j = 0; j < height; j += 2) {
+    // Process from top to bottom to match standard rendering order
+    for (int j = height - 2; j >= 0; j -= 2) {
         for (int i = 0; i < width; i += 4) {
+            // Skip if this block would go beyond the image bounds
+            if (j + 1 >= height) continue;
             Color pixel_colors[8] = {Color(0,0,0), Color(0,0,0), Color(0,0,0), Color(0,0,0),
                                     Color(0,0,0), Color(0,0,0), Color(0,0,0), Color(0,0,0)};
 
@@ -366,9 +369,8 @@ void Renderer::render_simd_packets(const Camera& cam, const Scene& scene,
                     // Gamma correction
                     final_color = AVX2::sqrt_avx2(final_color);
 
-                    // Write to framebuffer (flip Y to match standard rendering)
-                    int y_pos = height - 1 - j - dy;
-                    framebuffer[y_pos][i + dx] = final_color;
+                    // Write to framebuffer (no flip - conversion loop handles orientation)
+                    framebuffer[j + dy][i + dx] = final_color;
                     out_idx++;
                 }
             }
