@@ -100,12 +100,13 @@ inline void setup_cornell_box_scene(Scene& scene) {
     scene.add_object(std::make_shared<Sphere>(Point3(-3.5, -2.0, 2.0), 0.8, material_noise));
 
     // Gradient texture sphere (purple to yellow vertical gradient)
+    // Sphere at Y=-1.5, radius 0.8, spans from Y=-2.3 to Y=-0.7
     auto gradient_purple_yellow = std::make_shared<GradientTexture>(
         Color(0.6f, 0.2f, 0.8f),  // Purple
         Color(0.9f, 0.9f, 0.2f),  // Yellow
         Vec3(0, 1, 0),            // Vertical direction
-        0.3f,                     // Scale
-        0.5f                      // Offset (default, works fine for sphere)
+        0.625f,                   // Scale (calibrated for sphere position)
+        1.4375f                   // Offset (calibrated for sphere at Y=-2.3 to -0.7)
     );
     auto material_gradient = std::make_shared<Lambertian>(gradient_purple_yellow);
     scene.add_object(std::make_shared<Sphere>(Point3(-1.0, -1.5, 2.0), 0.8, material_gradient));
