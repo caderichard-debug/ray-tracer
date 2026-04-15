@@ -308,11 +308,6 @@ QualityPreset quality_levels[] = {
 
 const int NUM_QUALITY_LEVELS = 6;
 
-// Safety limits
-const int MAX_WIDTH = 1920;
-const int MAX_SAMPLES = 64;
-const int MAX_DEPTH = 5;
-
 // Estimate memory usage for a render
 int estimate_memory_mb(int width, int height, int samples) {
     int pixels = width * height;
@@ -396,6 +391,7 @@ void save_gpu_framebuffer(int width, int height, const char* filename) {
 #else
 // Save CPU renderer texture to PNG file
 void save_cpu_screenshot(SDL_Renderer* renderer, SDL_Texture* texture, int width, int height, const char* filename) {
+    (void)texture;  // Unused parameter - we read from renderer instead
     // Allocate buffer for pixel data
     std::vector<unsigned char> pixels(width * height * 3);
 
@@ -557,9 +553,9 @@ public:
 
         // Create smaller semi-transparent background
         SDL_Rect overlay_rect = {
-            (window_width - 440) / 2,
+            (window_width - 460) / 2,
             (window_height - 340) / 2,
-            440,
+            460,
             340
         };
 
@@ -573,7 +569,7 @@ public:
         const char* title_text = "HELP";
         SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
         if (title_surface) {
-            SDL_Rect title_rect = {(440 - title_surface->w) / 2, 12, title_surface->w, title_surface->h};
+            SDL_Rect title_rect = {(460 - title_surface->w) / 2, 12, title_surface->w, title_surface->h};
             SDL_BlitSurface(title_surface, nullptr, surface, &title_rect);
             SDL_FreeSurface(title_surface);
         }
@@ -591,7 +587,7 @@ public:
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, controls_text[i], text_color);
 
             if (text_surface) {
-                SDL_Rect text_rect = {(440 - text_surface->w) / 2, y_offset, text_surface->w, text_surface->h};
+                SDL_Rect text_rect = {(460 - text_surface->w) / 2, y_offset, text_surface->w, text_surface->h};
                 SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
                 SDL_FreeSurface(text_surface);
             }
@@ -602,7 +598,7 @@ public:
         const char* footer = "Press H to close";
         SDL_Surface* footer_surface = TTF_RenderText_Blended(font, footer, text_color);
         if (footer_surface) {
-            SDL_Rect footer_rect = {(440 - footer_surface->w) / 2, 280, footer_surface->w, footer_surface->h};
+            SDL_Rect footer_rect = {(460 - footer_surface->w) / 2, 280, footer_surface->w, footer_surface->h};
             SDL_BlitSurface(footer_surface, nullptr, surface, &footer_rect);
             SDL_FreeSurface(footer_surface);
         }
@@ -823,67 +819,6 @@ public:
             }
         };
 
-        // Extended button renderer with custom text and colors
-        auto render_button_ext = [&](const char* prefix, const char* label, int category, bool is_active, SDL_Color custom_color) {
-            int button_width = 60;
-            int button_height = 24;
-            int button_spacing = 8;
-
-            static int button_x_ext = 15;
-            static int buttons_in_row_ext = 0;
-
-            if (buttons.empty() || buttons.back().category != category) {
-                button_x_ext = 15;
-                buttons_in_row_ext = 0;
-            }
-
-            // Split into label text and button
-            SDL_Surface* prefix_surface = TTF_RenderText_Blended(font, prefix, text_color);
-            if (prefix_surface) {
-                SDL_Rect prefix_rect = {button_x_ext, y_offset, prefix_surface->w, prefix_surface->h};
-                SDL_BlitSurface(prefix_surface, nullptr, surface, &prefix_rect);
-                SDL_FreeSurface(prefix_surface);
-                button_x_ext += prefix_surface->w + 5;
-            }
-
-            SDL_Rect button_rect = {button_x_ext, y_offset, button_width, button_height};
-
-            // Store button for click detection
-            buttons.push_back({{button_rect.x + panel_x, button_rect.y + panel_y, button_rect.w, button_rect.h},
-                              label, is_active ? 1 : 0, category});
-
-            // Draw button background with custom color
-            Uint32 button_bg = SDL_MapRGBA(surface->format, custom_color.r, custom_color.g, custom_color.b, custom_color.a);
-            SDL_FillRect(surface, &button_rect, button_bg);
-
-            // Draw button border
-            SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
-            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
-            border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
-            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
-
-            // Draw button text
-            SDL_Surface* text_surface = TTF_RenderText_Blended(font, label, text_color);
-            if (text_surface) {
-                SDL_Rect text_rect = {
-                    button_x_ext + (button_width - text_surface->w) / 2,
-                    y_offset + (button_height - text_surface->h) / 2,
-                    text_surface->w, text_surface->h
-                };
-                SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
-                SDL_FreeSurface(text_surface);
-            }
-
-            button_x_ext += button_width + button_spacing;
-            buttons_in_row_ext++;
-
-            if (buttons_in_row_ext >= 2) {
-                button_x_ext = 15;
-                buttons_in_row_ext = 0;
-                y_offset += button_height + button_spacing;
-            }
-        };
-
         // Quality level buttons
         SDL_Surface* label_surface = TTF_RenderText_Blended(font, "Quality Level:", title_color);
         if (label_surface) {
@@ -952,13 +887,6 @@ public:
 
         int resolution_values[] = {640, 960, 1280, 1600, 1920};
         const char* resolution_names[] = {"Low", "Medium", "High", "Ultra", "Max"};
-        const char* resolution_desc[] = {
-            "Fast",
-            "Good",
-            "High",
-            "Ultra",
-            "Maximum"
-        };
 
         for (int i = 0; i < 5; i++) {
             bool is_active = (preset.width == resolution_values[i]);
