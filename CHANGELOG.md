@@ -2,11 +2,20 @@
 
 ## [Unreleased] - 2026-04-15
 
+### 🖥️ UI Improvements
+
+- **CPU Interactive Default Window Size**:
+  - Changed default quality level from "Low (Fast)" to "Large Window (Default)"
+  - Default window now starts at 1920x1080 instead of 640x360
+  - Renamed main_interactive.cpp to main_cpu_interactive.cpp for clarity
+  - Updated quality preset array with larger window options
+
 ### 🎨 New Feature: ASCII Terminal Ray Tracer
 
 - **ASCII Terminal Mode**: Retro text-based rendering
   - Pure terminal rendering (no GUI required)
   - Automatic camera animation (orbits scene)
+  - Optimized animation timing (75 frames at 100ms delay)
   - Real-time ASCII art output
   - Cross-platform (macOS/Linux/Windows)
   - Adaptive terminal sizing
