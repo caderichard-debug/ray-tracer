@@ -3,7 +3,7 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -Xpreprocessor -fopenmp -flto
+CXXFLAGS = -std=c++17 -Wall -Wextra -Wno-missing-field-initializers -Wno-deprecated-declarations -Xpreprocessor -fopenmp -flto
 OPTFLAGS = -O3 -march=native -mavx2 -mfma -ffast-math
 INCLUDES = -Isrc -Iexternal -I/usr/local/opt/libomp/include
 LDFLAGS = -L/usr/local/opt/libomp/lib -lomp -flto
