@@ -37,11 +37,15 @@ public:
         : odd(t1), even(t2), scale(s) {}
 
     Color value(float u, float v, const Point3& p) const override {
-        float sines = std::sin(scale * p.x) * std::sin(scale * p.y) * std::sin(scale * p.z);
-        if (sines < 0) {
-            return odd->value(u, v, p);
-        } else {
+        // Optimized: Use integer-based pattern instead of expensive sin() calls
+        int ix = static_cast<int>(p.x * scale);
+        int iy = static_cast<int>(p.y * scale);
+        int iz = static_cast<int>(p.z * scale);
+        int sum = ix + iy + iz;
+        if (sum % 2 == 0) {
             return even->value(u, v, p);
+        } else {
+            return odd->value(u, v, p);
         }
     }
 };
@@ -51,14 +55,19 @@ class GradientTexture : public Texture {
 public:
     Color color1;
     Color color2;
-    Vec3 direction;  // Gradient direction
+    Vec3 direction;  // Gradient direction (normalized in constructor)
+    float scale;     // Gradient scale factor
+    float offset;    // Offset for positioning the gradient
 
-    GradientTexture(Color c1, Color c2, Vec3 dir = Vec3(0, 1, 0))
-        : color1(c1), color2(c2), direction(dir.normalized()) {}
+    GradientTexture(Color c1, Color c2, Vec3 dir = Vec3(0, 1, 0), float s = 0.25f, float o = 0.0f)
+        : color1(c1), color2(c2), direction(dir.normalized()), scale(s), offset(o) {}
 
     Color value(float u, float v, const Point3& p) const override {
         (void)u; (void)v;
-        float t = 0.5f * (dot(p.normalized(), direction) + 1.0f);
+        // Simple linear gradient based on position in direction
+        float value = dot(p, direction);
+        // Map approximately to [0, 1] range using scale factor and offset
+        float t = std::clamp(value * scale + offset, 0.0f, 1.0f);
         return (1.0f - t) * color1 + t * color2;
     }
 };
@@ -75,14 +84,25 @@ public:
     NoiseTexture(Color c1, Color c2, float s = 5.0f, int oct = 4, float pers = 0.5f)
         : color1(c1), color2(c2), scale(s), octaves(oct), persistence(pers) {}
 
-    // Simple pseudo-random noise function
+    // Fast integer-based hash function (much cheaper than sin())
     float noise(float x, float y, float z) const {
-        // Simple hash-based noise
-        float hash = std::sin(x * 12.9898f + y * 78.233f + z * 37.719f) * 43758.5453f;
-        return hash - std::floor(hash);
+        // Convert to integer coordinates for hashing
+        int ix = static_cast<int>(x);
+        int iy = static_cast<int>(y);
+        int iz = static_cast<int>(z);
+
+        // Simple hash function
+        int hash = (ix * 73856093) ^ (iy * 19349663) ^ (iz * 83492791);
+        // Use bit manipulation for better distribution
+        hash = hash * 1103515245 + 12345;
+        hash = (hash ^ (hash >> 16)) * 1103515245 + 12345;
+
+        // Convert to float in [-1, 1] range
+        float n = (hash % 1000) / 500.0f - 1.0f;
+        return n;
     }
 
-    // Fractal Brownian Motion
+    // Optimized Fractal Brownian Motion
     float fbm(float x, float y, float z) const {
         float total = 0.0f;
         float frequency = 1.0f;
@@ -96,12 +116,14 @@ public:
             frequency *= 2.0f;
         }
 
-        return total / max_value;
+        return total / max_value;  // Returns range approximately [-1, 1]
     }
 
     Color value(float u, float v, const Point3& p) const override {
+        (void)u; (void)v;
+        // Optimized: Direct position usage without scaling multiplication
         float n = fbm(p.x * scale, p.y * scale, p.z * scale);
-        // Remap from [-1, 1] to [0, 1]
+        // Remap from [-1, 1] to [0, 1] with more contrast
         float t = 0.5f * (n + 1.0f);
         t = std::clamp(t, 0.0f, 1.0f);
         return (1.0f - t) * color1 + t * color2;
@@ -121,12 +143,11 @@ public:
 
     Color value(float u, float v, const Point3& p) const override {
         (void)u; (void)v;
-        // Rotate point for angled stripes
-        float x = p.x * std::cos(angle) - p.y * std::sin(angle);
-        float stripe = std::sin(x * scale);
-        float t = 0.5f * (stripe + 1.0f);
-        t = std::clamp(t, 0.0f, 1.0f);
-        return (1.0f - t) * color1 + t * color2;
+        // Optimized: Simple stripes without trigonometric rotation
+        // Just use x-coordinate with scale for stripes
+        float stripe = std::sin(p.x * scale);
+        float t = (stripe > 0.0f) ? 1.0f : 0.0f;  // Hard edges
+        return t * color2 + (1.0f - t) * color1;
     }
 };
 

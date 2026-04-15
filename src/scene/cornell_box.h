@@ -44,8 +44,8 @@ inline void setup_cornell_box_scene(Scene& scene) {
     scene.add_object(std::make_shared<Sphere>(Point3(20.0, 0, 0), 16.0, material_green));
 
     // Objects in scene - positioned in 16x16x16 room
-    // Center sphere (gold - reflective)
-    scene.add_object(std::make_shared<Sphere>(Point3(0, 0, 0), 0.5, material_gold));
+    // Center sphere (gold - reflective, BIG)
+    scene.add_object(std::make_shared<Sphere>(Point3(0, 0, 0), 2.0, material_gold));
 
     // Orbiting spheres (distributed in the room)
     scene.add_object(std::make_shared<Sphere>(Point3(-3.0, 1.0, 2.0), 0.8, material_metal_fuzz));
@@ -53,48 +53,91 @@ inline void setup_cornell_box_scene(Scene& scene) {
     scene.add_object(std::make_shared<Sphere>(Point3(0, 0.5, 1.5), 0.6, material_red));
     scene.add_object(std::make_shared<Sphere>(Point3(-1.5, 0.3, 2.0), 0.5, material_yellow));
 
-    // Glass sphere (demonstrates refraction) - clearly visible
-    scene.add_object(std::make_shared<Sphere>(Point3(4.0, 1.5, 0.0), 0.8, material_glass));
+    // Glass sphere (demonstrates refraction) - near center, below golden ball, toward player
+    scene.add_object(std::make_shared<Sphere>(Point3(1.0, -1.5, 2.5), 0.8, material_glass));
+    // Sphere behind glass
+    scene.add_object(std::make_shared<Sphere>(Point3(0.5, -2.0, 1.5), 0.5, material_red));
 
-    // Triangles - forming a pyramid (positioned in larger room)
-    Point3 pyramid_top(0.0f, 2.5f, -4.0f);
-    Point3 pyramid_base1(-1.5f, 0.5f, -5.0f);
-    Point3 pyramid_base2(1.5f, 0.5f, -5.0f);
-    Point3 pyramid_base3(0.0f, 0.5f, -3.0f);
+    // Triangles - forming a pyramid (moved closer to camera)
+    Point3 pyramid_top(-2.0f, 4.0f, 0.0f);  // Much closer to camera
+    Point3 pyramid_base1(-1.0f, 2.0f, -1.0f);
+    Point3 pyramid_base2(-3.0f, 2.0f, -1.0f);
+    Point3 pyramid_base3(-2.0f, 2.0f, 1.0f);
+
+    // Give pyramid a solid gray color
+    auto material_pyramid = std::make_shared<Lambertian>(Color(0.5f, 0.5f, 0.5f));
 
     // 4 triangles forming a pyramid
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base1, pyramid_base2, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base2, pyramid_base3, material_green));
-    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base3, pyramid_base1, material_green));
+    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base1, pyramid_base2, material_pyramid));
+    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base2, pyramid_base3, material_pyramid));
+    scene.add_object(std::make_shared<Triangle>(pyramid_top, pyramid_base3, pyramid_base1, material_pyramid));
     scene.add_object(std::make_shared<Triangle>(pyramid_base1, pyramid_base3, pyramid_base2, material_gray));
 
-    // Small spheres in the back (positioned in larger room)
-    scene.add_object(std::make_shared<Sphere>(Point3(-1.0, 0.5, -4.0), 0.4, material_metal));
-    scene.add_object(std::make_shared<Sphere>(Point3(1.0, 0.5, -4.0), 0.4, material_metal));
+    // Small spheres in the back (moved closer to camera near pyramid)
+    scene.add_object(std::make_shared<Sphere>(Point3(-0.5f, 2.5f, 0.0f), 0.2, material_metal));
+    scene.add_object(std::make_shared<Sphere>(Point3(-3.5f, 2.8f, 0.0f), 0.2, material_metal));
 
     // === PROCEDURAL TEXTURES ===
 
-    // Checkerboard texture sphere (black and white)
-    auto checker_black = std::make_shared<SolidColor>(Color(0.1f, 0.1f, 0.1f));
-    auto checker_white = std::make_shared<SolidColor>(Color(0.9f, 0.9f, 0.9f));
-    auto texture_checker = std::make_shared<CheckerTexture>(checker_black, checker_white, 8.0f);
-    auto material_checker = std::make_shared<Lambertian>(texture_checker);
-    scene.add_object(std::make_shared<Sphere>(Point3(-5.0, 1.0, -2.0), 0.8, material_checker));
+    // Checkerboard texture sphere (alternating red and blue)
+    auto checker_red_blue = std::make_shared<CheckerTexture>(
+        std::make_shared<SolidColor>(Color(0.8f, 0.2f, 0.2f)),  // Red
+        std::make_shared<SolidColor>(Color(0.2f, 0.2f, 0.8f)),  // Blue
+        8.0f  // Scale
+    );
+    auto material_checker = std::make_shared<Lambertian>(checker_red_blue);
+    scene.add_object(std::make_shared<Sphere>(Point3(-3.0, 1.0, -2.0), 0.8, material_checker));
 
-    // Noise texture sphere (blue and white marble-like)
-    auto texture_noise = std::make_shared<NoiseTexture>(Color(0.6f, 0.7f, 0.9f), Color(0.9f, 0.95f, 1.0f), 4.0f, 4, 0.5f);
-    auto material_noise = std::make_shared<Lambertian>(texture_noise);
-    scene.add_object(std::make_shared<Sphere>(Point3(-5.0, 1.0, 2.0), 0.8, material_noise));
+    // Noise texture sphere (high contrast marble)
+    auto noise_marble = std::make_shared<NoiseTexture>(
+        Color(1.0f, 1.0f, 1.0f),     // Pure white
+        Color(0.0f, 0.0f, 0.0f),     // Pure black
+        5.0f,  // Scale (even more detailed)
+        6,     // Octaves (more detail layers)
+        0.7f   // Persistence (higher contrast)
+    );
+    auto material_noise = std::make_shared<Lambertian>(noise_marble);
+    scene.add_object(std::make_shared<Sphere>(Point3(-3.5, -2.0, 2.0), 0.8, material_noise));
 
-    // Gradient texture sphere (red to yellow)
-    auto texture_gradient = std::make_shared<GradientTexture>(Color(0.9f, 0.1f, 0.1f), Color(0.9f, 0.9f, 0.1f), Vec3(0, 1, 0));
-    auto material_gradient = std::make_shared<Lambertian>(texture_gradient);
-    scene.add_object(std::make_shared<Sphere>(Point3(5.0, 1.0, -2.0), 0.8, material_gradient));
+    // Gradient texture sphere (purple to yellow vertical gradient)
+    auto gradient_purple_yellow = std::make_shared<GradientTexture>(
+        Color(0.6f, 0.2f, 0.8f),  // Purple
+        Color(0.9f, 0.9f, 0.2f),  // Yellow
+        Vec3(0, 1, 0),            // Vertical direction
+        0.3f,                     // Scale
+        0.5f                      // Offset (default, works fine for sphere)
+    );
+    auto material_gradient = std::make_shared<Lambertian>(gradient_purple_yellow);
+    scene.add_object(std::make_shared<Sphere>(Point3(-1.0, -1.5, 2.0), 0.8, material_gradient));
 
-    // Stripe texture sphere (blue and cyan stripes)
-    auto texture_stripe = std::make_shared<StripeTexture>(Color(0.1f, 0.3f, 0.7f), Color(0.3f, 0.8f, 0.9f), 6.0f, 0.3f);
-    auto material_stripe = std::make_shared<Lambertian>(texture_stripe);
-    scene.add_object(std::make_shared<Sphere>(Point3(5.0, 1.0, 2.0), 0.8, material_stripe));
+    // Stripe texture sphere (orange and white horizontal stripes)
+    auto stripe_orange_white = std::make_shared<StripeTexture>(
+        Color(0.8f, 0.5f, 0.2f),  // Orange
+        Color(0.9f, 0.9f, 0.9f),  // White
+        8.0f,  // Scale (more stripes, closer together)
+        0.0f   // Angle
+    );
+    auto material_stripe = std::make_shared<Lambertian>(stripe_orange_white);
+    scene.add_object(std::make_shared<Sphere>(Point3(0.5, 1.5, 2.0), 0.8, material_stripe));
+
+    // Gradient quad (on right wall) - horizontal gradient from red to blue
+    auto gradient_red_blue = std::make_shared<GradientTexture>(
+        Color(1.0f, 0.0f, 0.0f),  // Pure red
+        Color(0.0f, 0.0f, 1.0f),  // Pure blue
+        Vec3(0, 0, 1),            // Horizontal gradient (along Z axis)
+        0.25f,                    // Scale
+        -0.25f                    // Offset (calibrated for quad at Z=1 to 5)
+    );
+    auto material_quad_gradient = std::make_shared<Lambertian>(gradient_red_blue);
+
+    // Quad made of 2 triangles on the right side
+    Point3 quad_top_left(4.0f, 3.0f, 1.0f);
+    Point3 quad_top_right(4.0f, 3.0f, 5.0f);
+    Point3 quad_bottom_left(4.0f, -1.0f, 1.0f);
+    Point3 quad_bottom_right(4.0f, -1.0f, 5.0f);
+
+    scene.add_object(std::make_shared<Triangle>(quad_top_left, quad_top_right, quad_bottom_right, material_quad_gradient));
+    scene.add_object(std::make_shared<Triangle>(quad_top_left, quad_bottom_right, quad_bottom_left, material_quad_gradient));
 
     // Lighting
     scene.add_light(Light(Point3(0, 18.0, 0), Color(1.0f, 1.0f, 1.0f)));
