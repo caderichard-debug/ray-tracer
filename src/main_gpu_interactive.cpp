@@ -1007,11 +1007,12 @@ class OpenGLUIRenderer {
 private:
     GLuint ui_program;
     GLuint ui_vao, ui_vbo;
+    GLint pos_attrib_loc, tex_attrib_loc;
     TTF_Font* font;
     bool initialized;
 
 public:
-    OpenGLUIRenderer() : ui_program(0), ui_vao(0), ui_vbo(0), font(nullptr), initialized(false) {}
+    OpenGLUIRenderer() : ui_program(0), ui_vao(0), ui_vbo(0), pos_attrib_loc(-1), tex_attrib_loc(-1), font(nullptr), initialized(false) {}
 
     ~OpenGLUIRenderer() {
         if (font) TTF_CloseFont(font);
@@ -1057,8 +1058,8 @@ public:
             void main() {
                 if (use_texture == 1) {
                     vec4 tex_color = texture2D(ui_texture, v_tex_coord);
-                    // For text: use texture RGB * color RGB, and texture alpha * color alpha
-                    gl_FragColor = vec4(tex_color.rgb * ui_color.rgb, tex_color.a * ui_color.a);
+                    // For text: just use the texture color directly
+                    gl_FragColor = tex_color;
                 } else {
                     gl_FragColor = ui_color;
                 }
@@ -1102,16 +1103,20 @@ public:
         glGenVertexArrays(1, &ui_vao);
         glGenBuffers(1, &ui_vbo);
 
-        // Set up VAO once
+        // Set up VAO once with vertex attribute pointers
         glBindVertexArray(ui_vao);
         glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
 
-        // Enable vertex attributes
-        GLint pos_loc = glGetAttribLocation(ui_program, "position");
-        GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
+        // Get attribute locations
+        pos_attrib_loc = glGetAttribLocation(ui_program, "position");
+        tex_attrib_loc = glGetAttribLocation(ui_program, "tex_coord");
 
-        glEnableVertexAttribArray(pos_loc);
-        glEnableVertexAttribArray(tex_loc);
+        // Set up vertex attribute pointers (will stay with VAO)
+        glEnableVertexAttribArray(pos_attrib_loc);
+        glVertexAttribPointer(pos_attrib_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+
+        glEnableVertexAttribArray(tex_attrib_loc);
+        glVertexAttribPointer(tex_attrib_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
 
         glBindVertexArray(0);
 
@@ -1177,15 +1182,7 @@ public:
         glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
 
-        GLint pos_loc = glGetAttribLocation(ui_program, "position");
-        GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
-
-        glEnableVertexAttribArray(pos_loc);
-        glVertexAttribPointer(pos_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-
-        glEnableVertexAttribArray(tex_loc);
-        glVertexAttribPointer(tex_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-
+        // VAO is already set up with vertex attribute pointers
         GLint color_loc = glGetUniformLocation(ui_program, "ui_color");
         GLint use_tex_loc = glGetUniformLocation(ui_program, "use_texture");
 
@@ -1222,7 +1219,6 @@ public:
         GLint depth_test_enabled, blend_enabled;
         GLint blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha;
         GLint active_texture, current_texture;
-        GLint texture_unit_0_binding;
 
         glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
@@ -1235,9 +1231,6 @@ public:
         glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst_alpha);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
-
-        glActiveTexture(GL_TEXTURE0);
-        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture_unit_0_binding);
 
         float x1 = (x / WIDTH) * 2.0f - 1.0f;
         float y1 = 1.0f - (y / HEIGHT) * 2.0f;
@@ -1256,15 +1249,7 @@ public:
         glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
 
-        GLint pos_loc = glGetAttribLocation(ui_program, "position");
-        GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
-
-        glEnableVertexAttribArray(pos_loc);
-        glVertexAttribPointer(pos_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-
-        glEnableVertexAttribArray(tex_loc);
-        glVertexAttribPointer(tex_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-
+        // VAO is already set up with vertex attribute pointers
         GLint color_loc = glGetUniformLocation(ui_program, "ui_color");
         GLint texture_loc = glGetUniformLocation(ui_program, "ui_texture");
         GLint use_tex_loc = glGetUniformLocation(ui_program, "use_texture");
@@ -2292,6 +2277,11 @@ int main(int argc, char* argv[]) {
         if (controls_panel.is_showing()) {
             controls_panel.render(enable_reflections, lighting_mode, num_lights);
         }
+
+        // Ensure clean state after UI rendering
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+        glUseProgram(program);
 
         // Always swap buffers every frame to show UI overlays
         SDL_GL_SwapWindow(window);

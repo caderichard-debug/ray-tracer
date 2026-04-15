@@ -1815,15 +1815,33 @@ int main(int argc, char* argv[]) {
                             std::cout << "Frustum culling: " << (enable_frustum ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.simd_packets_changed) {
-                            // Toggle SIMD packet tracing
-                            ray_renderer.enable_simd_packets = click_result.new_simd_packets;
+                            // Toggle SIMD packet tracing (disable BVH if enabling SIMD)
+                            if (!ray_renderer.enable_simd_packets) {
+                                // Enabling SIMD - disable BVH
+                                ray_renderer.enable_simd_packets = true;
+                                if (ray_renderer.enable_bvh) {
+                                    ray_renderer.enable_bvh = false;
+                                    std::cout << "BVH disabled (mutually exclusive with SIMD)" << std::endl;
+                                }
+                            } else {
+                                // Disabling SIMD
+                                ray_renderer.enable_simd_packets = false;
+                            }
                             std::cout << "SIMD packets: " << (ray_renderer.enable_simd_packets ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.bvh_changed) {
-                            // Toggle BVH acceleration
-                            ray_renderer.enable_bvh = click_result.new_bvh;
-                            if (ray_renderer.enable_bvh) {
+                            // Toggle BVH acceleration (disable SIMD if enabling BVH)
+                            if (!ray_renderer.enable_bvh) {
+                                // Enabling BVH - disable SIMD
+                                ray_renderer.enable_bvh = true;
+                                if (ray_renderer.enable_simd_packets) {
+                                    ray_renderer.enable_simd_packets = false;
+                                    std::cout << "SIMD disabled (mutually exclusive with BVH)" << std::endl;
+                                }
                                 ray_renderer.build_bvh(scene);
+                            } else {
+                                // Disabling BVH
+                                ray_renderer.enable_bvh = false;
                             }
                             std::cout << "BVH: " << (ray_renderer.enable_bvh ? "ON" : "OFF") << std::endl;
                             need_render = true;
