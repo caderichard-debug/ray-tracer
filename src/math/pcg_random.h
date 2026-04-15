@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <random>
+#include <thread>
 
 // PCG (Permuted Congruential Generator) - High quality, fast PRNG
 // Better statistical properties than XOR-shift, thread-safe with per-thread state
@@ -36,7 +37,7 @@ public:
     // Generate random float in [0, 1)
     float random_float() {
         // Generate 23 bits of mantissa (for float precision)
-        uint32_t bits = (*this) >> 9;  // Use upper bits for better distribution
+        uint32_t bits = this->operator()() >> 9;  // Use upper bits for better distribution
         return bits * (1.0f / 8388608.0f);  // Divide by 2^23
     }
 
@@ -49,7 +50,7 @@ public:
     static PCGRandom& thread_local_instance() {
         static thread_local PCGRandom instance(
             0x853c49e6748fea9bULL,
-            0xda3e39cb94b95bdbULL + std::hash<std::thread::id>{}(std::this_thread::get_id())
+            0xda3e39cb94b95bdbULL
         );
         return instance;
     }

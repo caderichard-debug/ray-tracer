@@ -125,7 +125,7 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
             Vec3 reflect_dir = AVX2::reflect_avx2(-light_dir_normalized, rec.normal);
             float view_dot_reflect = AVX2::dot_product_avx2(view_dir, reflect_dir);
             float spec = std::pow(std::max(0.0f, view_dot_reflect), rec.mat->shininess);
-            Color specular = AVX2::scale_avx2(AVX2::mul_color_avx2(rec.mat->specular_intensity, light.intensity), spec);
+            Color specular = AVX2::scale_avx2(light.intensity, rec.mat->specular_intensity * spec);
 
             // Accumulate using SIMD
             color = AVX2::add_avx2(color, diffuse);

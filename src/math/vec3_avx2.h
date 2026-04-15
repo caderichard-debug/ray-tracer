@@ -125,11 +125,8 @@ inline Vec3 sqrt_avx2(const Vec3& v) {
 
 // AVX2-optimized power function for specular highlights
 inline float pow_avx2(float base, float exponent) {
-    // Use SSE scalar math for power (AVX doesn't have scalar pow)
-    __m128 vbase = _mm_set_ss(base);
-    __m128 vexp = _mm_set_ss(exponent);
-    __m128 result = _mm_pow_ss(vbase, vexp);  // Requires -mfma
-    return _mm_cvtss_f32(result);
+    // Use standard library pow (AVX doesn't have scalar pow intrinsic)
+    return std::pow(base, exponent);
 }
 
 } // namespace AVX2
