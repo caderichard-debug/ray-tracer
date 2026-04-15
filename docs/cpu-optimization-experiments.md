@@ -116,6 +116,25 @@ This document tracks the performance impact of each optimization applied to the 
 - ✅ Stratified sampling: 1.68x faster convergence
 - ✅ Frustum culling: Infrastructure ready for complex scenes
 - ✅ All optimizations work together synergistically
+- ✅ **Interactive mode**: All Phase 2 optimizations now toggleable in real-time
+
+## Interactive Mode Integration
+
+**Status**: ✅ Complete - All Phase 2 optimizations fully interactive
+
+**New Interactive Controls**:
+- **Settings Panel → "Phase 2 Optimizations" section**
+- **Morton: ON/OFF** - Toggle cache-friendly Z-curve traversal
+- **Stratified: ON/OFF** - Toggle grid-based stratified sampling  
+- **Frustum: ON/OFF** - Toggle view frustum culling
+
+**Benefits**:
+- Real-time performance tuning during rendering
+- Visual comparison of optimization effects
+- Educational - see immediate impact of each optimization
+- Easy quality vs. performance tradeoff testing
+
+**Documentation**: See [interactive-controls-guide.md](interactive-controls-guide.md) for detailed usage instructions.
 
 ### Key Metrics
 - **Total Speedup**: TBD
