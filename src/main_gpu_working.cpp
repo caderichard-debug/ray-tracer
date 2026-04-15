@@ -338,6 +338,8 @@ struct TriangleData {
     float normal[3];
     float color[3];
     int material;
+    float gradient_scale;   // For gradient textures
+    float gradient_offset;  // For gradient textures
 };
 
 // Fragment shader that reads scene data from uniforms
@@ -363,6 +365,8 @@ uniform vec3 tri_v2[20];
 uniform vec3 tri_normals[20];
 uniform vec3 tri_colors[20];
 uniform int tri_materials[20];
+uniform float tri_gradient_scale[20];
+uniform float tri_gradient_offset[20];
 uniform int num_triangles;
 
 // Rendering options
@@ -460,9 +464,9 @@ vec3 noise_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
     return mix(color1, color2, n);
 }
 
-vec3 gradient_texture(vec3 pos, vec3 color1, vec3 color2, vec3 dir) {
-    // Use actual position (not normalized) for proper gradient along direction
-    float t = dot(pos, dir) * 0.5 + 0.5;
+vec3 gradient_texture(vec3 pos, vec3 color1, vec3 color2, vec3 dir, float scale, float offset) {
+    // Use actual position with scale and offset for proper gradient mapping
+    float t = dot(pos, dir) * scale + offset;
     return mix(color1, color2, clamp(t, 0.0, 1.0));
 }
 
@@ -526,8 +530,8 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                     // Noise (black and white)
                     color = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
                 } else if (material == 6) {
-                    // Gradient (purple to yellow vertical)
-                    color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0));
+                    // Gradient (purple to yellow vertical) - use default scale/offset for spheres
+                    color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0), 0.25, 0.0);
                 } else if (material == 7) {
                     // Stripe (orange and white horizontal)
                     color = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
@@ -543,8 +547,9 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                     // Pyramid checkerboard
                     color = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
                 } else if (material == 9) {
-                    // Gradient quad (red to blue horizontal)
-                    color = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
+                    // Gradient quad (red to blue along Z) - use proper scale/offset from texture
+                    color = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0),
+                                              tri_gradient_scale[hit_object], tri_gradient_offset[hit_object]);
                     // Don't apply lighting to gradient texture - it should be self-illuminated
                     apply_lighting = false;
                 }
@@ -797,13 +802,19 @@ void setup_scene_data(
                     std::cout << "  -> Checkerboard texture" << std::endl;
                 } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->albedo_texture)) {
                     data.material = 9; // Gradient (quad on right wall)
-                    std::cout << "  -> Gradient texture!" << std::endl;
+                    data.gradient_scale = gradient->scale;
+                    data.gradient_offset = gradient->offset;
+                    std::cout << "  -> Gradient texture! scale=" << gradient->scale << " offset=" << gradient->offset << std::endl;
                 } else {
                     data.material = 0; // Regular lambertian
+                    data.gradient_scale = 0.25f;  // Default
+                    data.gradient_offset = 0.0f;  // Default
                     std::cout << "  -> Regular lambertian (unknown texture)" << std::endl;
                 }
             } else {
                 data.material = 0; // Default lambertian
+                data.gradient_scale = 0.25f;  // Default
+                data.gradient_offset = 0.0f;  // Default
                 std::cout << "Not Lambertian" << std::endl;
             }
 
@@ -1127,6 +1138,14 @@ int main(int argc, char* argv[]) {
                 name = "tri_materials[" + std::to_string(i) + "]";
                 loc = glGetUniformLocation(program, name.c_str());
                 glUniform1i(loc, triangles[i].material);
+
+                name = "tri_gradient_scale[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, triangles[i].gradient_scale);
+
+                name = "tri_gradient_offset[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, triangles[i].gradient_offset);
             }
 
             // Render fullscreen quad

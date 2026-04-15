@@ -126,7 +126,7 @@ int main() {
     setup_cornell_box_scene(scene);
 
     // Setup camera
-    Point3 lookfrom(0, 1, 4);
+    Point3 lookfrom(0, 1, 5);
     Point3 lookat(0, 0.5, 0);
     Vec3 vup(0, 1, 0);
     float dist_to_focus = (lookfrom - lookat).length();
