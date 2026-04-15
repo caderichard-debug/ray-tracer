@@ -73,6 +73,8 @@ The CPU ray tracer interactive mode provides real-time rendering with comprehens
 └─────────────────────────────────────┘
 ```
 
+**Note**: The settings panel is scrollable! Use the **mouse wheel** to scroll through all controls when the content exceeds the visible area. A scrollbar indicator appears on the right side when scrolling is available.
+
 ## Usage Scenarios
 
 ### 🚀 Maximum Performance

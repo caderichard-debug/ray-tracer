@@ -1086,8 +1086,11 @@ public:
             SDL_FreeSurface(frustum_text_surface);
         }
 
+        // Add padding at bottom
+        y_offset += 10;
+
         // Calculate actual content height and scrolling
-        content_height = y_offset + 20;  // Add padding
+        content_height = y_offset;
         is_scrollable = (content_height > panel_height);
         max_scroll_offset = is_scrollable ? (content_height - panel_height) : 0;
         scroll_offset = std::min(scroll_offset, max_scroll_offset);  // Clamp scroll offset

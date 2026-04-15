@@ -219,58 +219,9 @@ public:
         }
     }
 };
-            "  ✗ PBR lighting (Phong mode only)",
-#endif
-#if ENABLE_MULTIPLE_LIGHTS
-            "  ✓ Multiple lights (press L to cycle)",
-#else
-            "  ✗ Multiple lights (single light only)",
-#endif
-#if ENABLE_TONE_MAPPING
-            "  ✓ ACES tone mapping",
-#endif
-#if ENABLE_GAMMA_CORRECTION
-            "  ✓ Gamma correction",
-#endif
-            "",
-            "Phase 2 Features:",
-#if ENABLE_SOFT_SHADOWS
-            "  ✓ Soft shadows (area light sampling)",
-#else
-            "  ✗ Soft shadows (hard shadows)",
-#endif
-#if ENABLE_AMBIENT_OCCLUSION
-            "  ✓ Ambient occlusion (ray-traced)",
-#else
-            "  ✗ Ambient occlusion",
-#endif
-            "",
-            "Performance: 60-500x faster than CPU",
-            "  - Real-time ray tracing at 60+ FPS",
-            "  - GLSL 1.20 (OpenGL 2.0+ compatible)",
-            "",
-            "Press H to close this help"
-        };
 
-        int y_offset = 70;
-        for (size_t i = 0; i < sizeof(help_lines) / sizeof(help_lines[0]); i++) {
-            SDL_Surface* surface = TTF_RenderText_Blended(font, help_lines[i], text_color);
-            if (surface) {
-                SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+// Console-based settings panel (no GUI to avoid OpenGL conflicts)
                 if (texture) {
-                    SDL_Rect dest_rect = {70, y_offset, surface->w, surface->h};
-                    SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
-                    SDL_DestroyTexture(texture);
-                }
-                SDL_FreeSurface(surface);
-                y_offset += 25;
-            }
-        }
-
-        SDL_RenderPresent(renderer);
-    }
-};
-
 // Console-based settings panel (no GUI to avoid OpenGL conflicts)
 class ControlsPanel {
 private:
@@ -321,7 +272,16 @@ public:
         std::cout << "  make gpu-showcase      - Maximum quality" << std::endl;
         std::cout << "\nPress C to close this panel\n" << std::endl;
     }
-
+};
+    void render(SDL_Window* window, SDL_Renderer* renderer, bool enable_reflections, int lighting_mode, int num_lights) {
+        // Console-based rendering - show current settings
+        if (show && initialized) {
+            std::cout << "\n=== Current Settings ===" << std::endl;
+            std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
+            std::cout << "Lighting: " << (lighting_mode == 0 ? "Phong" : "PBR") << std::endl;
+            std::cout << "Lights: " << num_lights << std::endl;
+        }
+    }
 
     void render(SDL_Window* window, SDL_Renderer* renderer, bool enable_reflections, int lighting_mode, int num_lights) {
         // Console-based rendering - show current settings
