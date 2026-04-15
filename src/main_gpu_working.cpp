@@ -1,7 +1,9 @@
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <cmath>
 #include <chrono>
+#include <sstream>
 
 // Include GLEW before SDL to avoid header conflicts
 #include <GL/glew.h>
@@ -12,10 +14,127 @@
 const int WIDTH = 1280;
 const int HEIGHT = 720;
 
+// Camera controller
+class CameraController {
+public:
+    float position[3];
+    float lookat[3];
+    float vup[3];
+    float vfov;
+    float aspect_ratio;
+    float yaw;
+    float pitch;
+
+public:
+    CameraController()
+        : vfov(60.0f), aspect_ratio((float)WIDTH / (float)HEIGHT), yaw(-90.0f), pitch(0.0f) {
+        position[0] = 0.0f; position[1] = 2.0f; position[2] = 15.0f;
+        lookat[0] = 0.0f; lookat[1] = 2.0f; lookat[2] = 0.0f;
+        vup[0] = 0.0f; vup[1] = 1.0f; vup[2] = 0.0f;
+        update_from_angles();
+    }
+
+    void update_from_angles() {
+        float yaw_rad = yaw * 3.14159f / 180.0f;
+        float pitch_rad = pitch * 3.14159f / 180.0f;
+
+        float direction[3];
+        direction[0] = cos(yaw_rad) * cos(pitch_rad);
+        direction[1] = sin(pitch_rad);
+        direction[2] = sin(yaw_rad) * cos(pitch_rad);
+
+        lookat[0] = position[0] + direction[0];
+        lookat[1] = position[1] + direction[1];
+        lookat[2] = position[2] + direction[2];
+    }
+
+    void move_forward(float delta) {
+        float forward[3] = {lookat[0] - position[0], lookat[1] - position[1], lookat[2] - position[2]};
+        float len = sqrt(forward[0]*forward[0] + forward[1]*forward[1] + forward[2]*forward[2]);
+        forward[0] /= len; forward[1] /= len; forward[2] /= len;
+
+        position[0] += forward[0] * delta;
+        position[1] += forward[1] * delta;
+        position[2] += forward[2] * delta;
+        update_from_angles();
+    }
+
+    void move_right(float delta) {
+        float forward[3] = {lookat[0] - position[0], lookat[1] - position[1], lookat[2] - position[2]};
+        float len = sqrt(forward[0]*forward[0] + forward[1]*forward[1] + forward[2]*forward[2]);
+        forward[0] /= len; forward[1] /= len; forward[2] /= len;
+
+        float right[3] = {
+            forward[1] * vup[2] - forward[2] * vup[1],
+            forward[2] * vup[0] - forward[0] * vup[2],
+            forward[0] * vup[1] - forward[1] * vup[0]
+        };
+
+        len = sqrt(right[0]*right[0] + right[1]*right[1] + right[2]*right[2]);
+        right[0] /= len; right[1] /= len; right[2] /= len;
+
+        position[0] += right[0] * delta;
+        position[1] += right[1] * delta;
+        position[2] += right[2] * delta;
+        update_from_angles();
+    }
+
+    void move_up(float delta) {
+        position[1] += delta;
+        update_from_angles();
+    }
+
+    void rotate(float delta_yaw, float delta_pitch) {
+        yaw += delta_yaw;
+        pitch += delta_pitch;
+
+        if (pitch > 89.0f) pitch = 89.0f;
+        if (pitch < -89.0f) pitch = -89.0f;
+
+        update_from_angles();
+    }
+};
+
+// Simple help overlay
+class HelpOverlay {
+private:
+    bool show;
+    bool initialized;
+
+public:
+    HelpOverlay() : show(false), initialized(false) {}
+
+    bool init() {
+        initialized = true;
+        return true;
+    }
+
+    void toggle() { show = !show; }
+    bool is_showing() const { return show; }
+};
+
+// Simple settings panel
+class ControlsPanel {
+private:
+    bool show;
+    bool initialized;
+
+public:
+    ControlsPanel() : show(false), initialized(false) {}
+
+    bool init() {
+        initialized = true;
+        return true;
+    }
+
+    void toggle() { show = !show; }
+    bool is_showing() const { return show; }
+};
+
 // Maximum scene objects (hardcoded for GLSL 1.20)
-const int NUM_SPHERES = 2;
-const int NUM_TRIANGLES = 12;
-const int NUM_MATERIALS = 6;
+const int NUM_SPHERES = 16;
+const int NUM_TRIANGLES = 20;
+const int NUM_MATERIALS = 12;
 const int NUM_LIGHTS = 1;
 
 // Simple fragment shader that works with GLSL 1.20
@@ -23,7 +142,10 @@ const char* fragment_shader_source = R"(
 #version 120
 
 uniform vec2 resolution;
-uniform float time;
+uniform vec3 camera_pos;
+uniform vec3 camera_lookat;
+uniform vec3 camera_vup;
+uniform float camera_vfov;
 
 // Simple ray-sphere intersection
 bool hit_sphere(vec3 origin, vec3 direction, vec3 center, float radius, inout float t) {
@@ -253,18 +375,17 @@ void main() {
     vec2 uv = gl_FragCoord.xy / resolution;
     uv.y = 1.0 - uv.y;
 
-    // Simple camera
-    vec3 origin = vec3(0.0, 2.0, 15.0);
-    vec3 lookat = vec3(0.0, 2.0, 0.0);
-    vec3 vup = vec3(0.0, 1.0, 0.0);
+    // Camera from uniforms
+    vec3 origin = camera_pos;
+    vec3 lookat = camera_lookat;
+    vec3 vup = camera_vup;
 
     vec3 w = normalize(origin - lookat);
     vec3 u = normalize(cross(vup, w));
     vec3 v = cross(w, u);
 
-    float vfov = 60.0;
     float aspect_ratio = resolution.x / resolution.y;
-    float theta = vfov * 0.0174533; // Convert to radians
+    float theta = camera_vfov * 0.0174533;
     float h = tan(theta * 0.5);
     float viewport_height = 2.0 * h;
     float viewport_width = aspect_ratio * viewport_height;
@@ -470,23 +591,44 @@ int main(int argc, char* argv[]) {
 
     // Get uniform locations
     GLint resolution_loc = glGetUniformLocation(program, "resolution");
-    GLint time_loc = glGetUniformLocation(program, "time");
+    GLint camera_pos_loc = glGetUniformLocation(program, "camera_pos");
+    GLint camera_lookat_loc = glGetUniformLocation(program, "camera_lookat");
+    GLint camera_vup_loc = glGetUniformLocation(program, "camera_vup");
+    GLint camera_vfov_loc = glGetUniformLocation(program, "camera_vfov");
 
     std::cout << "\n=== Starting Working GPU Ray Tracer ===" << std::endl;
     std::cout << "You should see a Cornell Box scene with:" << std::endl;
     std::cout << "  - Metal sphere (left) and glass sphere (right)" << std::endl;
     std::cout << "  - Red wall (left) and green wall (right)" << std::endl;
     std::cout << "  - Phong shading with specular highlights" << std::endl;
-    std::cout << "Controls: ESC to quit" << std::endl;
+    std::cout << "Controls:" << std::endl;
+    std::cout << "  Click window to capture mouse" << std::endl;
+    std::cout << "  WASD/Arrows - Move (slower)" << std::endl;
+    std::cout << "  Mouse       - Look around" << std::endl;
+    std::cout << "  H           - Help" << std::endl;
+    std::cout << "  ESC         - Quit" << std::endl;
     std::cout << "==============================\n" << std::endl;
+
+    // Camera controller (slower movement)
+    CameraController camera;
+    float move_speed = 0.05f; // Slower speed
+
+    // UI panels
+    HelpOverlay help_overlay;
+    help_overlay.init();
+
+    ControlsPanel controls_panel;
+    controls_panel.init();
 
     // Main loop
     bool running = true;
+    bool need_render = true;
     SDL_Event event;
 
     auto start_time = std::chrono::high_resolution_clock::now();
     int frame_count = 0;
-    float time = 0.0f;
+    float fps = 0.0f;
+    auto last_frame_time = std::chrono::high_resolution_clock::now();
 
     while (running) {
         while (SDL_PollEvent(&event)) {
@@ -495,37 +637,90 @@ int main(int argc, char* argv[]) {
             } else if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
                     running = false;
+                } else if (event.key.keysym.sym == SDLK_h) {
+                    help_overlay.toggle();
+                } else if (event.key.keysym.sym == SDLK_c) {
+                    controls_panel.toggle();
+                }
+            } else if (event.type == SDL_MOUSEBUTTONDOWN) {
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    SDL_bool captured = SDL_GetRelativeMouseMode();
+                    SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
+                }
+            } else if (event.type == SDL_MOUSEMOTION) {
+                if (SDL_GetRelativeMouseMode()) {
+                    camera.rotate(event.motion.xrel * 0.1f, -event.motion.yrel * 0.1f);
+                    need_render = true;
                 }
             }
         }
 
-        // Update time
+        // Handle continuous keyboard input
+        const Uint8* keystates = SDL_GetKeyboardState(NULL);
+
+        if (keystates[SDL_SCANCODE_W]) {
+            camera.move_forward(move_speed);
+            need_render = true;
+        }
+        if (keystates[SDL_SCANCODE_S]) {
+            camera.move_forward(-move_speed);
+            need_render = true;
+        }
+        if (keystates[SDL_SCANCODE_A]) {
+            camera.move_right(-move_speed);
+            need_render = true;
+        }
+        if (keystates[SDL_SCANCODE_D]) {
+            camera.move_right(move_speed);
+            need_render = true;
+        }
+        if (keystates[SDL_SCANCODE_UP]) {
+            camera.move_up(move_speed);
+            need_render = true;
+        }
+        if (keystates[SDL_SCANCODE_DOWN]) {
+            camera.move_up(-move_speed);
+            need_render = true;
+        }
+
+        // Update time (keep for potential animation)
         auto current_time = std::chrono::high_resolution_clock::now();
-        time = std::chrono::duration<float>(current_time - start_time).count();
+        float time = std::chrono::duration<float>(current_time - start_time).count();
 
         // Render
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        if (need_render) {
+            glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
 
-        glUseProgram(program);
+            glUseProgram(program);
 
-        // Set uniforms
-        glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
-        glUniform1f(time_loc, time);
+            // Set uniforms
+            glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
+            glUniform3f(camera_pos_loc, camera.position[0], camera.position[1], camera.position[2]);
+            glUniform3f(camera_lookat_loc, camera.lookat[0], camera.lookat[1], camera.lookat[2]);
+            glUniform3f(camera_vup_loc, camera.vup[0], camera.vup[1], camera.vup[2]);
+            glUniform1f(camera_vfov_loc, camera.vfov);
 
-        // Render fullscreen quad
-        glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            // Render fullscreen quad
+            glBindVertexArray(vao);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        SDL_GL_SwapWindow(window);
+            SDL_GL_SwapWindow(window);
 
-        // Calculate FPS
-        frame_count++;
-        if (frame_count % 30 == 0) {
-            auto end_time = std::chrono::high_resolution_clock::now();
-            float elapsed = std::chrono::duration<float>(end_time - start_time).count();
-            float fps = frame_count / elapsed;
-            std::cout << "FPS: " << fps << "\r" << std::flush;
+            // Calculate FPS
+            frame_count++;
+            auto now = std::chrono::high_resolution_clock::now();
+            double elapsed = std::chrono::duration<double>(now - last_frame_time).count();
+            if (elapsed >= 1.0) {
+                fps = frame_count / elapsed;
+                frame_count = 0;
+                last_frame_time = now;
+                std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
+                         << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
+                         << "     " << std::flush;
+            }
+
+            need_render = false;
         }
     }
 

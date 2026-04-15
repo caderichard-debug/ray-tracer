@@ -1646,20 +1646,37 @@ int main(int argc, char* argv[]) {
             {
                 // CPU rendering path with advanced features
                 if (ray_renderer.enable_progressive) {
-                    // PROGRESSIVE RENDERING: Multi-pass refinement
-                    std::cout << "Progressive rendering..." << std::endl;
+                    // TRUE PROGRESSIVE RENDERING: Start noisy, get progressively better
+                    static int progressive_frame_count = 0;
+                    static bool progressive_initialized = false;
 
-                    // Simple progressive rendering: render fewer samples per frame
-                    // This gives immediate feedback and refines over time
-                    const int progressive_samples = std::max(1, preset.samples / 4); // Render 1/4 of samples per frame
+                    // Reset when camera moves significantly
+                    static Point3 last_camera_pos(999, 999, 999);
+                    Point3 current_camera_pos = camera_controller.get_position();
+
+                    if (!progressive_initialized ||
+                        fabs(last_camera_pos.x - current_camera_pos.x) > 0.1f ||
+                        fabs(last_camera_pos.y - current_camera_pos.y) > 0.1f ||
+                        fabs(last_camera_pos.z - current_camera_pos.z) > 0.1f) {
+                        progressive_frame_count = 0;
+                        progressive_initialized = true;
+                        last_camera_pos = current_camera_pos;
+                    }
+
+                    // Calculate samples for this frame: 1, 2, 4, 8, 16... doubling each time
+                    int current_samples = 1 << std::min(10, progressive_frame_count);
+                    if (current_samples > preset.samples) current_samples = preset.samples;
+
+                    std::cout << "Progressive frame " << (progressive_frame_count + 1)
+                             << " using " << current_samples << " samples (target: " << preset.samples << ")" << std::endl;
 
                     #pragma omp parallel for schedule(dynamic, 4)
                     for (int j = image_height - 1; j >= 0; --j) {
                         for (int i = 0; i < image_width; ++i) {
                             Color pixel_color(0, 0, 0);
 
-                            // Render progressive samples
-                            for (int s = 0; s < progressive_samples; ++s) {
+                            // Render samples for this progressive level
+                            for (int s = 0; s < current_samples; ++s) {
                                 float u = (i + random_float()) / (image_width - 1);
                                 float v = (j + random_float()) / (image_height - 1);
 
@@ -1669,7 +1686,7 @@ int main(int argc, char* argv[]) {
                             }
 
                             // Average samples
-                            pixel_color = pixel_color / progressive_samples;
+                            pixel_color = pixel_color / current_samples;
 
                             // Gamma correction
                             pixel_color.x = std::sqrt(pixel_color.x);
@@ -1684,7 +1701,14 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    std::cout << "Progressive render complete (using " << progressive_samples << " samples)" << std::endl;
+                    progressive_frame_count++;
+
+                    // Keep rendering if we haven't reached target quality yet
+                    if (current_samples < preset.samples && progressive_frame_count < 10) {
+                        need_render = true; // Trigger next progressive frame
+                    } else {
+                        std::cout << "Progressive rendering complete!" << std::endl;
+                    }
 
                 } else if (ray_renderer.enable_wavefront) {
                     // WAVEFRONT RENDERING: Tiled cache-coherent rendering
