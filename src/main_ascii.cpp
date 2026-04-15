@@ -215,14 +215,14 @@ int main() {
                   << samples << " samples | "
                   << term_width << "x" << term_height;
 
-        // Simple animation - move camera slightly
-        float angle = frame * 0.02f;
+        // Simple animation - move camera slowly
+        float angle = frame * 0.01f;  // Slower camera movement
         lookfrom.x = std::sin(angle) * 4.0f - 4.0f;  // Original orbit radius, offset by -4
         lookfrom.z = std::cos(angle) * 4.0f;
         cam = Camera(lookfrom, lookat, vup, vfov, aspect_ratio, aperture, dist_to_focus);
 
         // Small delay to control frame rate
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     return 0;
