@@ -221,8 +221,6 @@ public:
 };
 
 // Console-based settings panel (no GUI to avoid OpenGL conflicts)
-                if (texture) {
-// Console-based settings panel (no GUI to avoid OpenGL conflicts)
 class ControlsPanel {
 private:
     bool show;
@@ -271,16 +269,6 @@ public:
         std::cout << "  make gpu-production    - High quality" << std::endl;
         std::cout << "  make gpu-showcase      - Maximum quality" << std::endl;
         std::cout << "\nPress C to close this panel\n" << std::endl;
-    }
-};
-    void render(SDL_Window* window, SDL_Renderer* renderer, bool enable_reflections, int lighting_mode, int num_lights) {
-        // Console-based rendering - show current settings
-        if (show && initialized) {
-            std::cout << "\n=== Current Settings ===" << std::endl;
-            std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
-            std::cout << "Lighting: " << (lighting_mode == 0 ? "Phong" : "PBR") << std::endl;
-            std::cout << "Lights: " << num_lights << std::endl;
-        }
     }
 
     void render(SDL_Window* window, SDL_Renderer* renderer, bool enable_reflections, int lighting_mode, int num_lights) {
