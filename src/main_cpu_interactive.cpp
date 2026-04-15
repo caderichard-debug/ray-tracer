@@ -2096,27 +2096,12 @@ int main(int argc, char* argv[]) {
                     std::cout << "Wavefront render complete" << std::endl;
 
                 } else if (ray_renderer.enable_simd_packets) {
-                    // SIMD PACKET RENDERING: AVX2 ray packet tracing
-                    std::cout << "SIMD packet rendering..." << std::endl;
+                    // SIMD PACKET RENDERING: DISABLED - needs full AVX2 intersection implementation
+                    std::cout << "SIMD packet tracing disabled (not yet performant - falling back to wavefront)" << std::endl;
+                    ray_renderer.enable_simd_packets = false;
+                    ray_renderer.enable_wavefront = true;
 
-                    std::vector<std::vector<Color>> simd_framebuffer(image_height, std::vector<Color>(image_width));
-                    ray_renderer.render_simd_packets(cam, scene, simd_framebuffer, image_width, image_height, preset.samples);
-
-                    // Convert to SDL framebuffer format
-                    #pragma omp parallel for schedule(dynamic, 4)
-                    for (int j = image_height - 1; j >= 0; --j) {
-                        for (int i = 0; i < image_width; ++i) {
-                            Color pixel_color = simd_framebuffer[j][i];
-
-                            // Write to framebuffer
-                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
-                        }
-                    }
-
-                    std::cout << "SIMD packet render complete" << std::endl;
+                    // Fall through to wavefront rendering
 
                 } else {
                     // STANDARD RENDERING: Original path with optional adaptive sampling

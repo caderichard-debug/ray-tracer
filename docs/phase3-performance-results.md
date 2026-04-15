@@ -18,16 +18,18 @@
 ### SIMD Packet Tracing
 - **Toggle**: Phase 3 Optimizations → "SIMD: ON/OFF"
 - **Implementation**: 4x2 pixel blocks, cache-friendly traversal
-- **Expected Impact**: 
+- **Expected Impact**:
   - Simple scenes (10 objects): Minimal improvement (0-5%)
   - Complex scenes (50+ objects): 10-20% improvement
   - Primary rays benefit most (coherent camera rays)
-- **Status**: ✅ Functional, scene renders correctly
+- **Status**: ❌ DISABLED - Performance regression (0.3x slower)
 
 **Notes**:
-- Uses hybrid approach: packet organization with scalar ray tracing
-- Improved cache locality through spatial coherence
-- Foundation for future full AVX2 intersection optimization
+- Current implementation: packet organization with scalar ray tracing
+- **Performance Issue**: Slower than standard rendering due to packet overhead without SIMD vectorization
+- **Root Cause**: No AVX2 vectorized intersection tests - still calling `ray_color()` scalarly for each ray
+- **Requirement**: Full AVX2 sphere intersection implementation needed for performance benefit
+- **Fallback**: Automatically falls back to wavefront rendering when enabled
 - Mutual exclusive with BVH (only one can be active at a time)
 
 ### BVH Acceleration
@@ -151,13 +153,43 @@
 - When Phase 1+2 optimizations are sufficient
 - When debugging (simpler code path)
 
+## Performance Issues
+
+### SIMD Packet Tracing Performance Regression
+**Issue**: SIMD mode runs at 0.3x speed (3x SLOWER) instead of expected 1.0-1.2x
+
+**Root Cause**:
+- Packet organization overhead (4x2 blocks, ray padding)
+- No actual SIMD vectorization - still scalar ray tracing
+- Each ray processed individually with `ray_color()` call
+- No AVX2 intersection tests (8 simultaneous sphere tests)
+
+**What's Missing**:
+1. AVX2 ray-sphere intersection: Test 8 rays against 1 sphere simultaneously
+2. AVX2 ray traversal: Process 8 rays through BVH nodes in parallel
+3. Vectorized ray direction and origin storage (Structure of Arrays)
+4. SIMD-friendly shading (or deferred shading)
+
+**Why Current Approach Failed**:
+- Organizing rays into packets adds overhead
+- Scalar intersection negates any cache coherence benefits
+- Padding rays at edges wastes computation
+- No early-out culling for invalid rays
+
 ## Future Work
 
-### Full AVX2 SIMD Intersection
-- Current: Packet organization with scalar intersection
-- Future: AVX2 vectorized sphere intersection
-- Expected: 2-4x additional improvement for intersection tests
-- Complexity: High (requires full Vec3_AVX2 integration)
+### Full AVX2 SIMD Intersection (HIGH PRIORITY for SIMD to be useful)
+- Current: Packet organization with scalar intersection (PERFORMANCE REGRESSION)
+- Required: AVX2 vectorized sphere intersection
+- Implementation needed:
+  1. `Vec3_AVX2` ray origins and directions (8 rays packed)
+  2. AVX2 ray-sphere intersection test (8 rays × 1 sphere)
+  3. AVX2 ray-BVH traversal (8 rays through nodes)
+  4. SIMD ray masking (handle invalid/terminated rays)
+  5. Vectorized min/max operations for closest hit
+- Expected: 2-4x improvement for intersection-heavy workloads
+- Complexity: Very High (requires significant refactoring)
+- Note: Without this, SIMD packet tracing should remain disabled
 
 ### Stress Test Scene
 - Create scene with 100+ spheres

@@ -1671,6 +1671,9 @@ int main(int argc, char* argv[]) {
     GLint light_radius_loc = glGetUniformLocation(program, "light_radius");
     GLint enable_ao_loc = glGetUniformLocation(program, "enable_ao");
     GLint ao_samples_loc = glGetUniformLocation(program, "ao_samples");
+    GLint enable_gi_loc = glGetUniformLocation(program, "enable_gi");
+    GLint gi_samples_loc = glGetUniformLocation(program, "gi_samples");
+    GLint gi_intensity_loc = glGetUniformLocation(program, "gi_intensity");
 
     // Rendering settings (matching CPU version)
     bool enable_reflections = true;
@@ -1739,6 +1742,9 @@ int main(int argc, char* argv[]) {
     std::cout << "  R           - Toggle reflections" << std::endl;
     std::cout << "  P           - Toggle Phong/PBR lighting" << std::endl;
     std::cout << "  L           - Cycle light configurations" << std::endl;
+    std::cout << "  G           - Toggle Global Illumination" << std::endl;
+    std::cout << "  [ / ]       - Adjust GI samples (1-8)" << std::endl;
+    std::cout << "  - / =       - Adjust GI intensity" << std::endl;
     std::cout << "  H           - Help" << std::endl;
     std::cout << "  C           - Controls panel" << std::endl;
     std::cout << "  ESC         - Quit" << std::endl;
@@ -1787,6 +1793,30 @@ int main(int argc, char* argv[]) {
                 } else if (event.key.keysym.sym == SDLK_l) {
                     num_lights = (num_lights % 3) + 1;  // Cycle 1->2->3->1
                     std::cout << "Lights: " << num_lights << (num_lights == 1 ? " (Single)" : num_lights == 2 ? " (2-point)" : " (3-point)") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_g) {
+                    enable_gi = !enable_gi;
+                    std::cout << "Global Illumination: " << (enable_gi ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_RIGHTBRACKET) {
+                    if (gi_samples < 8) {
+                        gi_samples++;
+                        std::cout << "GI Samples: " << gi_samples << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_LEFTBRACKET) {
+                    if (gi_samples > 1) {
+                        gi_samples--;
+                        std::cout << "GI Samples: " << gi_samples << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_EQUALS) {
+                    gi_intensity = std::min(1.0f, gi_intensity + 0.1f);
+                    std::cout << "GI Intensity: " << gi_intensity << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_MINUS) {
+                    gi_intensity = std::max(0.0f, gi_intensity - 0.1f);
+                    std::cout << "GI Intensity: " << gi_intensity << std::endl;
                     need_render = true;
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
@@ -1872,6 +1902,11 @@ int main(int argc, char* argv[]) {
             glUniform1f(light_radius_loc, light_radius);
             glUniform1i(enable_ao_loc, enable_ao ? 1 : 0);
             glUniform1i(ao_samples_loc, ao_samples);
+
+            // Set Phase 3 GI uniforms
+            glUniform1i(enable_gi_loc, enable_gi ? 1 : 0);
+            glUniform1i(gi_samples_loc, gi_samples);
+            glUniform1f(gi_intensity_loc, gi_intensity);
 
             // Set sphere uniforms
             for (size_t i = 0; i < spheres.size(); i++) {
