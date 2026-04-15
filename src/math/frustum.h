@@ -94,19 +94,19 @@ inline Frustum create_frustum(Vec3 position, Vec3 forward, Vec3 up, Vec3 right,
     frustum.planes[5] = Plane(near_normal, -dot(near_center, near_normal));
 
     // Right plane
-    Vec3 right_normal = normalize(cross(up, (forward * far_plane + right * (far_width / 2.0f)) - position));
+    Vec3 right_normal = (cross(up, (forward * far_plane + right * (far_width / 2.0f)) - position)).normalized();
     frustum.planes[0] = Plane(right_normal, -dot(position, right_normal));
 
     // Left plane
-    Vec3 left_normal = normalize(cross((forward * far_plane - right * (far_width / 2.0f)) - position, up));
+    Vec3 left_normal = (cross((forward * far_plane - right * (far_width / 2.0f)) - position, up)).normalized();
     frustum.planes[1] = Plane(left_normal, -dot(position, left_normal));
 
     // Top plane
-    Vec3 top_normal = normalize(cross(right, (forward * far_plane + up * (far_height / 2.0f)) - position));
+    Vec3 top_normal = (cross(right, (forward * far_plane + up * (far_height / 2.0f)) - position)).normalized();
     frustum.planes[2] = Plane(top_normal, -dot(position, top_normal));
 
     // Bottom plane
-    Vec3 bottom_normal = normalize(cross((forward * far_plane - up * (far_height / 2.0f)) - position, right));
+    Vec3 bottom_normal = (cross((forward * far_plane - up * (far_height / 2.0f)) - position, right)).normalized();
     frustum.planes[3] = Plane(bottom_normal, -dot(position, bottom_normal));
 
     return frustum;

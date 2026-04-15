@@ -34,16 +34,17 @@ public:
 
     // Cache-friendly rendering state
     bool enable_morton; // Enable Morton Z-curve ordering
+    bool enable_frustum; // Enable frustum culling
 
     Renderer() : max_depth(5), enable_shadows(true), enable_reflections(true),
                  enable_progressive(false), current_pass(0), max_passes(10),
                  enable_adaptive(false), variance_threshold(0.01f), min_samples(4), max_samples(64),
-                 enable_wavefront(false), wavefront_size(1024), enable_morton(false) {}
+                 enable_wavefront(false), wavefront_size(1024), enable_morton(false), enable_frustum(false) {}
 
     Renderer(int depth) : max_depth(depth), enable_shadows(true), enable_reflections(true),
                           enable_progressive(false), current_pass(0), max_passes(10),
                           enable_adaptive(false), variance_threshold(0.01f), min_samples(4), max_samples(64),
-                          enable_wavefront(false), wavefront_size(1024), enable_morton(false) {}
+                          enable_wavefront(false), wavefront_size(1024), enable_morton(false), enable_frustum(false) {}
 
     // Main ray tracing function
     Color ray_color(const Ray& r, const Scene& scene, int depth) const;

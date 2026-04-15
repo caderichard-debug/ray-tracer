@@ -14,6 +14,9 @@
 #include "stb_image_write.h"
 #include "math/vec3.h"
 #include "math/ray.h"
+#include "math/morton.h"
+#include "math/stratified.h"
+#include "math/frustum.h"
 
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
@@ -416,7 +419,8 @@ public:
     void render(SDL_Renderer* renderer, int window_width, int window_height,
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
                 const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
-                bool enable_progressive = false, bool enable_adaptive = false, bool enable_wavefront = false
+                bool enable_progressive = false, bool enable_adaptive = false, bool enable_wavefront = false,
+                bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false
 #ifdef GPU_RENDERING
                 , RendererType current_renderer = RendererType::CPU
 #endif
@@ -426,7 +430,7 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(750, window_height - 20);  // Increased to accommodate advanced rendering features
+        int panel_height = std::min(850, window_height - 20);  // Increased for Phase 2 optimizations
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
@@ -955,6 +959,124 @@ public:
             SDL_FreeSurface(wavefront_text_surface);
         }
 
+        y_offset += 35;
+
+        // Phase 2 Optimizations section
+        label_surface = TTF_RenderText_Blended(font, "Phase 2 Optimizations:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        // Morton Z-curve toggle button
+        const char* morton_label = enable_morton ? "Morton: ON" : "Morton: OFF";
+        int morton_button_width = 120;
+        SDL_Rect morton_button_rect = {15, y_offset, morton_button_width, 24};
+
+        // Store button for click detection (category 11 = morton)
+        buttons.push_back({{morton_button_rect.x + panel_x, morton_button_rect.y + panel_y, morton_button_rect.w, morton_button_rect.h},
+                          "morton", enable_morton ? 1 : 0, 11});
+
+        // Draw morton button background
+        Uint32 morton_button_bg = SDL_MapRGBA(surface->format,
+            enable_morton ? button_active_color.r : button_color.r,
+            enable_morton ? button_active_color.g : button_color.g,
+            enable_morton ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &morton_button_rect, morton_button_bg);
+
+        // Draw morton button border
+        SDL_Rect morton_border = {morton_button_rect.x, morton_button_rect.y, morton_button_rect.w, 2};
+        SDL_FillRect(surface, &morton_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        morton_border = {morton_button_rect.x, morton_button_rect.y + morton_button_rect.h - 2, morton_button_rect.w, 2};
+        SDL_FillRect(surface, &morton_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw morton button text
+        SDL_Surface* morton_text_surface = TTF_RenderText_Blended(font, morton_label, text_color);
+        if (morton_text_surface) {
+            SDL_Rect morton_text_rect = {
+                morton_button_rect.x + (morton_button_width - morton_text_surface->w) / 2,
+                y_offset + (24 - morton_text_surface->h) / 2,
+                morton_text_surface->w, morton_text_surface->h
+            };
+            SDL_BlitSurface(morton_text_surface, nullptr, surface, &morton_text_rect);
+            SDL_FreeSurface(morton_text_surface);
+        }
+
+        // Stratified sampling toggle button (next to morton)
+        const char* stratified_label = enable_stratified ? "Stratified: ON" : "Stratified: OFF";
+        int stratified_button_width = 120;
+        SDL_Rect stratified_button_rect = {150, y_offset, stratified_button_width, 24};
+
+        // Store button for click detection (category 12 = stratified)
+        buttons.push_back({{stratified_button_rect.x + panel_x, stratified_button_rect.y + panel_y, stratified_button_rect.w, stratified_button_rect.h},
+                          "stratified", enable_stratified ? 1 : 0, 12});
+
+        // Draw stratified button background
+        Uint32 stratified_button_bg = SDL_MapRGBA(surface->format,
+            enable_stratified ? button_active_color.r : button_color.r,
+            enable_stratified ? button_active_color.g : button_color.g,
+            enable_stratified ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &stratified_button_rect, stratified_button_bg);
+
+        // Draw stratified button border
+        SDL_Rect stratified_border = {stratified_button_rect.x, stratified_button_rect.y, stratified_button_rect.w, 2};
+        SDL_FillRect(surface, &stratified_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        stratified_border = {stratified_button_rect.x, stratified_button_rect.y + stratified_button_rect.h - 2, stratified_button_rect.w, 2};
+        SDL_FillRect(surface, &stratified_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw stratified button text
+        SDL_Surface* stratified_text_surface = TTF_RenderText_Blended(font, stratified_label, text_color);
+        if (stratified_text_surface) {
+            SDL_Rect stratified_text_rect = {
+                stratified_button_rect.x + (stratified_button_width - stratified_text_surface->w) / 2,
+                y_offset + (24 - stratified_text_surface->h) / 2,
+                stratified_text_surface->w, stratified_text_surface->h
+            };
+            SDL_BlitSurface(stratified_text_surface, nullptr, surface, &stratified_text_rect);
+            SDL_FreeSurface(stratified_text_surface);
+        }
+
+        y_offset += 35;
+
+        // Frustum culling toggle button (new row)
+        const char* frustum_label = enable_frustum ? "Frustum: ON" : "Frustum: OFF";
+        int frustum_button_width = 120;
+        SDL_Rect frustum_button_rect = {15, y_offset, frustum_button_width, 24};
+
+        // Store button for click detection (category 13 = frustum)
+        buttons.push_back({{frustum_button_rect.x + panel_x, frustum_button_rect.y + panel_y, frustum_button_rect.w, frustum_button_rect.h},
+                          "frustum", enable_frustum ? 1 : 0, 13});
+
+        // Draw frustum button background
+        Uint32 frustum_button_bg = SDL_MapRGBA(surface->format,
+            enable_frustum ? button_active_color.r : button_color.r,
+            enable_frustum ? button_active_color.g : button_color.g,
+            enable_frustum ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &frustum_button_rect, frustum_button_bg);
+
+        // Draw frustum button border
+        SDL_Rect frustum_border = {frustum_button_rect.x, frustum_button_rect.y, frustum_button_rect.w, 2};
+        SDL_FillRect(surface, &frustum_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        frustum_border = {frustum_button_rect.x, frustum_button_rect.y + frustum_button_rect.h - 2, frustum_button_rect.w, 2};
+        SDL_FillRect(surface, &frustum_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw frustum button text
+        SDL_Surface* frustum_text_surface = TTF_RenderText_Blended(font, frustum_label, text_color);
+        if (frustum_text_surface) {
+            SDL_Rect frustum_text_rect = {
+                frustum_button_rect.x + (frustum_button_width - frustum_text_surface->w) / 2,
+                y_offset + (24 - frustum_text_surface->h) / 2,
+                frustum_text_surface->w, frustum_text_surface->h
+            };
+            SDL_BlitSurface(frustum_text_surface, nullptr, surface, &frustum_text_rect);
+            SDL_FreeSurface(frustum_text_surface);
+        }
+
         // Convert surface to texture
 
         // Convert surface to texture
@@ -985,6 +1107,9 @@ public:
         bool progressive_changed;
         bool adaptive_changed;
         bool wavefront_changed;
+        bool morton_changed;
+        bool stratified_changed;
+        bool frustum_changed;
         bool button_clicked;
 
         ClickResult() : quality_changed(false), new_quality(0),
@@ -995,6 +1120,7 @@ public:
                        analysis_mode_changed(false), new_analysis_mode(0),
                        screenshot_requested(false), progressive_changed(false),
                        adaptive_changed(false), wavefront_changed(false),
+                       morton_changed(false), stratified_changed(false), frustum_changed(false),
                        button_clicked(false) {}
     };
 
@@ -1044,6 +1170,15 @@ public:
                         break;
                     case 10: // Wavefront toggle
                         result.wavefront_changed = true;
+                        break;
+                    case 11: // Morton toggle
+                        result.morton_changed = true;
+                        break;
+                    case 12: // Stratified toggle
+                        result.stratified_changed = true;
+                        break;
+                    case 13: // Frustum toggle
+                        result.frustum_changed = true;
                         break;
                 }
                 break;
@@ -1124,6 +1259,9 @@ int main(int argc, char* argv[]) {
     // Rendering feature toggles
     bool enable_shadows = true;
     bool enable_reflections = true;
+    bool enable_morton = false;
+    bool enable_stratified = false;
+    bool enable_frustum = false;
 
     // Create window
     std::string window_title = "Real-time Ray Tracer - CPU (OpenMP)";
@@ -1483,6 +1621,23 @@ int main(int argc, char* argv[]) {
                             // Toggle wavefront rendering
                             ray_renderer.enable_wavefront = !ray_renderer.enable_wavefront;
                             std::cout << "Wavefront rendering: " << (ray_renderer.enable_wavefront ? "ON" : "OFF") << std::endl;
+                            need_render = true;
+                        } else if (click_result.morton_changed) {
+                            // Toggle Morton Z-curve ordering
+                            enable_morton = !enable_morton;
+                            ray_renderer.enable_morton = enable_morton;
+                            std::cout << "Morton Z-curve: " << (enable_morton ? "ON" : "OFF") << std::endl;
+                            need_render = true;
+                        } else if (click_result.stratified_changed) {
+                            // Toggle stratified sampling
+                            enable_stratified = !enable_stratified;
+                            std::cout << "Stratified sampling: " << (enable_stratified ? "ON" : "OFF") << std::endl;
+                            need_render = true;
+                        } else if (click_result.frustum_changed) {
+                            // Toggle frustum culling
+                            enable_frustum = !enable_frustum;
+                            ray_renderer.enable_frustum = enable_frustum;
+                            std::cout << "Frustum culling: " << (enable_frustum ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.resolution_changed) {
                             int new_width = click_result.new_resolution;
@@ -1866,7 +2021,8 @@ int main(int argc, char* argv[]) {
 #else
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
-                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront);
+                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
+                                 enable_morton, enable_stratified, enable_frustum);
 #endif
         }
 
