@@ -62,14 +62,19 @@ phase2: $(BUILD_DIR)
 # Interactive real-time ray tracer with SDL2
 # Features: Real-time rendering, Camera movement, Quality switching
 .PHONY: interactive
-interactive: $(BUILD_DIR)
+.PHONY: interactive-cpu
+interactive-cpu: $(BUILD_DIR)
 	@echo "Building Interactive Real-time Ray Tracer (CPU)"
 	@echo "Features: SDL2 window, Camera controls, Quality levels 1-3"
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) \
 		src/main_cpu_interactive.cpp src/renderer/renderer.cpp \
-		-o $(BUILD_DIR)/raytracer_interactive $(LDFLAGS) $(SDL_LDFLAGS)
-	@echo "✓ Interactive built: $(BUILD_DIR)/raytracer_interactive"
-	@ln -sf $(BUILD_DIR)/raytracer_interactive raytracer_interactive
+		-o $(BUILD_DIR)/raytracer_interactive_cpu $(LDFLAGS) $(SDL_LDFLAGS)
+	@echo "✓ Interactive CPU built: $(BUILD_DIR)/raytracer_interactive_cpu"
+	@ln -sf $(BUILD_DIR)/raytracer_interactive_cpu raytracer_interactive_cpu
+
+# Convenience target for backward compatibility
+.PHONY: interactive
+interactive: interactive-cpu
 
 # Interactive real-time ray tracer with GPU support
 # Features: GPU-accelerated rendering, Camera movement, Quality switching
@@ -144,17 +149,21 @@ phase6:
 	@echo "⚠️  Phase 6 not yet implemented"
 
 # Run current phase
-.PHONY: run runi runi-gpu run-gpu-working test-int
+.PHONY: run runi-cpu runi-gpu run-gpu-interactive test-int
 run: phase2
 	@echo "Running ray tracer (Phase 2)..."
 	./$(BINARY) > output.ppm
 	@echo "✓ Output written to output.ppm"
 
 # Run interactive real-time ray tracer (CPU)
-runi: interactive
+runi-cpu: interactive-cpu
 	@echo "Starting interactive real-time ray tracer (CPU)..."
 	@echo "Controls: WASD=Move, Mouse=Look, 1-3=Quality, R=Toggle GPU, H=Help, Space=Pause, ESC=Quit"
-	./raytracer_interactive
+	./raytracer_interactive_cpu
+
+# Convenience target for backward compatibility
+.PHONY: runi
+runi: runi-cpu
 
 # Run interactive real-time ray tracer (GPU)
 runi-gpu: interactive-gpu
@@ -252,23 +261,18 @@ help:
 	@echo "Building:"
 	@echo "  make phase1        - Build Phase 1 (scalar foundation)"
 	@echo "  make phase2        - Build Phase 2 (basic rendering) [default]"
-	@echo "  make interactive   - Build real-time interactive ray tracer (CPU)"
-	@echo "  make interactive-gpu - Build real-time interactive ray tracer (GPU)"
-	@echo "  make gpu-only      - Build GPU ray tracer (OpenGL 4.3+ compute shaders)"
-	@echo "  make gpu-legacy    - Build GPU ray tracer (OpenGL 2.0+ fragment shaders)"
-	@echo "  make gpu-fragment  - Build GPU ray tracer with full CPU feature parity (OpenGL 3.3+)"
-	@echo "  make gpu-interactive - Build INTERACTIVE GPU ray tracer (GLSL 1.20 - OpenGL 2.0+)"
-	@echo "  make ascii         - Build ASCII terminal ray tracer (RETRO STYLE)"
-	@echo "  make all           - Build all implemented phases"
+	@echo "  make interactive-cpu   - Build real-time interactive ray tracer (CPU)"
+	@echo "  make interactive-gpu   - Build real-time interactive ray tracer (GPU)"
+	@echo "  make gpu-interactive   - Build standalone INTERACTIVE GPU ray tracer (GLSL 1.20)"
+	@echo "  make ascii            - Build ASCII terminal ray tracer (RETRO STYLE)"
+	@echo "  make all              - Build all implemented phases"
 	@echo ""
 	@echo "Running:"
-	@echo "  make run           - Build and run batch ray tracer"
-	@echo "  make runi          - Build and run interactive ray tracer (CPU)"
-	@echo "  make runi-gpu      - Build and run interactive ray tracer (GPU)"
-	@echo "  make run-gpu-legacy - Build and run legacy GPU ray tracer"
-	@echo "  make run-gpu-fragment - Build and run GPU fragment ray tracer (full CPU parity)"
-	@echo "  make run-gpu-interactive - Build and run INTERACTIVE GPU ray tracer"
-	@echo "  make runa          - Build and run ASCII terminal ray tracer (RETRO!)"
+	@echo "  make run              - Build and run batch ray tracer"
+	@echo "  make runi-cpu         - Build and run interactive ray tracer (CPU)"
+	@echo "  make runi-gpu         - Build and run interactive ray tracer (GPU)"
+	@echo "  make run-gpu-interactive - Build and run standalone INTERACTIVE GPU"
+	@echo "  make runa             - Build and run ASCII terminal ray tracer (RETRO!)"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
 	@echo "Testing:"
