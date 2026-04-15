@@ -557,9 +557,9 @@ public:
 
         // Create smaller semi-transparent background
         SDL_Rect overlay_rect = {
-            (window_width - 420) / 2,
+            (window_width - 440) / 2,
             (window_height - 340) / 2,
-            420,
+            440,
             340
         };
 
@@ -573,7 +573,7 @@ public:
         const char* title_text = "HELP";
         SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
         if (title_surface) {
-            SDL_Rect title_rect = {(420 - title_surface->w) / 2, 12, title_surface->w, title_surface->h};
+            SDL_Rect title_rect = {(440 - title_surface->w) / 2, 12, title_surface->w, title_surface->h};
             SDL_BlitSurface(title_surface, nullptr, surface, &title_rect);
             SDL_FreeSurface(title_surface);
         }
@@ -591,7 +591,7 @@ public:
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, controls_text[i], text_color);
 
             if (text_surface) {
-                SDL_Rect text_rect = {(420 - text_surface->w) / 2, y_offset, text_surface->w, text_surface->h};
+                SDL_Rect text_rect = {(440 - text_surface->w) / 2, y_offset, text_surface->w, text_surface->h};
                 SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
                 SDL_FreeSurface(text_surface);
             }
@@ -602,7 +602,7 @@ public:
         const char* footer = "Press H to close";
         SDL_Surface* footer_surface = TTF_RenderText_Blended(font, footer, text_color);
         if (footer_surface) {
-            SDL_Rect footer_rect = {(400 - footer_surface->w) / 2, 280, footer_surface->w, footer_surface->h};
+            SDL_Rect footer_rect = {(440 - footer_surface->w) / 2, 280, footer_surface->w, footer_surface->h};
             SDL_BlitSurface(footer_surface, nullptr, surface, &footer_rect);
             SDL_FreeSurface(footer_surface);
         }
@@ -703,7 +703,7 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(536, window_height - 20);
+        int panel_height = std::min(550, window_height - 20);
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
