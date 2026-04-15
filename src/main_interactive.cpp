@@ -298,7 +298,7 @@ struct QualityPreset {
 };
 
 QualityPreset quality_levels[] = {
-    {320, 1, 1, "Preview (Ultra Fast)"},
+    {1280, 1, 1, "Preview (Ultra Fast)"},  // 4x bigger window
     {640, 1, 3, "Low (Fast)"},
     {800, 4, 3, "Medium"},
     {1280, 16, 5, "High"},
@@ -338,6 +338,33 @@ bool is_quality_safe(const QualityPreset& preset) {
         return false;
     }
 
+    return true;
+}
+
+// Check if samples per pixel is safe for current resolution
+bool is_samples_safe(int samples, int width) {
+    int height = width * 9 / 16;
+    int pixels = width * height;
+    int rays = pixels * samples;
+
+    // Conservative limit for interactive use: max 50M rays
+    if (rays > 50000000) {
+        return false;
+    }
+
+    return true;
+}
+
+// Validate current settings are safe, returns true if safe
+bool validate_current_settings(const QualityPreset& preset) {
+    if (!is_samples_safe(preset.samples, preset.width)) {
+        std::cout << "\n⚠️  DANGER: Current settings are UNSAFE!\n";
+        std::cout << "  Resolution: " << preset.width << "x" << (preset.width * 9 / 16) << "\n";
+        std::cout << "  Samples: " << preset.samples << " (must be < 8)\n";
+        std::cout << "  This combination may crash the application.\n";
+        std::cout << "  Please reduce samples or resolution.\n\n";
+        return false;
+    }
     return true;
 }
 
@@ -384,9 +411,9 @@ public:
 
 public:
     CameraController()
-        : position(0, 2, 15), lookat(0, 2, 0), vup(0, 1, 0),
+        : position(0, 0, 8), lookat(0, 0, 0), vup(0, 1, 0),
           vfov(60), aspect_ratio(16.0f / 9.0f), aperture(0.0f),
-          dist_to_focus(3.0f), yaw(-180.0f), pitch(0.0f) {
+          dist_to_focus(3.0f), yaw(-90.0f), pitch(0.0f) {
         update_from_angles();
     }
 
@@ -578,14 +605,30 @@ private:
     SDL_Color background_color;
     SDL_Color title_color;
     SDL_Color value_color;
+    SDL_Color button_color;
+    SDL_Color button_hover_color;
+    SDL_Color button_active_color;
     bool initialized;
 
+    // Button regions for click detection
+    struct Button {
+        SDL_Rect rect;
+        std::string label;
+        int value;
+        int category; // 0: quality, 1: samples, 2: depth, 3: shadows, 4: reflections, 5: resolution, 6: debug
+    };
+    std::vector<Button> buttons;
+    int panel_x, panel_y;
+
 public:
-    ControlsPanel() : font(nullptr), title_font(nullptr), initialized(false) {
+    ControlsPanel() : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0) {
         text_color = {20, 20, 20, 255};
         background_color = {50, 50, 60, 230};  // Dark blue-gray
         title_color = {100, 200, 255, 255};     // Light blue
         value_color = {255, 200, 100, 255};     // Orange
+        button_color = {70, 70, 90, 255};
+        button_hover_color = {90, 90, 110, 255};
+        button_active_color = {100, 150, 200, 255};
     }
 
     bool init() {
@@ -627,18 +670,16 @@ public:
 
     void render(SDL_Renderer* renderer, int window_width, int window_height,
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
-                const char* analysis_mode_name = nullptr) {
+                const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true) {
+        (void)window_height;  // Only used to calculate aspect ratio
         if (!initialized || !font || !title_font) return;
 
-        // Panel positioned in top-right corner
-        int panel_width = 320;
-        int panel_height = 260;
-        SDL_Rect overlay_rect = {
-            window_width - panel_width - 10,
-            10,
-            panel_width,
-            panel_height
-        };
+        // Panel positioned in top-right corner, scales with window size
+        int panel_width = std::min(420, window_width - 20);
+        int panel_height = std::min(640, window_height - 20);
+        panel_x = window_width - panel_width - 10;
+        panel_y = 10;
+        SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
 
         SDL_Surface* surface = SDL_CreateRGBSurface(0, overlay_rect.w, overlay_rect.h, 32, 0, 0, 0, 0);
         if (!surface) return;
@@ -647,7 +688,7 @@ public:
         SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 50, 50, 60, 230));
 
         // Render title
-        const char* title_text = "⚙️ QUALITY SETTINGS";
+        const char* title_text = "⚙️ INTERACTIVE CONTROLS";
         SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
         if (title_surface) {
             SDL_Rect title_rect = {15, 10, title_surface->w, title_surface->h};
@@ -660,11 +701,11 @@ public:
         SDL_FillRect(surface, &separator, SDL_MapRGBA(surface->format, 100, 100, 120, 255));
 
         int y_offset = 50;
-        const int line_height = 32;
+        const int line_height = 28;
+        buttons.clear(); // Clear previous buttons
 
         // Helper lambda to render label-value pairs
         auto render_setting = [&](const char* label, const char* value) {
-            // Label
             SDL_Surface* label_surface = TTF_RenderText_Blended(font, label, text_color);
             if (label_surface) {
                 SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
@@ -672,7 +713,6 @@ public:
                 SDL_FreeSurface(label_surface);
             }
 
-            // Value
             SDL_Surface* value_surface = TTF_RenderText_Blended(font, value, value_color);
             if (value_surface) {
                 SDL_Rect value_rect = {panel_width - value_surface->w - 15, y_offset, value_surface->w, value_surface->h};
@@ -688,29 +728,374 @@ public:
         snprintf(fps_str, sizeof(fps_str), "%.1f FPS", fps);
         snprintf(time_str, sizeof(time_str), "%.3f s", render_time);
 
-        render_setting("Quality Level:", std::to_string(quality_idx + 1).c_str());
-        render_setting("Preset Name:", preset.name);
+        render_setting("Quality:", preset.name);
         render_setting("Resolution:", (std::to_string(preset.width) + "x" + std::to_string(preset.width * 9 / 16)).c_str());
-        render_setting("Samples/Pixel:", std::to_string(preset.samples).c_str());
-        render_setting("Max Depth:", std::to_string(preset.max_depth).c_str());
-        render_setting("Performance:", fps_str);
-        render_setting("Render Time:", time_str);
+        render_setting("Samples:", std::to_string(preset.samples).c_str());
+        render_setting("Depth:", std::to_string(preset.max_depth).c_str());
+        render_setting("FPS:", fps_str);
 
-        // Show analysis mode if active
-        if (analysis_mode_name) {
-            y_offset += 5;  // Extra spacing
-            render_setting("Analysis Mode:", analysis_mode_name);
-        }
+        // Always show analysis mode
+        const char* current_analysis = analysis_mode_name ? analysis_mode_name : "None";
+        render_setting("Analysis:", current_analysis);
 
-        // Add controls hint
         y_offset += 10;
-        const char* hint = "Press 1-6 to change quality";
-        SDL_Surface* hint_surface = TTF_RenderText_Blended(font, hint, title_color);
-        if (hint_surface) {
-            SDL_Rect hint_rect = {(panel_width - hint_surface->w) / 2, y_offset, hint_surface->w, hint_surface->h};
-            SDL_BlitSurface(hint_surface, nullptr, surface, &hint_rect);
-            SDL_FreeSurface(hint_surface);
+
+        // Helper lambda to render a button
+        auto render_button = [&](const char* label, int value, int category, bool is_active) {
+            int button_width = 50;
+            int button_height = 24;
+            int button_spacing = 5;
+            static int button_x = 15;
+            static int buttons_in_row = 0;
+
+            if (buttons.empty() || buttons.back().category != category) {
+                button_x = 15;
+                buttons_in_row = 0;
+            }
+
+            SDL_Rect button_rect = {button_x, y_offset, button_width, button_height};
+
+            // Store button for click detection
+            buttons.push_back({{button_rect.x + panel_x, button_rect.y + panel_y, button_rect.w, button_rect.h},
+                              label, value, category});
+
+            // Draw button background
+            Uint32 button_bg;
+            if (is_active) {
+                button_bg = SDL_MapRGBA(surface->format, 100, 150, 200, 255);
+            } else {
+                button_bg = SDL_MapRGBA(surface->format, 70, 70, 90, 255);
+            }
+            SDL_FillRect(surface, &button_rect, button_bg);
+
+            // Draw button border
+            SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
+            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+            border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
+            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+            // Draw button text
+            SDL_Surface* text_surface = TTF_RenderText_Blended(font, label, text_color);
+            if (text_surface) {
+                SDL_Rect text_rect = {
+                    button_x + (button_width - text_surface->w) / 2,
+                    y_offset + (button_height - text_surface->h) / 2,
+                    text_surface->w, text_surface->h
+                };
+                SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
+                SDL_FreeSurface(text_surface);
+            }
+
+            button_x += button_width + button_spacing;
+            buttons_in_row++;
+
+            if (buttons_in_row >= 7) {
+                button_x = 15;
+                buttons_in_row = 0;
+                y_offset += button_height + button_spacing;
+            }
+        };
+
+        // Extended button renderer with custom text and colors
+        auto render_button_ext = [&](const char* prefix, const char* label, int category, bool is_active, SDL_Color custom_color) {
+            int button_width = 60;
+            int button_height = 24;
+            int button_spacing = 8;
+
+            static int button_x_ext = 15;
+            static int buttons_in_row_ext = 0;
+
+            if (buttons.empty() || buttons.back().category != category) {
+                button_x_ext = 15;
+                buttons_in_row_ext = 0;
+            }
+
+            // Split into label text and button
+            SDL_Surface* prefix_surface = TTF_RenderText_Blended(font, prefix, text_color);
+            if (prefix_surface) {
+                SDL_Rect prefix_rect = {button_x_ext, y_offset, prefix_surface->w, prefix_surface->h};
+                SDL_BlitSurface(prefix_surface, nullptr, surface, &prefix_rect);
+                SDL_FreeSurface(prefix_surface);
+                button_x_ext += prefix_surface->w + 5;
+            }
+
+            SDL_Rect button_rect = {button_x_ext, y_offset, button_width, button_height};
+
+            // Store button for click detection
+            buttons.push_back({{button_rect.x + panel_x, button_rect.y + panel_y, button_rect.w, button_rect.h},
+                              label, is_active ? 1 : 0, category});
+
+            // Draw button background with custom color
+            Uint32 button_bg = SDL_MapRGBA(surface->format, custom_color.r, custom_color.g, custom_color.b, custom_color.a);
+            SDL_FillRect(surface, &button_rect, button_bg);
+
+            // Draw button border
+            SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
+            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+            border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
+            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+            // Draw button text
+            SDL_Surface* text_surface = TTF_RenderText_Blended(font, label, text_color);
+            if (text_surface) {
+                SDL_Rect text_rect = {
+                    button_x_ext + (button_width - text_surface->w) / 2,
+                    y_offset + (button_height - text_surface->h) / 2,
+                    text_surface->w, text_surface->h
+                };
+                SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
+                SDL_FreeSurface(text_surface);
+            }
+
+            button_x_ext += button_width + button_spacing;
+            buttons_in_row_ext++;
+
+            if (buttons_in_row_ext >= 2) {
+                button_x_ext = 15;
+                buttons_in_row_ext = 0;
+                y_offset += button_height + button_spacing;
+            }
+        };
+
+        // Quality level buttons
+        SDL_Surface* label_surface = TTF_RenderText_Blended(font, "Quality Level:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
         }
+        y_offset += 22;
+
+        for (int i = 0; i < 6; i++) {
+            char label[8];
+            snprintf(label, sizeof(label), "%d", i + 1);
+            render_button(label, i, 0, i == quality_idx);
+        }
+        y_offset += 35;
+
+        // Samples per pixel buttons
+        label_surface = TTF_RenderText_Blended(font, "Samples Per Pixel:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        // Samples per pixel options
+        int sample_values[] = {1, 4, 8, 16};
+        for (int s : sample_values) {
+            char label[8];
+            if (s >= 100) {
+                snprintf(label, sizeof(label), "%d", s);
+            } else {
+                snprintf(label, sizeof(label), "%d", s);
+            }
+            bool is_active = (preset.samples == s);
+            render_button(label, s, 1, is_active);
+        }
+        y_offset += 35;
+
+        // Max depth buttons
+        label_surface = TTF_RenderText_Blended(font, "Max Depth:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        int depth_values[] = {1, 3, 5, 8};
+        for (int d : depth_values) {
+            char label[8];
+            snprintf(label, sizeof(label), "%d", d);
+            bool is_active = (preset.max_depth == d);
+            render_button(label, d, 2, is_active);
+        }
+        y_offset += 35;
+
+        y_offset += 22;
+
+        // Resolution buttons
+        label_surface = TTF_RenderText_Blended(font, "Resolution:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        int resolution_values[] = {640, 960, 1280, 1600, 1920};
+        const char* resolution_names[] = {"Low", "Medium", "High", "Ultra", "Max"};
+        const char* resolution_desc[] = {
+            "Fast",
+            "Good",
+            "High",
+            "Ultra",
+            "Maximum"
+        };
+
+        for (int i = 0; i < 5; i++) {
+            bool is_active = (preset.width == resolution_values[i]);
+            render_button(resolution_names[i], resolution_values[i], 5, is_active);
+        }
+        y_offset += 35;
+
+        y_offset += 22;
+
+        // Render Features section
+        label_surface = TTF_RenderText_Blended(font, "Render Features:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        // Shadows toggle button
+        const char* shadows_label = enable_shadows ? "Shadows: ON" : "Shadows: OFF";
+        int shadows_button_width = 110;
+        SDL_Rect shadows_button_rect = {15, y_offset, shadows_button_width, 24};
+
+        // Store button for click detection (category 3 = shadows)
+        buttons.push_back({{shadows_button_rect.x + panel_x, shadows_button_rect.y + panel_y, shadows_button_rect.w, shadows_button_rect.h},
+                          "shadows", enable_shadows ? 1 : 0, 3});
+
+        // Draw shadows button background
+        Uint32 shadows_button_bg = SDL_MapRGBA(surface->format,
+            enable_shadows ? button_active_color.r : button_color.r,
+            enable_shadows ? button_active_color.g : button_color.g,
+            enable_shadows ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &shadows_button_rect, shadows_button_bg);
+
+        // Draw shadows button border
+        SDL_Rect shadows_border = {shadows_button_rect.x, shadows_button_rect.y, shadows_button_rect.w, 2};
+        SDL_FillRect(surface, &shadows_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        shadows_border = {shadows_button_rect.x, shadows_button_rect.y + shadows_button_rect.h - 2, shadows_button_rect.w, 2};
+        SDL_FillRect(surface, &shadows_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw shadows button text
+        SDL_Surface* shadows_text_surface = TTF_RenderText_Blended(font, shadows_label, text_color);
+        if (shadows_text_surface) {
+            SDL_Rect shadows_text_rect = {
+                shadows_button_rect.x + (shadows_button_width - shadows_text_surface->w) / 2,
+                y_offset + (24 - shadows_text_surface->h) / 2,
+                shadows_text_surface->w, shadows_text_surface->h
+            };
+            SDL_BlitSurface(shadows_text_surface, nullptr, surface, &shadows_text_rect);
+            SDL_FreeSurface(shadows_text_surface);
+        }
+
+        // Reflections toggle button (next to shadows)
+        const char* reflections_label = enable_reflections ? "Reflections: ON" : "Reflections: OFF";
+        int reflections_button_width = 130;
+        SDL_Rect reflections_button_rect = {140, y_offset, reflections_button_width, 24};
+
+        // Store button for click detection (category 4 = reflections)
+        buttons.push_back({{reflections_button_rect.x + panel_x, reflections_button_rect.y + panel_y, reflections_button_rect.w, reflections_button_rect.h},
+                          "reflections", enable_reflections ? 1 : 0, 4});
+
+        // Draw reflections button background
+        Uint32 reflections_button_bg = SDL_MapRGBA(surface->format,
+            enable_reflections ? button_active_color.r : button_color.r,
+            enable_reflections ? button_active_color.g : button_color.g,
+            enable_reflections ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(surface, &reflections_button_rect, reflections_button_bg);
+
+        // Draw reflections button border
+        SDL_Rect reflections_border = {reflections_button_rect.x, reflections_button_rect.y, reflections_button_rect.w, 2};
+        SDL_FillRect(surface, &reflections_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+        reflections_border = {reflections_button_rect.x, reflections_button_rect.y + reflections_button_rect.h - 2, reflections_button_rect.w, 2};
+        SDL_FillRect(surface, &reflections_border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+        // Draw reflections button text
+        SDL_Surface* reflections_text_surface = TTF_RenderText_Blended(font, reflections_label, text_color);
+        if (reflections_text_surface) {
+            SDL_Rect reflections_text_rect = {
+                reflections_button_rect.x + (reflections_button_width - reflections_text_surface->w) / 2,
+                y_offset + (24 - reflections_text_surface->h) / 2,
+                reflections_text_surface->w, reflections_text_surface->h
+            };
+            SDL_BlitSurface(reflections_text_surface, nullptr, surface, &reflections_text_rect);
+            SDL_FreeSurface(reflections_text_surface);
+        }
+
+        y_offset += 35;
+
+        // Debug features section
+        label_surface = TTF_RenderText_Blended(font, "Debug Features:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        // Individual analysis mode buttons
+        const char* analysis_modes[] = {"None", "Normals", "Depth", "Albedo"};
+        AnalysisMode modes[] = {
+            AnalysisMode::NORMAL,
+            AnalysisMode::NORMALS,
+            AnalysisMode::DEPTH,
+            AnalysisMode::ALBEDO
+        };
+
+        // Determine current mode from mode_name
+        AnalysisMode current_mode = AnalysisMode::NORMAL;
+        if (analysis_mode_name) {
+            for (int i = 0; i < 4; i++) {
+                if (strcmp(analysis_mode_name, analysis_modes[i]) == 0) {
+                    current_mode = modes[i];
+                    break;
+                }
+            }
+        }
+
+        // Manually layout debug buttons in 1 row
+        int button_width = 85;  // Wider for longer text
+        int button_height = 24;
+        int button_spacing = 5;
+        int start_x = 15;
+
+        // Single row: None, Normals, Depth, Albedo
+        for (int i = 0; i < 4; i++) {
+            bool is_active = (current_mode == modes[i]);
+            SDL_Rect button_rect = {start_x + i * (button_width + button_spacing), y_offset, button_width, button_height};
+
+            // Store button for click detection (category 6 = debug modes)
+            buttons.push_back({{button_rect.x + panel_x, button_rect.y + panel_y, button_rect.w, button_rect.h},
+                              analysis_modes[i], static_cast<int>(modes[i]), 6});
+
+            // Draw button background
+            Uint32 button_bg = SDL_MapRGBA(surface->format,
+                is_active ? button_active_color.r : button_color.r,
+                is_active ? button_active_color.g : button_color.g,
+                is_active ? button_active_color.b : button_color.b,
+                255);
+            SDL_FillRect(surface, &button_rect, button_bg);
+
+            // Draw button border
+            SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
+            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+            border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
+            SDL_FillRect(surface, &border, SDL_MapRGBA(surface->format, 120, 120, 140, 255));
+
+            // Draw button text
+            SDL_Surface* text_surface = TTF_RenderText_Blended(font, analysis_modes[i], text_color);
+            if (text_surface) {
+                SDL_Rect text_rect = {
+                    button_rect.x + (button_width - text_surface->w) / 2,
+                    y_offset + (button_height - text_surface->h) / 2,
+                    text_surface->w, text_surface->h
+                };
+                SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
+                SDL_FreeSurface(text_surface);
+            }
+        }
+
+        // Convert surface to texture
 
         // Convert surface to texture
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -722,6 +1107,73 @@ public:
         SDL_FreeSurface(surface);
     }
 
+    // Handle mouse clicks, returns true if a setting was changed
+    struct ClickResult {
+        bool quality_changed;
+        int new_quality;
+        bool samples_changed;
+        int new_samples;
+        bool depth_changed;
+        int new_depth;
+        bool resolution_changed;
+        int new_resolution;
+        bool shadows_changed;
+        bool reflections_changed;
+        bool analysis_mode_changed;
+        int new_analysis_mode;
+        bool button_clicked;
+
+        ClickResult() : quality_changed(false), new_quality(0),
+                       samples_changed(false), new_samples(1),
+                       depth_changed(false), new_depth(1),
+                       resolution_changed(false), new_resolution(0),
+                       shadows_changed(false), reflections_changed(false),
+                       analysis_mode_changed(false), new_analysis_mode(0),
+                       button_clicked(false) {}
+    };
+
+    ClickResult handle_click(int mouse_x, int mouse_y) {
+        ClickResult result;
+        for (const auto& button : buttons) {
+            if (mouse_x >= button.rect.x && mouse_x < button.rect.x + button.rect.w &&
+                mouse_y >= button.rect.y && mouse_y < button.rect.y + button.rect.h) {
+
+                result.button_clicked = true;
+
+                switch (button.category) {
+                    case 0: // Quality level
+                        result.quality_changed = true;
+                        result.new_quality = button.value;
+                        break;
+                    case 1: // Samples
+                        result.samples_changed = true;
+                        result.new_samples = button.value;
+                        break;
+                    case 2: // Depth
+                        result.depth_changed = true;
+                        result.new_depth = button.value;
+                        break;
+                    case 3: // Shadows toggle
+                        result.shadows_changed = true;
+                        break;
+                    case 4: // Reflections toggle
+                        result.reflections_changed = true;
+                        break;
+                    case 5: // Resolution
+                        result.resolution_changed = true;
+                        result.new_resolution = button.value;
+                        break;
+                    case 6: // Analysis mode
+                        result.analysis_mode_changed = true;
+                        result.new_analysis_mode = button.value;
+                        break;
+                }
+                break;
+            }
+        }
+        return result;
+    }
+
     ~ControlsPanel() {
         if (font) TTF_CloseFont(font);
         if (title_font) TTF_CloseFont(title_font);
@@ -729,9 +1181,57 @@ public:
     }
 };
 
+// Crash handler signal handling
+#include <signal.h>
+#include <execinfo.h>
+
+void crash_handler(int sig) {
+    void *array[10];
+    size_t size;
+
+    // Get void*'s for all entries on the stack
+    size = backtrace(array, 10);
+
+    // Print out all the frames to stderr
+    fprintf(stderr, "\n=== CRASH DETECTED ===\n");
+    fprintf(stderr, "Error: signal %d:\n", sig);
+
+    // Print backtrace symbols
+    char** strings = backtrace_symbols(array, size);
+    if (strings) {
+        for (size_t i = 0; i < size; i++) {
+            fprintf(stderr, "  %s\n", strings[i]);
+        }
+        free(strings);
+    }
+
+    fprintf(stderr, "\nCurrent settings:\n");
+    fprintf(stderr, "  Resolution: ??? x ???\n");
+    fprintf(stderr, "  Samples: ???\n");
+    fprintf(stderr, "  Depth: ???\n");
+    fprintf(stderr, "\nThe ray tracer has crashed. This may be due to:\n");
+    fprintf(stderr, "  - Samples per pixel too high for current resolution\n");
+    fprintf(stderr, "  - Memory exhaustion\n");
+    fprintf(stderr, "  - GPU driver issues (if using GPU renderer)\n");
+    fprintf(stderr, "  - Known bugs in ray tracing code\n");
+    fprintf(stderr, "\nTo prevent crashes:\n");
+    fprintf(stderr, "  - Keep samples per pixel < 8\n");
+    fprintf(stderr, "  - Use lower quality presets (1-3)\n");
+    fprintf(stderr, "  - Switch to CPU renderer if GPU renderer crashes\n");
+    fprintf(stderr, "\n======================\n\n");
+
+    exit(1);
+}
+
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
+
+    // Install crash handler for interactive mode
+    signal(SIGSEGV, crash_handler);   // Segmentation fault
+    signal(SIGABRT, crash_handler);   // Abort
+    signal(SIGFPE, crash_handler);    // Floating point exception
+    signal(SIGILL, crash_handler);    // Illegal instruction
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -742,6 +1242,10 @@ int main(int argc, char* argv[]) {
     // Initial quality level
     int current_quality = 0; // Start at "Preview (Ultra Fast)" quality
     QualityPreset preset = quality_levels[current_quality];
+
+    // Rendering feature toggles
+    bool enable_shadows = true;
+    bool enable_reflections = true;
 
     // Setup OpenGL for GPU rendering
 #ifdef USE_GPU_RENDERER
@@ -824,6 +1328,9 @@ int main(int argc, char* argv[]) {
         image_height
     );
 
+    // Set texture scaling to linear for smooth upscaling
+    SDL_SetTextureScaleMode(texture, SDL_ScaleModeLinear);
+
     if (!texture) {
         std::cerr << "SDL_CreateTexture failed: " << SDL_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);
@@ -857,6 +1364,8 @@ int main(int argc, char* argv[]) {
     std::cout << "GPU Renderer initialized (OpenGL 3.3)" << std::endl;
 #else
     Renderer ray_renderer(preset.max_depth);
+    ray_renderer.enable_shadows = enable_shadows;
+    ray_renderer.enable_reflections = enable_reflections;
     std::cout << "CPU Renderer initialized (OpenMP with " << omp_get_max_threads() << " threads)" << std::endl;
 #endif
 
@@ -924,8 +1433,10 @@ int main(int argc, char* argv[]) {
     std::cout << "  WASD          - Move camera\n";
     std::cout << "  Arrow Keys    - Move up/down\n";
     std::cout << "  Mouse         - Look around (when captured)\n";
-    std::cout << "  Left Click    - Capture/release mouse\n";
+    std::cout << "  Left Click    - Capture/release mouse or click panel buttons\n";
     std::cout << "  1-6           - Change quality level\n";
+    std::cout << "  C             - Toggle interactive controls panel\n";
+    std::cout << "  H             - Toggle help overlay\n";
     std::cout << "  H             - Toggle help overlay\n";
     std::cout << "  Space         - Pause rendering\n";
     std::cout << "  S             - Save screenshot (screenshots/screenshot_*.png)\n";
@@ -960,7 +1471,7 @@ int main(int argc, char* argv[]) {
                         break;
                     case SDLK_m: {  // Cycle analysis modes
                         int mode = static_cast<int>(analysis.get_mode());
-                        mode = (mode + 1) % 6;  // 6 analysis modes
+                        mode = (mode + 1) % 4;  // 4 analysis modes
                         analysis.set_mode(static_cast<AnalysisMode>(mode));
                         std::cout << "Analysis mode: " << analysis.get_mode_name() << std::endl;
                         need_render = true;
@@ -1041,6 +1552,8 @@ int main(int argc, char* argv[]) {
 #else
                             // Update CPU renderer (keep window size, only change quality)
                             ray_renderer = Renderer(preset.max_depth);
+                            ray_renderer.enable_shadows = enable_shadows;
+                            ray_renderer.enable_reflections = enable_reflections;
                             std::cout << "Quality: " << preset.name << " (" << preset.samples
                                      << " samples, depth " << preset.max_depth << ")" << std::endl;
 #endif
@@ -1051,8 +1564,135 @@ int main(int argc, char* argv[]) {
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
-                    SDL_bool captured = SDL_GetRelativeMouseMode();
-                    SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
+                    // Check if clicking on controls panel
+                    if (show_controls) {
+                        auto click_result = controls_panel.handle_click(event.button.x, event.button.y);
+                        if (click_result.quality_changed) {
+                            current_quality = click_result.new_quality;
+                            preset = quality_levels[current_quality];
+#ifdef USE_GPU_RENDERER
+                            std::cout << "Quality: " << preset.name << " (" << preset.samples
+                                     << " samples, depth " << preset.max_depth << ")" << std::endl;
+#else
+                            ray_renderer = Renderer(preset.max_depth);
+                            ray_renderer.enable_shadows = enable_shadows;
+                            ray_renderer.enable_reflections = enable_reflections;
+                            std::cout << "Quality: " << preset.name << " (" << preset.samples
+                                     << " samples, depth " << preset.max_depth << ")" << std::endl;
+#endif
+                            need_render = true;
+                        } else if (click_result.samples_changed) {
+                            // Safety check for samples
+                            int new_samples = click_result.new_samples;
+                            if (!is_samples_safe(new_samples, preset.width)) {
+                                int height = preset.width * 9 / 16;
+                                int pixels = preset.width * height;
+                                int rays = pixels * new_samples;
+                                std::cout << "\n⚠️  UNSAFE SAMPLES SETTING!\n";
+                                std::cout << "  Requested: " << new_samples << " samples\n";
+                                std::cout << "  Current resolution: " << preset.width << "x" << height << "\n";
+                                std::cout << "  Total rays would be: " << rays << " (" << (rays / 1000000) << " MRays)\n";
+                                std::cout << "  This exceeds safe limits for interactive use.\n";
+                                std::cout << "  Samples limited to < 8 for stability.\n";
+                                std::cout << "  Change rejected. Please choose a lower value.\n";
+                            } else {
+                                preset.samples = new_samples;
+                                std::cout << "Samples: " << preset.samples << std::endl;
+                                need_render = true;
+                            }
+                        } else if (click_result.depth_changed) {
+                            preset.max_depth = click_result.new_depth;
+#ifdef USE_GPU_RENDERER
+                            std::cout << "Depth: " << preset.max_depth << std::endl;
+#else
+                            ray_renderer = Renderer(preset.max_depth);
+                            ray_renderer.enable_shadows = enable_shadows;
+                            ray_renderer.enable_reflections = enable_reflections;
+                            std::cout << "Depth: " << preset.max_depth << std::endl;
+#endif
+                            need_render = true;
+                        } else if (click_result.shadows_changed) {
+                            enable_shadows = !enable_shadows;
+#ifndef USE_GPU_RENDERER
+                            ray_renderer.enable_shadows = enable_shadows;
+#endif
+                            std::cout << "Shadows: " << (enable_shadows ? "ON" : "OFF") << std::endl;
+                            need_render = true;
+                        } else if (click_result.reflections_changed) {
+                            enable_reflections = !enable_reflections;
+#ifndef USE_GPU_RENDERER
+                            ray_renderer.enable_reflections = enable_reflections;
+#endif
+                            std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
+                            need_render = true;
+                        } else if (click_result.analysis_mode_changed) {
+                            // Specific analysis mode selected - only if different from current
+                            AnalysisMode new_mode = static_cast<AnalysisMode>(click_result.new_analysis_mode);
+                            if (new_mode != analysis.get_mode()) {
+                                analysis.set_mode(new_mode);
+                                std::cout << "Analysis mode: " << analysis.get_mode_name() << std::endl;
+                                need_render = true;
+                            }
+                        } else if (click_result.resolution_changed) {
+                            int new_width = click_result.new_resolution;
+                            if (!is_samples_safe(preset.samples, new_width)) {
+                                std::cout << "⚠️  Unsafe resolution for current samples. Please reduce samples first.\n";
+                            } else {
+                                int old_width = image_width;
+                                int old_height = image_height;
+
+                                preset.width = new_width;
+                                image_width = preset.width;
+                                image_height = static_cast<int>(preset.width / (16.0f / 9.0f));
+
+                                std::cout << "=== RESOLUTION CHANGE ===\n";
+                                std::cout << "Rendering resolution: " << image_width << "x" << image_height << "\n";
+                                std::cout << "Window size stays: " << old_width << "x" << old_height << " (scaled to fit)\n";
+                                std::cout << "Total pixels: " << (image_width * image_height) << "\n";
+                                std::cout << "========================\n";
+
+#ifndef USE_GPU_RENDERER
+                                // Recreate texture with new dimensions (window size doesn't change)
+                                if (texture) {
+                                    SDL_DestroyTexture(texture);
+                                }
+                                texture = SDL_CreateTexture(
+                                    renderer,
+                                    SDL_PIXELFORMAT_RGB24,
+                                    SDL_TEXTUREACCESS_STREAMING,
+                                    image_width,
+                                    image_height
+                                );
+
+                                // Set texture scaling to linear for smooth upscaling
+                                SDL_SetTextureScaleMode(texture, SDL_ScaleModeLinear);
+
+                                if (!texture) {
+                                    std::cerr << "SDL_CreateTexture failed: " << SDL_GetError() << std::endl;
+                                    SDL_DestroyRenderer(renderer);
+                                    SDL_DestroyWindow(window);
+                                    SDL_Quit();
+                                    return 1;
+                                }
+#else
+                                // GPU mode uses OpenGL rendering directly
+                                (void)renderer; // Unused in GPU mode
+                                (void)texture;  // Unused in GPU mode
+#endif
+                                analysis.resize(image_width, image_height);
+                                std::cout << "Resolution: " << image_width << "x" << image_height << "\n" << std::endl;
+                                need_render = true;
+                            }
+                        } else {
+                            // No button clicked, toggle mouse capture
+                            SDL_bool captured = SDL_GetRelativeMouseMode();
+                            SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
+                        }
+                    } else {
+                        // Controls panel not visible, toggle mouse capture
+                        SDL_bool captured = SDL_GetRelativeMouseMode();
+                        SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
+                    }
                 }
             } else if (event.type == SDL_MOUSEMOTION) {
                 if (SDL_GetRelativeMouseMode()) {
@@ -1114,6 +1754,13 @@ int main(int argc, char* argv[]) {
         // Render frame if needed and not paused
         double render_time = 0.0;  // Declare outside the if block for controls panel
         if (need_render && !paused) {
+            // Safety check before rendering
+            if (!validate_current_settings(preset)) {
+                std::cout << "Render aborted due to unsafe settings. Please adjust quality.\n";
+                need_render = false;
+                continue;
+            }
+
             auto render_start = std::chrono::high_resolution_clock::now();
 
             // Get camera from controller (needed by both GPU and CPU paths)
@@ -1407,28 +2054,65 @@ int main(int argc, char* argv[]) {
             for (int j = image_height - 1; j >= 0; --j) {
                 for (int i = 0; i < image_width; ++i) {
                     Color pixel_color(0, 0, 0);
+                    float total_depth = 0.0f;
+                    Color pixel_normal(0, 0, 0);
+                    Color pixel_albedo(0, 0, 0);
+                    int shadow_rays = 0;
+                    int total_rays = 0;
 
                     for (int s = 0; s < preset.samples; ++s) {
                         float u = (i + random_float()) / (image_width - 1);
                         float v = (j + random_float()) / (image_height - 1);
 
                         Ray r = cam.get_ray(u, v);
-                        pixel_color = pixel_color + ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+                        Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+                        pixel_color = pixel_color + sample_color;
+                        total_rays += ray_renderer.max_depth;
+
+                        // Get hit info for analysis (simple approximation)
+                        HitRecord rec;
+                        if (scene.hit(r, 0.001f, 1000.0f, rec)) {
+                            total_depth += rec.t;
+                            pixel_normal = pixel_normal + Color(rec.normal.x, rec.normal.y, rec.normal.z);
+                            if (rec.mat) {
+                                pixel_albedo = pixel_albedo + rec.mat->albedo;
+                            }
+
+                            // Count shadow rays for this hit point
+                            if (enable_shadows) {
+                                for (const auto& light : scene.lights) {
+                                    Vec3 light_dir = light.position - rec.p;
+                                    Ray shadow_ray(rec.p, light_dir.normalized());
+                                    if (!scene.is_shadowed(shadow_ray, light_dir.length())) {
+                                        shadow_rays++;
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     float scale = 1.0f / preset.samples;
                     pixel_color = pixel_color * scale;
+                    pixel_normal = pixel_normal * scale;
+                    pixel_albedo = pixel_albedo * scale;
+                    total_depth *= scale;
+
+                    // Record analysis data
+                    analysis.record_pixel(i, image_height - 1 - j, shadow_rays, total_rays, total_depth, pixel_normal, pixel_albedo);
+
+                    // Apply analysis mode if active
+                    Color final_color = analysis.get_analysis_color(i, image_height - 1 - j, pixel_color);
 
                     // Gamma correction
-                    pixel_color.x = std::sqrt(pixel_color.x);
-                    pixel_color.y = std::sqrt(pixel_color.y);
-                    pixel_color.z = std::sqrt(pixel_color.z);
+                    final_color.x = std::sqrt(final_color.x);
+                    final_color.y = std::sqrt(final_color.y);
+                    final_color.z = std::sqrt(final_color.z);
 
                     // Write to framebuffer
                     int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-                    framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
-                    framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
-                    framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+                    framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(final_color.x, 0.0f, 0.999f));
+                    framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(final_color.y, 0.0f, 0.999f));
+                    framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(final_color.z, 0.0f, 0.999f));
                 }
             }
 
@@ -1474,10 +2158,9 @@ int main(int argc, char* argv[]) {
 
         // Render controls panel if active
         if (show_controls) {
-            const char* mode_name = (analysis.get_mode() != AnalysisMode::NORMAL) ?
-                                   analysis.get_mode_name() : nullptr;
+            const char* mode_name = analysis.get_mode_name();
             controls_panel.render(renderer, window_width, window_height,
-                                 current_quality, preset, fps, render_time, mode_name);
+                                 current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections);
         }
 
         // Render help overlay if active
