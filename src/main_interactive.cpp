@@ -675,8 +675,8 @@ public:
         if (!initialized || !font || !title_font) return;
 
         // Panel positioned in top-right corner, scales with window size
-        int panel_width = std::min(420, window_width - 20);
-        int panel_height = std::min(640, window_height - 20);
+        int panel_width = std::min(360, window_width - 20);
+        int panel_height = std::min(550, window_height - 20);
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
