@@ -1324,7 +1324,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Initial quality level
-    int current_quality = 0; // Start at "Large Window (Default)" quality
+    int current_quality = 2; // Start at "Medium" quality
     QualityPreset preset = quality_levels[current_quality];
 
     // Rendering feature toggles
