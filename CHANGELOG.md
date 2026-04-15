@@ -15,7 +15,8 @@
 - **ASCII Terminal Mode**: Retro text-based rendering
   - Pure terminal rendering (no GUI required)
   - Automatic camera animation (orbits scene)
-  - Optimized animation timing (75 frames at 100ms delay)
+  - Slow camera path movement (0.01f speed multiplier)
+  - Optimized frame timing (75 frames at 50ms delay)
   - Real-time ASCII art output
   - Cross-platform (macOS/Linux/Windows)
   - Adaptive terminal sizing
