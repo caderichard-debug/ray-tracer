@@ -155,6 +155,23 @@ public:
             }
         }
 
+        // Debug: log material assignments for all rays
+        static bool debug_mat_assign_once = true;
+        if (debug_mat_assign_once) {
+            std::ofstream debug_log("simd_debug.log", std::ios::app);
+            debug_log << "SIMD: Material assignments:" << std::endl;
+            for (int i = 0; i < 8; i++) {
+                debug_log << "  Ray " << i << ": sphere_idx=" << hit_sphere_indices[i];
+                if (hit_records[i].mat) {
+                    debug_log << " mat_albedo=(" << hit_records[i].mat->albedo.x << "," << hit_records[i].mat->albedo.y << "," << hit_records[i].mat->albedo.z << ")" << std::endl;
+                } else {
+                    debug_log << " mat=null" << std::endl;
+                }
+            }
+            debug_log.close();
+            debug_mat_assign_once = false;
+        }
+
         // Compute position and normal for hits (extract ray data from packet to ensure consistency)
         for (int i = 0; i < 8; i++) {
             if (hit_sphere_indices[i] >= 0) {

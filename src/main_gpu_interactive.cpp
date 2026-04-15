@@ -120,6 +120,15 @@
 #define DOF_APERTURE 0.1  // Default aperture size
 #endif
 
+// Phase 5: Motion Blur
+#ifndef ENABLE_MOTION_BLUR
+#define ENABLE_MOTION_BLUR 0  // Enable motion blur
+#endif
+
+#ifndef MOTION_BLUR_STRENGTH
+#define MOTION_BLUR_STRENGTH 0.5  // Default motion blur strength
+#endif
+
 #ifndef TONE_MAPPING_OPERATOR
 #define TONE_MAPPING_OPERATOR 1  // 0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted
 #endif
@@ -590,6 +599,11 @@ uniform float chromatic_aberration_strength; // Chromatic aberration strength (0
 uniform bool enable_dof;                 // Enable depth of field
 uniform float dof_focus_distance;        // Focus distance (0.1-10.0)
 uniform float dof_aperture;              // Aperture size (0.01-0.5)
+
+// Phase 5: Motion Blur
+uniform bool enable_motion_blur;         // Enable motion blur
+uniform float motion_blur_strength;      // Motion blur intensity (0.0-1.0)
+uniform vec2 motion_vector;              // Motion direction vector
 
 uniform int tone_mapping_op;             // Tone mapping operator (0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted)
 uniform float exposure;                  // Exposure compensation (0.1-2.0)
@@ -1422,6 +1436,34 @@ vec3 apply_depth_of_field(vec3 color, vec2 uv) {
     return mix(color, blurred, min(blur_strength * 2.0, 1.0));
 }
 
+// Phase 5: Motion Blur (directional blur based on motion vector)
+vec3 apply_motion_blur(vec3 color, vec2 uv) {
+    if (!enable_motion_blur || motion_blur_strength <= 0.0) {
+        return color;  // No motion blur
+    }
+
+    float motion_length = length(motion_vector);
+    if (motion_length < 0.001) {
+        return color;  // No motion, no blur
+    }
+
+    // Apply directional blur along motion vector
+    vec2 motion_dir = normalize(motion_vector);
+    float blur_samples = 5.0;  // Number of blur samples
+    vec3 blurred_color = vec3(0.0);
+
+    for (float i = -blur_samples; i <= blur_samples; i += 1.0) {
+        float offset = (i / blur_samples) * motion_blur_strength * motion_length * 0.02;
+        vec2 sample_uv = uv + motion_dir * offset;
+
+        // Simple sample - in real implementation would sample framebuffer
+        vec3 sample_color = color;  // Placeholder
+        blurred_color += sample_color;
+    }
+
+    return blurred_color / (blur_samples * 2.0 + 1.0);
+}
+
 // Full Phase 4 post-processing pipeline
 vec3 apply_post_processing(vec3 color, vec2 uv) {
     // Phase 5: Apply chromatic aberration (first, before other effects)
@@ -1454,6 +1496,9 @@ vec3 apply_post_processing(vec3 color, vec2 uv) {
 
     // Phase 5: Apply depth of field (after gamma, before vignette)
     color = apply_depth_of_field(color, uv);
+
+    // Phase 5: Apply motion blur (after DOF, before vignette)
+    color = apply_motion_blur(color, uv);
 
     // Apply vignette
     color = apply_vignette(color, uv);
@@ -2151,6 +2196,11 @@ int main(int argc, char* argv[]) {
     GLint dof_focus_distance_loc = glGetUniformLocation(program, "dof_focus_distance");
     GLint dof_aperture_loc = glGetUniformLocation(program, "dof_aperture");
 
+    // Phase 5: Motion Blur
+    GLint enable_motion_blur_loc = glGetUniformLocation(program, "enable_motion_blur");
+    GLint motion_blur_strength_loc = glGetUniformLocation(program, "motion_blur_strength");
+    GLint motion_vector_loc = glGetUniformLocation(program, "motion_vector");
+
     GLint tone_mapping_op_loc = glGetUniformLocation(program, "tone_mapping_op");
     GLint exposure_loc = glGetUniformLocation(program, "exposure");
     GLint contrast_loc = glGetUniformLocation(program, "contrast");
@@ -2233,6 +2283,14 @@ int main(int argc, char* argv[]) {
     bool enable_dof = ENABLE_DOF ? true : false;
     float dof_focus_distance = DOF_FOCUS_DISTANCE;  // Focus distance
     float dof_aperture = DOF_APERTURE;              // Aperture size
+
+    // Phase 5: Motion Blur
+    bool enable_motion_blur = ENABLE_MOTION_BLUR ? true : false;
+    float motion_blur_strength = MOTION_BLUR_STRENGTH;  // Motion blur strength
+    float motion_vector_x = 0.0f;  // Current motion vector X
+    float motion_vector_y = 0.0f;  // Current motion vector Y
+    float previous_mouse_x = 0.0f;  // Previous mouse position X
+    float previous_mouse_y = 0.0f;  // Previous mouse position Y
 
     int tone_mapping_op = TONE_MAPPING_OPERATOR;          // Tone mapping operator
     float exposure = 1.0f;                                // Exposure compensation
@@ -2437,6 +2495,22 @@ int main(int argc, char* argv[]) {
                         std::cout << "DOF Aperture: " << dof_aperture << std::endl;
                         need_render = true;
                     }
+                } else if (event.key.keysym.sym == SDLK_m) {  // M key for Motion Blur (Phase 5)
+                    enable_motion_blur = !enable_motion_blur;
+                    std::cout << "Motion Blur: " << (enable_motion_blur ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_SEMICOLON) {  // ; key for motion blur strength down
+                    if (motion_blur_strength > 0.0f) {
+                        motion_blur_strength = std::max(0.0f, motion_blur_strength - 0.1f);
+                        std::cout << "Motion Blur Strength: " << motion_blur_strength << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_QUOTE) {  // ' key for motion blur strength up
+                    if (motion_blur_strength < 1.0f) {
+                        motion_blur_strength = std::min(1.0f, motion_blur_strength + 0.1f);
+                        std::cout << "Motion Blur Strength: " << motion_blur_strength << std::endl;
+                        need_render = true;
+                    }
                 } else if (event.key.keysym.sym == SDLK_t) {  // T key to cycle tone mapping
                     tone_mapping_op = (tone_mapping_op + 1) % 5;  // Cycle 0-4
                     const char* op_names[] = {"None", "ACES", "Reinhard", "Filmic", "Uncharted 2"};
@@ -2506,6 +2580,21 @@ int main(int argc, char* argv[]) {
         if (keystates[SDL_SCANCODE_DOWN]) {
             camera.move_up(-move_speed);
             need_render = true;
+        }
+
+        // Phase 5: Track motion for motion blur
+        if (enable_motion_blur && need_render) {
+            // Calculate motion based on camera movement (simplified)
+            // In a real implementation, would track actual camera position changes
+            float motion_decay = 0.8f;  // How fast motion fades
+            motion_vector_x *= motion_decay;
+            motion_vector_y *= motion_decay;
+
+            // Add motion from WASD keys (simplified)
+            if (keystates[SDL_SCANCODE_W]) motion_vector_y += move_speed * 0.1f;
+            if (keystates[SDL_SCANCODE_S]) motion_vector_y -= move_speed * 0.1f;
+            if (keystates[SDL_SCANCODE_A]) motion_vector_x -= move_speed * 0.1f;
+            if (keystates[SDL_SCANCODE_D]) motion_vector_x += move_speed * 0.1f;
         }
 
         // Update time (keep for potential animation)
@@ -2590,6 +2679,11 @@ int main(int argc, char* argv[]) {
             glUniform1i(enable_dof_loc, enable_dof ? 1 : 0);
             glUniform1f(dof_focus_distance_loc, dof_focus_distance);
             glUniform1f(dof_aperture_loc, dof_aperture);
+
+            // Phase 5: Motion Blur
+            glUniform1i(enable_motion_blur_loc, enable_motion_blur ? 1 : 0);
+            glUniform1f(motion_blur_strength_loc, motion_blur_strength);
+            glUniform2f(motion_vector_loc, motion_vector_x, motion_vector_y);
 
             glUniform1i(tone_mapping_op_loc, tone_mapping_op);
             glUniform1f(exposure_loc, exposure);

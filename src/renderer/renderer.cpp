@@ -424,6 +424,23 @@ void Renderer::render_simd_packets(const Camera& cam, const Scene& scene,
 
                 scene.hit_packet(packet, 0.001f, infinity, hit_records);
 
+                // Debug: log hit results
+                static bool debug_hit_once = true;
+                if (debug_hit_once) {
+                    std::ofstream debug_log("simd_debug.log", std::ios::app);
+                    debug_log << "SIMD: After hit_packet, materials:" << std::endl;
+                    for (int r = 0; r < 8; r++) {
+                        debug_log << "  Ray " << r << ": t=" << hit_records[r].t;
+                        if (hit_records[r].mat) {
+                            debug_log << " mat_albedo=(" << hit_records[r].mat->albedo.x << "," << hit_records[r].mat->albedo.y << "," << hit_records[r].mat->albedo.z << ")" << std::endl;
+                        } else {
+                            debug_log << " mat=nullptr" << std::endl;
+                        }
+                    }
+                    debug_log.close();
+                    debug_hit_once = false;
+                }
+
                 // Shade each ray (scalar shading, but SIMD intersection)
                 int missing_mats = 0;
                 int shaded_count = 0;
