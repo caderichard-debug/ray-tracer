@@ -107,6 +107,19 @@
 #define CHROMATIC_ABERRATION_STRENGTH 1.0  // Default strength (0.0-2.0)
 #endif
 
+// Phase 5: Depth of Field
+#ifndef ENABLE_DOF
+#define ENABLE_DOF 0  // Enable depth of field
+#endif
+
+#ifndef DOF_FOCUS_DISTANCE
+#define DOF_FOCUS_DISTANCE 3.0  // Default focus distance
+#endif
+
+#ifndef DOF_APERTURE
+#define DOF_APERTURE 0.1  // Default aperture size
+#endif
+
 #ifndef TONE_MAPPING_OPERATOR
 #define TONE_MAPPING_OPERATOR 1  // 0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted
 #endif
@@ -572,6 +585,11 @@ uniform float grain_size;                // Film grain size (1.0-10.0)
 // Phase 5: Chromatic Aberration
 uniform bool enable_chromatic_aberration; // Enable chromatic aberration
 uniform float chromatic_aberration_strength; // Chromatic aberration strength (0.0-2.0)
+
+// Phase 5: Depth of Field
+uniform bool enable_dof;                 // Enable depth of field
+uniform float dof_focus_distance;        // Focus distance (0.1-10.0)
+uniform float dof_aperture;              // Aperture size (0.01-0.5)
 
 uniform int tone_mapping_op;             // Tone mapping operator (0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted)
 uniform float exposure;                  // Exposure compensation (0.1-2.0)
@@ -1375,6 +1393,35 @@ vec3 apply_color_grading(vec3 color) {
     return clamp(color, vec3(0.0), vec3(1.0));
 }
 
+// Phase 5: Depth of Field (simple radial blur simulation)
+// In a real ray tracer, this would use depth information
+// This version simulates DOF by blurring edges of the screen
+vec3 apply_depth_of_field(vec3 color, vec2 uv) {
+    if (!enable_dof || dof_aperture <= 0.0) {
+        return color;  // No DOF
+    }
+
+    // Calculate distance from center (focus point)
+    vec2 offset = uv - vec2(0.5);
+    float dist = length(offset);
+
+    // Calculate blur amount based on distance from focus point
+    float blur_amount = (dist - dof_focus_distance * 0.1) * dof_aperture;
+
+    if (blur_amount <= 0.0) {
+        return color;  // In focus
+    }
+
+    // Apply simple blur based on distance from center
+    float blur_strength = min(blur_amount * 0.5, 0.3);
+
+    // Mix with slightly blurred version (simulated by reducing contrast)
+    vec3 blurred = color * (1.0 - blur_strength * 0.5);
+    blurred += vec3(blur_strength * 0.1);  // Add brightness to simulate blur
+
+    return mix(color, blurred, min(blur_strength * 2.0, 1.0));
+}
+
 // Full Phase 4 post-processing pipeline
 vec3 apply_post_processing(vec3 color, vec2 uv) {
     // Phase 5: Apply chromatic aberration (first, before other effects)
@@ -1404,6 +1451,9 @@ vec3 apply_post_processing(vec3 color, vec2 uv) {
 
     // Apply gamma correction
     color = gamma_correct(color);
+
+    // Phase 5: Apply depth of field (after gamma, before vignette)
+    color = apply_depth_of_field(color, uv);
 
     // Apply vignette
     color = apply_vignette(color, uv);
@@ -2096,6 +2146,11 @@ int main(int argc, char* argv[]) {
     GLint enable_chromatic_aberration_loc = glGetUniformLocation(program, "enable_chromatic_aberration");
     GLint chromatic_aberration_strength_loc = glGetUniformLocation(program, "chromatic_aberration_strength");
 
+    // Phase 5: Depth of Field
+    GLint enable_dof_loc = glGetUniformLocation(program, "enable_dof");
+    GLint dof_focus_distance_loc = glGetUniformLocation(program, "dof_focus_distance");
+    GLint dof_aperture_loc = glGetUniformLocation(program, "dof_aperture");
+
     GLint tone_mapping_op_loc = glGetUniformLocation(program, "tone_mapping_op");
     GLint exposure_loc = glGetUniformLocation(program, "exposure");
     GLint contrast_loc = glGetUniformLocation(program, "contrast");
@@ -2173,6 +2228,11 @@ int main(int argc, char* argv[]) {
     // Phase 5: Chromatic Aberration
     bool enable_chromatic_aberration = ENABLE_CHROMATIC_ABERRATION ? true : false;
     float chromatic_aberration_strength = CHROMATIC_ABERRATION_STRENGTH;  // Chromatic aberration strength
+
+    // Phase 5: Depth of Field
+    bool enable_dof = ENABLE_DOF ? true : false;
+    float dof_focus_distance = DOF_FOCUS_DISTANCE;  // Focus distance
+    float dof_aperture = DOF_APERTURE;              // Aperture size
 
     int tone_mapping_op = TONE_MAPPING_OPERATOR;          // Tone mapping operator
     float exposure = 1.0f;                                // Exposure compensation
@@ -2349,6 +2409,34 @@ int main(int argc, char* argv[]) {
                         std::cout << "Chromatic Aberration Strength: " << chromatic_aberration_strength << std::endl;
                         need_render = true;
                     }
+                } else if (event.key.keysym.sym == SDLK_f) {  // F key for Depth of Field (Phase 5)
+                    enable_dof = !enable_dof;
+                    std::cout << "Depth of Field: " << (enable_dof ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_MINUS) {  // - key for DOF focus distance down
+                    if (dof_focus_distance > 0.5f) {
+                        dof_focus_distance = std::max(0.5f, dof_focus_distance - 0.5f);
+                        std::cout << "DOF Focus Distance: " << dof_focus_distance << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_EQUALS) {  // = key for DOF focus distance up
+                    if (dof_focus_distance < 10.0f) {
+                        dof_focus_distance = std::min(10.0f, dof_focus_distance + 0.5f);
+                        std::cout << "DOF Focus Distance: " << dof_focus_distance << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_COMMA) {  // , key for DOF aperture down
+                    if (dof_aperture > 0.01f) {
+                        dof_aperture = std::max(0.01f, dof_aperture - 0.01f);
+                        std::cout << "DOF Aperture: " << dof_aperture << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_PERIOD) {  // . key for DOF aperture up
+                    if (dof_aperture < 0.5f) {
+                        dof_aperture = std::min(0.5f, dof_aperture + 0.01f);
+                        std::cout << "DOF Aperture: " << dof_aperture << std::endl;
+                        need_render = true;
+                    }
                 } else if (event.key.keysym.sym == SDLK_t) {  // T key to cycle tone mapping
                     tone_mapping_op = (tone_mapping_op + 1) % 5;  // Cycle 0-4
                     const char* op_names[] = {"None", "ACES", "Reinhard", "Filmic", "Uncharted 2"};
@@ -2497,6 +2585,11 @@ int main(int argc, char* argv[]) {
             // Phase 5: Chromatic Aberration
             glUniform1i(enable_chromatic_aberration_loc, enable_chromatic_aberration ? 1 : 0);
             glUniform1f(chromatic_aberration_strength_loc, chromatic_aberration_strength);
+
+            // Phase 5: Depth of Field
+            glUniform1i(enable_dof_loc, enable_dof ? 1 : 0);
+            glUniform1f(dof_focus_distance_loc, dof_focus_distance);
+            glUniform1f(dof_aperture_loc, dof_aperture);
 
             glUniform1i(tone_mapping_op_loc, tone_mapping_op);
             glUniform1f(exposure_loc, exposure);

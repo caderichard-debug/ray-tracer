@@ -135,25 +135,23 @@ public:
                 // Update closest t values
                 closest_t = _mm256_min_ps(closest_t, packet_hits.t);
 
-                // Track which sphere each ray hit
+                // Track which sphere each ray hit (store t values AFTER updating closest_t)
                 float t_arr[8];
                 _mm256_storeu_ps(t_arr, closest_t);
                 for (int i = 0; i < 8; i++) {
                     if (hit_mask & (1 << i)) {
                         hit_sphere_indices[i] = sphere_idx;
                         hit_records[i].t = t_arr[i];
-                        hit_records[i].mat = original_spheres[sphere_idx]->mat;  // Set material directly
-
-                    // Debug: log material assignment
-                    static bool debug_mat_once = true;
-                    if (debug_mat_once && (i == 0)) {
-                        std::ofstream debug_log("simd_debug.log", std::ios::app);
-                        debug_log << "SIMD: Ray 0 material assigned: albedo=(" << hit_records[i].mat->albedo.x << "," << hit_records[i].mat->albedo.y << "," << hit_records[i].mat->albedo.z << ")" << std::endl;
-                        debug_log.close();
-                        debug_mat_once = false;
-                    }
+                        // NOTE: Material will be set AFTER all spheres are tested
                     }
                 }
+            }
+        }
+
+        // Set materials based on which sphere each ray hit (FIX: Set materials AFTER all spheres tested)
+        for (int i = 0; i < 8; i++) {
+            if (hit_sphere_indices[i] >= 0) {
+                hit_records[i].mat = original_spheres[hit_sphere_indices[i]]->mat;
             }
         }
 
