@@ -1,5 +1,7 @@
 #include "gpu_renderer.h"
 #include "shader_manager.h"
+#include "primitives/sphere.h"
+#include "material/material.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -190,8 +192,84 @@ void GPURenderer::upload_scene() {
 
     std::cout << "Uploading scene to GPU..." << std::endl;
 
-    // TODO: Upload scene data to GPU buffers
-    // This will be implemented once we have the compute shader
+    // Upload spheres
+    std::vector<GPUSphere> gpu_spheres;
+    for (const auto& obj : scene->objects) {
+        if (auto sphere = std::dynamic_pointer_cast<Sphere>(obj)) {
+            GPUSphere gpu_sphere;
+            gpu_sphere.center[0] = sphere->center.x;
+            gpu_sphere.center[1] = sphere->center.y;
+            gpu_sphere.center[2] = sphere->center.z;
+            gpu_sphere.center[3] = 1.0f;
+            gpu_sphere.radius = sphere->radius;
+            gpu_sphere.material_id = 0; // TODO: Get actual material ID
+            gpu_sphere.padding[0] = 0.0f;
+            gpu_sphere.padding[1] = 0.0f;
+            gpu_sphere.padding[2] = 0.0f;
+            gpu_spheres.push_back(gpu_sphere);
+        }
+    }
+
+    if (!gpu_spheres.empty()) {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, sphere_buffer);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, gpu_spheres.size() * sizeof(GPUSphere), gpu_spheres.data(), GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sphere_buffer);
+        std::cout << "  Uploaded " << gpu_spheres.size() << " spheres" << std::endl;
+    }
+
+    // Upload materials
+    std::vector<GPUMaterial> gpu_materials;
+    for (const auto& obj : scene->objects) {
+        if (auto sphere = std::dynamic_pointer_cast<Sphere>(obj)) {
+            GPUMaterial gpu_material;
+            gpu_material.albedo[0] = sphere->mat->albedo.x;
+            gpu_material.albedo[1] = sphere->mat->albedo.y;
+            gpu_material.albedo[2] = sphere->mat->albedo.z;
+            gpu_material.albedo[3] = 1.0f;
+
+            // Determine material type
+            if (auto metal = std::dynamic_pointer_cast<Metal>(sphere->mat)) {
+                gpu_material.type = 1; // Metal
+                gpu_material.fuzz = metal->fuzz;
+            } else {
+                gpu_material.type = 0; // Lambertian
+                gpu_material.fuzz = 0.0f;
+            }
+
+            gpu_material.padding[0] = 0.0f;
+            gpu_material.padding[1] = 0.0f;
+            gpu_materials.push_back(gpu_material);
+        }
+    }
+
+    if (!gpu_materials.empty()) {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, material_buffer);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, gpu_materials.size() * sizeof(GPUMaterial), gpu_materials.data(), GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, material_buffer);
+        std::cout << "  Uploaded " << gpu_materials.size() << " materials" << std::endl;
+    }
+
+    // Upload lights
+    std::vector<GPULight> gpu_lights;
+    for (const auto& light : scene->lights) {
+        GPULight gpu_light;
+        gpu_light.position[0] = light.position.x;
+        gpu_light.position[1] = light.position.y;
+        gpu_light.position[2] = light.position.z;
+        gpu_light.position[3] = 1.0f;
+        gpu_light.intensity[0] = light.intensity.x;
+        gpu_light.intensity[1] = light.intensity.y;
+        gpu_light.intensity[2] = light.intensity.z;
+        gpu_light.intensity[3] = 1.0f;
+        gpu_lights.push_back(gpu_light);
+    }
+
+    if (!gpu_lights.empty()) {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, light_buffer);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, gpu_lights.size() * sizeof(GPULight), gpu_lights.data(), GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, light_buffer);
+        std::cout << "  Uploaded " << gpu_lights.size() << " lights" << std::endl;
+    }
 
     scene_uploaded = true;
     std::cout << "✓ Scene uploaded to GPU" << std::endl;
@@ -284,6 +362,22 @@ void GPURenderer::dispatch_compute() {
 
     GLint frame_count_loc = glGetUniformLocation(compute_program, "frame_count");
     glUniform1ui(frame_count_loc, 0);
+
+    // Set scene uniforms
+    GLint num_spheres_loc = glGetUniformLocation(compute_program, "num_spheres");
+    glUniform1i(num_spheres_loc, scene->objects.size());
+
+    GLint num_materials_loc = glGetUniformLocation(compute_program, "num_materials");
+    glUniform1i(num_materials_loc, scene->objects.size());
+
+    GLint num_lights_loc = glGetUniformLocation(compute_program, "num_lights");
+    glUniform1i(num_lights_loc, scene->lights.size());
+
+    GLint max_depth_loc = glGetUniformLocation(compute_program, "max_depth");
+    glUniform1i(max_depth_loc, 8); // Default max depth
+
+    GLint samples_loc = glGetUniformLocation(compute_program, "samples_per_pixel");
+    glUniform1i(samples_loc, 1); // Default samples
 
     // Bind output texture as image
     glBindImageTexture(5, output_texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);

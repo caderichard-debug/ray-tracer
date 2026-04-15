@@ -6,11 +6,66 @@ layout(local_size_x = 16, local_size_y = 16) in;
 // Output image
 layout(binding = 5, rgba32f) uniform image2D output_image;
 
+// GPU Buffer structures (must match C++ layouts)
+struct Camera {
+    vec4 position;
+    vec4 lookat;
+    vec4 vup;
+    float vfov;
+    float aspect_ratio;
+    vec2 padding;
+};
+
+struct Sphere {
+    vec4 center;
+    float radius;
+    int material_id;
+    vec3 padding;
+};
+
+struct Material {
+    vec4 albedo;
+    float fuzz;
+    int type;  // 0 = Lambertian, 1 = Metal
+    vec2 padding;
+};
+
+struct Light {
+    vec4 position;
+    vec4 intensity;
+};
+
+// Scene SSBOs
+layout(std430, binding = 0) buffer CameraBuffer { Camera camera; };
+layout(std430, binding = 1) buffer SphereBuffer { Sphere spheres[]; };
+layout(std430, binding = 2) buffer MaterialBuffer { Material materials[]; };
+layout(std430, binding = 3) buffer LightBuffer { Light lights[]; };
+
 // Uniforms
+uniform int num_spheres;
+uniform int num_materials;
+uniform int num_lights;
+uniform int max_depth;
+uniform int samples_per_pixel;
 uniform vec2 resolution;
 uniform uint frame_count;
 
-// Simple random number generator
+// Ray structure
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
+
+// Hit record
+struct HitRecord {
+    bool hit;
+    float t;
+    vec3 point;
+    vec3 normal;
+    int material_id;
+};
+
+// Random number generator
 uint rand(inout uint seed) {
     seed = seed * 747796405u + 2891336453u;
     uint word = ((seed >> ((seed >> 28u) + 4u)) ^ seed) * 277803737u;
@@ -25,6 +80,166 @@ vec3 rand_vec3(inout uint seed) {
     return vec3(rand_float(seed), rand_float(seed), rand_float(seed));
 }
 
+// Random unit vector in sphere
+vec3 random_in_unit_sphere(inout uint seed) {
+    while (true) {
+        vec3 p = 2.0 * rand_vec3(seed) - 1.0;
+        if (dot(p, p) < 1.0) {
+            return p;
+        }
+    }
+}
+
+// Random unit vector
+vec3 random_unit_vector(inout uint seed) {
+    return normalize(random_in_unit_sphere(seed));
+}
+
+// Ray-sphere intersection
+bool hit_sphere(const Sphere sphere, const Ray ray, float t_min, float t_max, inout HitRecord rec) {
+    vec3 oc = ray.origin - sphere.center.xyz;
+    float a = dot(ray.direction, ray.direction);
+    float b = dot(oc, ray.direction);
+    float c = dot(oc, oc) - sphere.radius * sphere.radius;
+    float discriminant = b * b - a * c;
+
+    if (discriminant < 0.0) {
+        return false;
+    }
+
+    float sqrt_d = sqrt(discriminant);
+    float root = (-b - sqrt_d) / a;
+
+    if (root < t_min || root > t_max) {
+        root = (-b + sqrt_d) / a;
+        if (root < t_min || root > t_max) {
+            return false;
+        }
+    }
+
+    rec.hit = true;
+    rec.t = root;
+    rec.point = ray.origin + root * ray.direction;
+    rec.normal = (rec.point - sphere.center.xyz) / sphere.radius;
+    rec.material_id = sphere.material_id;
+
+    return true;
+}
+
+// Hit scene (spheres only for now)
+bool hit_scene(const Ray ray, float t_min, float t_max, inout HitRecord rec) {
+    HitRecord temp_rec;
+    temp_rec.hit = false;
+    bool hit_anything = false;
+    float closest_so_far = t_max;
+
+    for (int i = 0; i < num_spheres; i++) {
+        if (hit_sphere(spheres[i], ray, t_min, closest_so_far, temp_rec)) {
+            hit_anything = true;
+            closest_so_far = temp_rec.t;
+            rec = temp_rec;
+        }
+    }
+
+    return hit_anything;
+}
+
+// Scatter functions
+bool scatter_lambertian(const Material material, vec3 normal, inout uint seed, inout Ray scattered, inout vec3 attenuation) {
+    vec3 scatter_direction = normal + random_unit_vector(seed);
+
+    // Catch degenerate scatter direction
+    if (abs(scatter_direction.x) < 1e-8 && abs(scatter_direction.y) < 1e-8 && abs(scatter_direction.z) < 1e-8) {
+        scatter_direction = normal;
+    }
+
+    scattered.origin = // will be set by caller
+    scattered.direction = normalize(scatter_direction);
+    attenuation = material.albedo.rgb;
+    return true;
+}
+
+bool scatter_metal(const Material material, vec3 reflected, inout uint seed, inout Ray scattered, inout vec3 attenuation) {
+    vec3 reflected_dir = reflected + material.fuzz * random_in_unit_sphere(seed);
+    scattered.direction = normalize(reflected_dir);
+    attenuation = material.albedo.rgb;
+    return (dot(scattered.direction, reflected) > 0.0);
+}
+
+// Ray color recursive
+vec3 ray_color(const Ray ray, int depth, inout uint seed) {
+    Ray current_ray = ray;
+    vec3 current_attenuation = vec3(1.0);
+    vec3 accumulated_color = vec3(0.0);
+
+    for (int i = 0; i < depth; i++) {
+        HitRecord rec;
+        if (hit_scene(current_ray, 0.001, 1000.0, rec)) {
+            // Get material
+            Material material = materials[rec.material_id];
+
+            // Calculate lighting (simple ambient + direct lighting)
+            vec3 color = material.albedo.rgb * 0.1; // Ambient
+
+            // Add direct lighting from lights
+            for (int j = 0; j < num_lights; j++) {
+                vec3 light_dir = normalize(lights[j].position.xyz - rec.point);
+                float diff = max(dot(rec.normal, light_dir), 0.0);
+                color += material.albedo.rgb * diff * lights[j].intensity.rgb * 0.5;
+            }
+
+            accumulated_color += current_attenuation * color;
+
+            // Scatter ray for next bounce
+            Ray scattered;
+            vec3 attenuation;
+            vec3 reflected = reflect(current_ray.direction, rec.normal);
+
+            if (material.type == 0) { // Lambertian
+                scatter_lambertian(material, rec.normal, seed, scattered, attenuation);
+            } else { // Metal
+                scatter_metal(material, reflected, seed, scattered, attenuation);
+            }
+
+            scattered.origin = rec.point;
+            current_ray = scattered;
+            current_attenuation *= attenuation;
+        } else {
+            // Background gradient
+            vec3 unit_direction = normalize(current_ray.direction);
+            float t = 0.5 * (unit_direction.y + 1.0);
+            vec3 background = mix(vec3(1.0), vec3(0.5, 0.7, 1.0), t);
+            accumulated_color += current_attenuation * background;
+            break;
+        }
+    }
+
+    return accumulated_color;
+}
+
+// Get camera ray
+Ray get_camera_ray(vec2 uv) {
+    // Simple camera model
+    float theta = radians(camera.vfov);
+    float h = tan(theta / 2.0);
+    float viewport_height = 2.0 * h;
+    float viewport_width = camera.aspect_ratio * viewport_height;
+
+    vec3 w = normalize(camera.position.xyz - camera.lookat.xyz);
+    vec3 u = normalize(cross(camera.vup.xyz, w));
+    vec3 v = cross(w, u);
+
+    vec3 origin = camera.position.xyz;
+    vec3 horizontal = viewport_width * u;
+    vec3 vertical = viewport_height * v;
+    vec3 lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - w;
+
+    Ray ray;
+    ray.origin = origin;
+    ray.direction = lower_left_corner + uv.x * horizontal + uv.y * vertical - origin;
+    return ray;
+}
+
 // Main compute shader
 void main() {
     vec2 pixel = vec2(gl_GlobalInvocationID.xy);
@@ -37,14 +252,27 @@ void main() {
     // Initialize random number generator
     uint seed = uint(pixel.y * resolution.x + pixel.x) + frame_count;
 
-    // Normalize coordinates to [0, 1]
-    vec2 uv = pixel / resolution;
+    vec3 color = vec3(0.0);
 
-    // Create a simple gradient as a test
-    vec3 color = vec3(uv, 0.5);  // Red-green gradient
+    // Multi-sample anti-aliasing
+    for (int s = 0; s < samples_per_pixel; s++) {
+        vec2 offset = vec2(0.0);
+        if (samples_per_pixel > 1) {
+            offset = rand_vec3(seed).xy / resolution;
+        }
 
-    // Add some randomness based on frame count for testing
-    color += 0.01 * (rand_vec3(seed) - 0.5);
+        vec2 uv = (pixel + offset) / resolution;
+        uv.y = 1.0 - uv.y; // Flip Y for screen coordinates
+
+        Ray ray = get_camera_ray(uv);
+        color += ray_color(ray, max_depth, seed);
+    }
+
+    // Average samples
+    color /= float(samples_per_pixel);
+
+    // Gamma correction
+    color = pow(color, vec3(1.0 / 2.2));
 
     // Store the color
     imageStore(output_image, ivec2(pixel), vec4(color, 1.0));
