@@ -185,6 +185,47 @@ void Renderer::render_wavefront(const Camera& cam, const Scene& scene, std::vect
                 for (int i = tile_x; i < tile_end_x; ++i) {
                     Color pixel_color(0, 0, 0);
 
+#ifdef ENABLE_LOOP_UNROLL
+                    // Loop unrolling by 4 for better performance
+                    int s = 0;
+                    for (; s + 4 <= samples; s += 4) {
+                        // Helper function for random float
+                        auto random_float = []() {
+                            return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+                        };
+
+                        // Unroll 4 samples
+                        float u0 = (i + random_float()) / (width - 1);
+                        float v0 = (j + random_float()) / (height - 1);
+                        Ray r0 = cam.get_ray(u0, v0);
+                        pixel_color = pixel_color + ray_color(r0, scene, max_depth);
+
+                        float u1 = (i + random_float()) / (width - 1);
+                        float v1 = (j + random_float()) / (height - 1);
+                        Ray r1 = cam.get_ray(u1, v1);
+                        pixel_color = pixel_color + ray_color(r1, scene, max_depth);
+
+                        float u2 = (i + random_float()) / (width - 1);
+                        float v2 = (j + random_float()) / (height - 1);
+                        Ray r2 = cam.get_ray(u2, v2);
+                        pixel_color = pixel_color + ray_color(r2, scene, max_depth);
+
+                        float u3 = (i + random_float()) / (width - 1);
+                        float v3 = (j + random_float()) / (height - 1);
+                        Ray r3 = cam.get_ray(u3, v3);
+                        pixel_color = pixel_color + ray_color(r3, scene, max_depth);
+                    }
+                    // Handle remaining samples
+                    for (; s < samples; ++s) {
+                        auto random_float = []() {
+                            return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+                        };
+                        float u = (i + random_float()) / (width - 1);
+                        float v = (j + random_float()) / (height - 1);
+                        Ray r = cam.get_ray(u, v);
+                        pixel_color = pixel_color + ray_color(r, scene, max_depth);
+                    }
+#else
                     for (int s = 0; s < samples; ++s) {
                         // Helper function for random float
                         auto random_float = []() {
@@ -197,6 +238,7 @@ void Renderer::render_wavefront(const Camera& cam, const Scene& scene, std::vect
                         Ray r = cam.get_ray(u, v);
                         pixel_color = pixel_color + ray_color(r, scene, max_depth);
                     }
+#endif
 
                     float scale = 1.0f / samples;
                     pixel_color = pixel_color * scale;
