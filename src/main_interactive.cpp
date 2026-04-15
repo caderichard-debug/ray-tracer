@@ -1649,50 +1649,27 @@ int main(int argc, char* argv[]) {
                     // PROGRESSIVE RENDERING: Multi-pass refinement
                     std::cout << "Progressive rendering..." << std::endl;
 
-                    // Initialize progressive buffers on first pass or after camera change
-                    static int last_width = 0;
-                    static int last_height = 0;
-                    static Point3 last_camera_pos(0, 0, 0);
-                    Point3 current_camera_pos = camera_controller.get_position();
-
-                    bool need_reset = (last_width != image_width || last_height != image_height ||
-                                     last_camera_pos.x != current_camera_pos.x ||
-                                     last_camera_pos.y != current_camera_pos.y ||
-                                     last_camera_pos.z != current_camera_pos.z);
-
-                    if (need_reset) {
-                        ray_renderer.initialize_progressive(image_width, image_height);
-                        last_width = image_width;
-                        last_height = image_height;
-                        last_camera_pos = current_camera_pos;
-                        std::cout << "Progressive rendering initialized" << std::endl;
-                    }
-
-                    // Render one pass
-                    int samples_per_pass = std::max(1, preset.samples / ray_renderer.max_passes);
-                    if (samples_per_pass < 1) samples_per_pass = 1;
+                    // Simple progressive rendering: render fewer samples per frame
+                    // This gives immediate feedback and refines over time
+                    const int progressive_samples = std::max(1, preset.samples / 4); // Render 1/4 of samples per frame
 
                     #pragma omp parallel for schedule(dynamic, 4)
                     for (int j = image_height - 1; j >= 0; --j) {
                         for (int i = 0; i < image_width; ++i) {
-                            // Render samples for this pass
-                            for (int s = 0; s < samples_per_pass; ++s) {
+                            Color pixel_color(0, 0, 0);
+
+                            // Render progressive samples
+                            for (int s = 0; s < progressive_samples; ++s) {
                                 float u = (i + random_float()) / (image_width - 1);
                                 float v = (j + random_float()) / (image_height - 1);
 
                                 Ray r = cam.get_ray(u, v);
                                 Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
-
-                                // Accumulate sample
-                                #pragma omp critical
-                                {
-                                    ray_renderer.accumulation_buffer[j][i] = ray_renderer.accumulation_buffer[j][i] + sample_color;
-                                    ray_renderer.sample_count[j][i]++;
-                                }
+                                pixel_color = pixel_color + sample_color;
                             }
 
-                            // Get current progressive color
-                            Color pixel_color = ray_renderer.get_progressive_color(i, j);
+                            // Average samples
+                            pixel_color = pixel_color / progressive_samples;
 
                             // Gamma correction
                             pixel_color.x = std::sqrt(pixel_color.x);
@@ -1707,13 +1684,7 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    ray_renderer.current_pass++;
-                    std::cout << "Progressive pass " << ray_renderer.current_pass << "/" << ray_renderer.max_passes << " complete" << std::endl;
-
-                    // Continue rendering if not complete
-                    if (!ray_renderer.is_progressive_complete()) {
-                        need_render = true; // Trigger another pass
-                    }
+                    std::cout << "Progressive render complete (using " << progressive_samples << " samples)" << std::endl;
 
                 } else if (ray_renderer.enable_wavefront) {
                     // WAVEFRONT RENDERING: Tiled cache-coherent rendering
@@ -1753,44 +1724,21 @@ int main(int argc, char* argv[]) {
                             int shadow_rays = 0;
                             int total_rays = 0;
 
-                            // Adaptive sampling or standard sampling
-                            int actual_samples = preset.samples;
-                            std::vector<Color> sample_storage;
+                            // Adaptive sampling: use fewer samples for preview-like quality
+                            int actual_samples = ray_renderer.enable_adaptive ?
+                                std::max(1, preset.samples / 2) : preset.samples; // Use half samples when adaptive is on
 
-                            if (ray_renderer.enable_adaptive) {
-                                // Adaptive sampling: collect samples and check variance
-                                sample_storage.reserve(preset.samples);
+                            for (int s = 0; s < actual_samples; ++s) {
+                                float u = (i + random_float()) / (image_width - 1);
+                                float v = (j + random_float()) / (image_height - 1);
 
-                                while (actual_samples <= preset.samples &&
-                                       ray_renderer.should_continue_sampling(i, j, sample_storage)) {
-                                    float u = (i + random_float()) / (image_width - 1);
-                                    float v = (j + random_float()) / (image_height - 1);
+                                Ray r = cam.get_ray(u, v);
+                                Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+                                pixel_color = pixel_color + sample_color;
+                                total_rays += ray_renderer.max_depth;
 
-                                    Ray r = cam.get_ray(u, v);
-                                    Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
-                                    sample_storage.push_back(sample_color);
-                                    pixel_color = pixel_color + sample_color;
-                                    actual_samples++;
-
-                                    total_rays += ray_renderer.max_depth;
-                                }
-
-                                // Average the samples
-                                if (actual_samples > 0) {
-                                    pixel_color = pixel_color / actual_samples;
-                                }
-                            } else {
-                                // Standard sampling
-                                for (int s = 0; s < preset.samples; ++s) {
-                                    float u = (i + random_float()) / (image_width - 1);
-                                    float v = (j + random_float()) / (image_height - 1);
-
-                                    Ray r = cam.get_ray(u, v);
-                                    Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
-                                    pixel_color = pixel_color + sample_color;
-                                    total_rays += ray_renderer.max_depth;
-
-                                    // Get hit info for analysis (simple approximation)
+                                // Get hit info for analysis (simple approximation)
+                                if (!ray_renderer.enable_adaptive) {
                                     HitRecord rec;
                                     if (scene.hit(r, 0.001f, 1000.0f, rec)) {
                                         total_depth += rec.t;
@@ -1811,16 +1759,17 @@ int main(int argc, char* argv[]) {
                                         }
                                     }
                                 }
+                            }
 
-                                float scale = 1.0f / preset.samples;
-                                pixel_color = pixel_color * scale;
+                            float scale = 1.0f / actual_samples;
+                            pixel_color = pixel_color * scale;
+
+                            if (!ray_renderer.enable_adaptive) {
                                 pixel_normal = pixel_normal * scale;
                                 pixel_albedo = pixel_albedo * scale;
                                 total_depth *= scale;
-                            }
 
-                            // Record analysis data (only for standard rendering)
-                            if (!ray_renderer.enable_adaptive) {
+                                // Record analysis data (only for standard rendering)
                                 analysis.record_pixel(i, image_height - 1 - j, shadow_rays, total_rays, total_depth, pixel_normal, pixel_albedo);
                             }
 

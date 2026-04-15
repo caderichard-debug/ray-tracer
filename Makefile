@@ -152,6 +152,28 @@ gpu-interactive: $(BUILD_DIR)
 	@echo "✓ Interactive GPU Ray Tracer built: $(BUILD_DIR)/gpu_interactive"
 	@echo "Run with: ./build/gpu_interactive"
 
+# Interactive GPU ray tracer (full featured with UI panels)
+.PHONY: gpu-interactive-full
+gpu-interactive-full: $(BUILD_DIR)
+	@echo "Building Interactive GPU Ray Tracer (Full Featured - Fixed Scene + Controls + UI)"
+	@echo "Features: Fixed scene, slower camera, reflections, settings panel, help overlay"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		src/main_gpu_interactive_full.cpp \
+		-o $(BUILD_DIR)/gpu_interactive_full $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ Interactive GPU Ray Tracer (Full) built: $(BUILD_DIR)/gpu_interactive_full"
+	@echo "Run with: ./build/gpu_interactive_full"
+
+# Interactive GPU ray tracer (WORKING - fixed black screen issue)
+.PHONY: gpu-working-fixed
+gpu-working-fixed: $(BUILD_DIR)
+	@echo "Building Interactive GPU Ray Tracer (WORKING - Fixed Black Screen)"
+	@echo "Features: Same scene as CPU, slower camera, UI panels, simplified shader"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		src/main_gpu_working_fixed.cpp \
+		-o $(BUILD_DIR)/gpu_working_fixed $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ Working GPU Ray Tracer built: $(BUILD_DIR)/gpu_working_fixed"
+	@echo "Run with: ./build/gpu_working_fixed"
+
 # Simple GPU test - renders a green window to verify OpenGL works
 .PHONY: gpu-test
 gpu-test: $(BUILD_DIR)
@@ -263,6 +285,22 @@ run-gpu-interactive: gpu-interactive
 	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, ESC to quit"
 	./build/gpu_interactive
 
+# Run interactive GPU ray tracer (full featured with all fixes)
+.PHONY: run-gpu-interactive-full
+run-gpu-interactive-full: gpu-interactive-full
+	@echo "Starting Interactive GPU Ray Tracer (Full Featured - All Issues Fixed)..."
+	@echo "Features: Fixed scene, slower camera, reflections, settings panel (C), help overlay (H)"
+	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, C/H for panels, ESC to quit"
+	./build/gpu_interactive_full
+
+# Run working GPU ray tracer (fixed black screen issue)
+.PHONY: run-gpu-working-fixed
+run-gpu-working-fixed: gpu-working-fixed
+	@echo "Starting Working GPU Ray Tracer (Fixed Black Screen Issue)..."
+	@echo "Features: Same scene as CPU, slower camera, UI panels, working shader"
+	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, C/H for panels, ESC to quit"
+	./build/gpu_working_fixed
+
 # Run with test scene
 .PHONY: test
 test: phase2
@@ -349,6 +387,8 @@ help:
 	@echo "  make gpu-fragment  - Build GPU ray tracer with full CPU feature parity (OpenGL 3.3+)"
 	@echo "  make gpu-working   - Build WORKING GPU ray tracer (GLSL 1.20 - OpenGL 2.0+)"
 	@echo "  make gpu-interactive - Build INTERACTIVE GPU ray tracer (same scene as CPU + controls)"
+	@echo "  make gpu-interactive-full - Build INTERACTIVE GPU (full featured)"
+	@echo "  make gpu-working-fixed - Build WORKING GPU (fixed black screen - RECOMMENDED)"
 	@echo "  make gpu-infra-test - Build GPU infrastructure test"
 	@echo "  make all           - Build all implemented phases"
 	@echo ""
@@ -359,7 +399,9 @@ help:
 	@echo "  make run-gpu-legacy - Build and run legacy GPU ray tracer"
 	@echo "  make run-gpu-fragment - Build and run GPU fragment ray tracer (full CPU parity)"
 	@echo "  make run-gpu-working - Build and run WORKING GPU ray tracer"
-	@echo "  make run-gpu-interactive - Build and run INTERACTIVE GPU (same scene as CPU, recommended)"
+	@echo "  make run-gpu-interactive - Build and run INTERACTIVE GPU (basic)"
+	@echo "  make run-gpu-interactive-full - Build and run INTERACTIVE GPU (full featured)"
+	@echo "  make run-gpu-working-fixed - Build and run WORKING GPU (fixed black screen - RECOMMENDED)"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
 	@echo "Testing:"
