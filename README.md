@@ -127,10 +127,16 @@ make phase2
 # Build and run interactive ray tracer
 make interactive
 make runi
-
-# View interactive controls guide
-cat INTERACTIVE_GUIDE.md
 ```
+
+**⚠️ IMPORTANT:** When the interactive ray tracer starts, **press H** immediately to see the help overlay with all controls! The help overlay shows:
+
+- **Movement:** WASD + Arrow keys to move, mouse to look around
+- **Quality:** Press 1-6 to change quality levels  
+- **Screenshot:** Press S to save screenshots
+- **Controls:** Press C to toggle the controls panel
+- **Navigation:** Click window to capture mouse for camera control
+- **Quit:** Press ESC or H to close help overlay
 
 ## Makefile Targets
 
