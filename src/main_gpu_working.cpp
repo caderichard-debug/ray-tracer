@@ -705,6 +705,23 @@ void setup_scene_data(
 ) {
     // === SPHERES (matching cornell_box.h exactly) ===
 
+    // Cornell box walls (using large spheres like CPU version)
+    // Walls at distance ±20 with radius 16 creates a ~16x16x16 room
+    // Back wall (green)
+    spheres.push_back({{0.0f, 0.0f, -20.0f}, 16.0f, {0.12f, 0.45f, 0.15f}, 0});
+
+    // Floor (gray)
+    spheres.push_back({{0.0f, -20.0f, 0.0f}, 16.0f, {0.73f, 0.73f, 0.73f}, 0});
+
+    // Ceiling (gray)
+    spheres.push_back({{0.0f, 20.0f, 0.0f}, 16.0f, {0.73f, 0.73f, 0.73f}, 0});
+
+    // Left wall (red)
+    spheres.push_back({{-20.0f, 0.0f, 0.0f}, 16.0f, {0.65f, 0.05f, 0.05f}, 0});
+
+    // Right wall (green)
+    spheres.push_back({{20.0f, 0.0f, 0.0f}, 16.0f, {0.12f, 0.45f, 0.15f}, 0});
+
     // Center sphere (gold - reflective, BIG)
     spheres.push_back({{0.0f, 0.0f, 0.0f}, 2.0f, {1.0f, 0.77f, 0.35f}, 1}); // Metal
 
@@ -842,93 +859,6 @@ void setup_scene_data(
         {quad_bottom_left[0], quad_bottom_left[1], quad_bottom_left[2]},
         {quad_n[0], quad_n[1], quad_n[2]},
         {0.73f, 0.73f, 0.73f}, 9 // Gradient
-    });
-
-    // === WALLS (simplified - using large triangles) ===
-
-    // Back wall (green)
-    triangles.push_back({
-        {-20.0f, -20.0f, -16.0f},
-        {20.0f, -20.0f, -16.0f},
-        {20.0f, 20.0f, -16.0f},
-        {0.0f, 0.0f, 1.0f},
-        {0.12f, 0.45f, 0.15f}, 0
-    });
-
-    triangles.push_back({
-        {-20.0f, -20.0f, -16.0f},
-        {20.0f, 20.0f, -16.0f},
-        {-20.0f, 20.0f, -16.0f},
-        {0.0f, 0.0f, 1.0f},
-        {0.12f, 0.45f, 0.15f}, 0
-    });
-
-    // Floor (gray)
-    triangles.push_back({
-        {-20.0f, -16.0f, -20.0f},
-        {20.0f, -16.0f, -20.0f},
-        {20.0f, -16.0f, 20.0f},
-        {0.0f, 1.0f, 0.0f},
-        {0.73f, 0.73f, 0.73f}, 0
-    });
-
-    triangles.push_back({
-        {-20.0f, -16.0f, -20.0f},
-        {20.0f, -16.0f, 20.0f},
-        {-20.0f, -16.0f, 20.0f},
-        {0.0f, 1.0f, 0.0f},
-        {0.73f, 0.73f, 0.73f}, 0
-    });
-
-    // Ceiling (gray)
-    triangles.push_back({
-        {-20.0f, 16.0f, -20.0f},
-        {20.0f, 16.0f, -20.0f},
-        {20.0f, 16.0f, 20.0f},
-        {0.0f, -1.0f, 0.0f},
-        {0.73f, 0.73f, 0.73f}, 0
-    });
-
-    triangles.push_back({
-        {-20.0f, 16.0f, -20.0f},
-        {20.0f, 16.0f, 20.0f},
-        {-20.0f, 16.0f, 20.0f},
-        {0.0f, -1.0f, 0.0f},
-        {0.73f, 0.73f, 0.73f}, 0
-    });
-
-    // Left wall (red)
-    triangles.push_back({
-        {-16.0f, -20.0f, -20.0f},
-        {-16.0f, -20.0f, 20.0f},
-        {-16.0f, 20.0f, 20.0f},
-        {1.0f, 0.0f, 0.0f},
-        {0.65f, 0.05f, 0.05f}, 0
-    });
-
-    triangles.push_back({
-        {-16.0f, -20.0f, -20.0f},
-        {-16.0f, 20.0f, 20.0f},
-        {-16.0f, 20.0f, -20.0f},
-        {1.0f, 0.0f, 0.0f},
-        {0.65f, 0.05f, 0.05f}, 0
-    });
-
-    // Right wall (green)
-    triangles.push_back({
-        {16.0f, -20.0f, -20.0f},
-        {16.0f, -20.0f, 20.0f},
-        {16.0f, 20.0f, 20.0f},
-        {-1.0f, 0.0f, 0.0f},
-        {0.12f, 0.45f, 0.15f}, 0
-    });
-
-    triangles.push_back({
-        {16.0f, -20.0f, -20.0f},
-        {16.0f, 20.0f, 20.0f},
-        {16.0f, 20.0f, -20.0f},
-        {-1.0f, 0.0f, 0.0f},
-        {0.12f, 0.45f, 0.15f}, 0
     });
 }
 
