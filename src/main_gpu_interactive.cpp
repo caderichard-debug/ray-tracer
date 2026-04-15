@@ -1068,6 +1068,7 @@ public:
         GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_shader_src);
 
         if (!vertex_shader || !fragment_shader) {
+            std::cerr << "OpenGLUI: Failed to compile shaders" << std::endl;
             return false;
         }
 
@@ -1076,15 +1077,45 @@ public:
         glAttachShader(ui_program, fragment_shader);
         glLinkProgram(ui_program);
 
+        // Check link status
+        GLint link_status;
+        glGetProgramiv(ui_program, GL_LINK_STATUS, &link_status);
+        if (link_status != GL_TRUE) {
+            GLint log_length;
+            glGetProgramiv(ui_program, GL_INFO_LOG_LENGTH, &log_length);
+            std::vector<char> log(log_length);
+            glGetProgramInfoLog(ui_program, log_length, nullptr, log.data());
+            std::cerr << "OpenGLUI: Failed to link UI program:" << std::endl;
+            std::cerr << log.data() << std::endl;
+            glDeleteProgram(ui_program);
+            ui_program = 0;
+            return false;
+        }
+
         glDeleteShader(vertex_shader);
         glDeleteShader(fragment_shader);
+
+        std::cout << "OpenGLUI: UI program linked successfully" << std::endl;
 
         // Create VAO/VBO for UI rendering
         glGenVertexArrays(1, &ui_vao);
         glGenBuffers(1, &ui_vbo);
 
+        // Set up VAO once
+        glBindVertexArray(ui_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
+
+        // Enable vertex attributes
+        GLint pos_loc = glGetAttribLocation(ui_program, "position");
+        GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
+
+        glEnableVertexAttribArray(pos_loc);
+        glEnableVertexAttribArray(tex_loc);
+
+        glBindVertexArray(0);
+
         initialized = true;
-        std::cout << "OpenGLUI: UI renderer initialized" << std::endl;
+        std::cout << "OpenGLUI: UI renderer initialized successfully" << std::endl;
         return true;
     }
 
@@ -1112,6 +1143,22 @@ public:
     }
 
     void render_colored_quad(float x, float y, float width, float height, const SDL_Color& color) {
+        std::cout << "OpenGLUI: render_colored_quad(" << x << ", " << y << ", " << width << ", " << height << ")" << std::endl;
+
+        if (!initialized) {
+            std::cout << "OpenGLUI: ERROR - Not initialized!" << std::endl;
+            return;
+        }
+
+        // Save current OpenGL state
+        GLint current_program, current_vao, current_array_buffer, current_vertex_array_buffer_binding;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &current_vao);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &current_array_buffer);
+        glGetIntegerv(GL_VERTEX_ARRAY_BUFFER_BINDING, &current_vertex_array_buffer_binding);
+
+        std::cout << "OpenGLUI: Current state - program=" << current_program << " vao=" << current_vao << std::endl;
+
         float x1 = (x / WIDTH) * 2.0f - 1.0f;
         float y1 = 1.0f - (y / HEIGHT) * 2.0f;
         float x2 = ((x + width) / WIDTH) * 2.0f - 1.0f;
@@ -1124,13 +1171,29 @@ public:
             x2, y2, 1.0f, 1.0f
         };
 
+        std::cout << "OpenGLUI: Using UI program " << ui_program << " (was using " << current_program << ")" << std::endl;
         glUseProgram(ui_program);
+
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            std::cout << "OpenGLUI: ERROR after glUseProgram - " << err << std::endl;
+        }
+
         glBindVertexArray(ui_vao);
         glBindBuffer(GL_ARRAY_BUFFER, ui_vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
 
         GLint pos_loc = glGetAttribLocation(ui_program, "position");
         GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
+
+        std::cout << "OpenGLUI: pos_loc=" << pos_loc << " tex_loc=" << tex_loc << std::endl;
+
+        if (pos_loc == -1 || tex_loc == -1) {
+            std::cout << "OpenGLUI: ERROR - Failed to get attribute locations!" << std::endl;
+            glUseProgram(current_program); // Restore state
+            glBindVertexArray(current_vao); // Restore state
+            return;
+        }
 
         glEnableVertexAttribArray(pos_loc);
         glVertexAttribPointer(pos_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
@@ -1144,12 +1207,31 @@ public:
         glUniform4f(color_loc, color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
         glUniform1i(use_tex_loc, 0);
 
+        std::cout << "OpenGLUI: Drawing quad" << std::endl;
         glDisable(GL_BLEND);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        err = glGetError();
+        if (err != GL_NO_ERROR) {
+            std::cout << "OpenGLUI: ERROR after glDrawArrays - " << err << std::endl;
+        }
+
+        // Restore OpenGL state
+        glUseProgram(current_program);
+        glBindVertexArray(current_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, current_vertex_array_buffer_binding);
+
+        std::cout << "OpenGLUI: Restored state - program=" << current_program << " vao=" << current_vao << std::endl;
     }
 
     void render_text_quad(float x, float y, float width, float height, GLuint texture, const SDL_Color& color) {
         if (texture == 0) return;
+
+        // Save current OpenGL state
+        GLint current_program;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+        GLint current_texture;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
 
         float x1 = (x / WIDTH) * 2.0f - 1.0f;
         float y1 = 1.0f - (y / HEIGHT) * 2.0f;
@@ -1170,6 +1252,11 @@ public:
 
         GLint pos_loc = glGetAttribLocation(ui_program, "position");
         GLint tex_loc = glGetAttribLocation(ui_program, "tex_coord");
+
+        if (pos_loc == -1 || tex_loc == -1) {
+            glUseProgram(current_program); // Restore state
+            return;
+        }
 
         glEnableVertexAttribArray(pos_loc);
         glVertexAttribPointer(pos_loc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
@@ -1192,6 +1279,11 @@ public:
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         glDisable(GL_BLEND);
+
+        // Restore OpenGL state
+        glUseProgram(current_program);
+        glBindTexture(GL_TEXTURE_2D, current_texture);
+        glBindVertexArray(0);
     }
 
     TTF_Font* get_font() { return font; }
@@ -1232,13 +1324,19 @@ public:
     bool is_showing() const { return show; }
 
     void render() {
-        if (!show || !initialized || !ui_renderer) return;
+        if (!show || !initialized || !ui_renderer) {
+            std::cout << "HelpOverlay::render() - skipping: show=" << show << " initialized=" << initialized << " renderer=" << (ui_renderer != nullptr) << std::endl;
+            return;
+        }
+
+        std::cout << "HelpOverlay::render() - rendering UI" << std::endl;
 
         SDL_Color white = {255, 255, 255, 255};
         SDL_Color bg_color = {20, 20, 30, 230};
         SDL_Color title_color = {255, 200, 100, 255};
 
         // Render semi-transparent background
+        std::cout << "HelpOverlay::render() - rendering background quad" << std::endl;
         ui_renderer->render_colored_quad(50, 50, WIDTH - 100, HEIGHT - 100, bg_color);
 
         // Render help text
@@ -2200,9 +2298,11 @@ int main(int argc, char* argv[]) {
             // Render OpenGL-based overlays
             // Both panels can now be visible independently
             if (help_overlay.is_showing()) {
+                std::cout << "Rendering help overlay (OpenGL)" << std::endl;
                 help_overlay.render();
             }
             if (controls_panel.is_showing()) {
+                std::cout << "Rendering controls panel (OpenGL)" << std::endl;
                 controls_panel.render(enable_reflections, lighting_mode, num_lights);
             }
 

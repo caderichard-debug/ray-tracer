@@ -50,7 +50,7 @@ struct QualityPreset {
 };
 
 QualityPreset quality_levels[] = {
-    {1920, 4, 3, "Large Window (Default)"},  // Large window with medium quality
+    {1920, 1, 3, "Large Window (Default)"},
     {640, 1, 3, "Low (Fast)"},
     {800, 4, 3, "Medium"},
     {1280, 16, 5, "High"},
