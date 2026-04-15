@@ -2,7 +2,16 @@
 
 ## [Unreleased] - 2026-04-15
 
-### 🚀 Major Features Added
+### 🎨 New Feature: ASCII Terminal Ray Tracer
+
+- **ASCII Terminal Mode**: Retro text-based rendering
+  - Pure terminal rendering (no GUI required)
+  - Automatic camera animation (orbits scene)
+  - Real-time ASCII art output
+  - Cross-platform (macOS/Linux/Windows)
+  - Adaptive terminal sizing
+  - Quality presets (1-3)
+  - Brightness mapping: `  .:-=+*#%@`
 
 #### Advanced CPU Rendering Optimizations - FULLY IMPLEMENTED ✅
 
