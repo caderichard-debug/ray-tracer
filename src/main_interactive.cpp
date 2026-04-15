@@ -914,8 +914,6 @@ public:
         }
         y_offset += 35;
 
-        y_offset += 22;
-
         // Resolution buttons
         label_surface = TTF_RenderText_Blended(font, "Resolution:", title_color);
         if (label_surface) {
@@ -940,8 +938,6 @@ public:
             render_button(resolution_names[i], resolution_values[i], 5, is_active);
         }
         y_offset += 35;
-
-        y_offset += 22;
 
         // Render Features section
         label_surface = TTF_RenderText_Blended(font, "Render Features:", title_color);
