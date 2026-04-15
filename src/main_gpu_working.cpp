@@ -11,6 +11,15 @@
 #include <SDL2/SDL_opengl.h>
 #include <SDL2/SDL_ttf.h>
 
+// Include CPU scene setup for shared scene data
+#include "scene/scene.h"
+#include "scene/cornell_box.h"
+#include "primitives/sphere.h"
+#include "primitives/triangle.h"
+#include "material/material.h"
+#include "math/vec3.h"
+#include "math/ray.h"
+
 // Window dimensions
 const int WIDTH = 1280;
 const int HEIGHT = 720;
@@ -698,168 +707,87 @@ GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
     return program;
 }
 
-// Setup scene data (matching CPU Cornell Box exactly)
+// Setup scene data using the same CPU scene setup code
 void setup_scene_data(
     std::vector<SphereData>& spheres,
     std::vector<TriangleData>& triangles
 ) {
-    // === SPHERES (matching cornell_box.h exactly) ===
+    // Use the exact same scene setup as CPU renderer
+    Scene scene;
+    setup_cornell_box_scene(scene);
 
-    // Cornell box walls (using large spheres like CPU version)
-    // Walls at distance ±20 with radius 16 creates a ~16x16x16 room
-    // Back wall (green)
-    spheres.push_back({{0.0f, 0.0f, -20.0f}, 16.0f, {0.12f, 0.45f, 0.15f}, 0});
+    // Extract sphere data from Scene objects
+    for (const auto& obj : scene.objects) {
+        if (auto sphere = std::dynamic_pointer_cast<Sphere>(obj)) {
+            SphereData data;
+            data.center[0] = sphere->center.x;
+            data.center[1] = sphere->center.y;
+            data.center[2] = sphere->center.z;
+            data.radius = sphere->radius;
+            data.color[0] = sphere->mat->albedo.x;
+            data.color[1] = sphere->mat->albedo.y;
+            data.color[2] = sphere->mat->albedo.z;
 
-    // Floor (gray)
-    spheres.push_back({{0.0f, -20.0f, 0.0f}, 16.0f, {0.73f, 0.73f, 0.73f}, 0});
+            // Determine material type
+            if (auto metal = std::dynamic_pointer_cast<Metal>(sphere->mat)) {
+                if (metal->fuzz < 0.1) {
+                    data.material = 1; // Perfect metal
+                } else {
+                    data.material = 2; // Fuzzy metal
+                }
+            } else if (auto glass = std::dynamic_pointer_cast<Dielectric>(sphere->mat)) {
+                data.material = 3; // Glass
+            } else if (std::dynamic_pointer_cast<Lambertian>(sphere->mat)) {
+                // Check if this is a procedural texture material
+                if (sphere->mat->albedo.x > 0.7 && sphere->mat->albedo.y < 0.3 && sphere->mat->albedo.z < 0.3) {
+                    data.material = 4; // Checkerboard (red base)
+                } else if (sphere->mat->albedo.x > 0.9 && sphere->mat->albedo.y > 0.9 && sphere->mat->albedo.z > 0.9) {
+                    data.material = 5; // Noise (white base)
+                } else if (sphere->mat->albedo.x > 0.5 && sphere->mat->albedo.y < 0.3 && sphere->mat->albedo.z > 0.5) {
+                    data.material = 6; // Gradient (purple base)
+                } else if (sphere->mat->albedo.x > 0.7 && sphere->mat->albedo.y > 0.4 && sphere->mat->albedo.y < 0.6 && sphere->mat->albedo.z < 0.3) {
+                    data.material = 7; // Stripe (orange base)
+                } else {
+                    data.material = 0; // Regular lambertian
+                }
+            } else {
+                data.material = 0; // Default lambertian
+            }
 
-    // Ceiling (gray)
-    spheres.push_back({{0.0f, 20.0f, 0.0f}, 16.0f, {0.73f, 0.73f, 0.73f}, 0});
+            spheres.push_back(data);
+        } else if (auto triangle = std::dynamic_pointer_cast<Triangle>(obj)) {
+            TriangleData data;
 
-    // Left wall (red)
-    spheres.push_back({{-20.0f, 0.0f, 0.0f}, 16.0f, {0.65f, 0.05f, 0.05f}, 0});
+            // Extract vertices using public methods
+            Point3 v0 = triangle->vertex0();
+            Point3 v1 = triangle->vertex1();
+            Point3 v2 = triangle->vertex2();
 
-    // Right wall (green)
-    spheres.push_back({{20.0f, 0.0f, 0.0f}, 16.0f, {0.12f, 0.45f, 0.15f}, 0});
+            data.v0[0] = v0.x; data.v0[1] = v0.y; data.v0[2] = v0.z;
+            data.v1[0] = v1.x; data.v1[1] = v1.y; data.v1[2] = v1.z;
+            data.v2[0] = v2.x; data.v2[1] = v2.y; data.v2[2] = v2.z;
 
-    // Center sphere (gold - reflective, BIG)
-    spheres.push_back({{0.0f, 0.0f, 0.0f}, 2.0f, {1.0f, 0.77f, 0.35f}, 1}); // Metal
+            // Calculate normal
+            Vec3 edge1 = v1 - v0;
+            Vec3 edge2 = v2 - v0;
+            Vec3 normal = unit_vector(cross(edge1, edge2));
+            data.normal[0] = normal.x;
+            data.normal[1] = normal.y;
+            data.normal[2] = normal.z;
 
-    // Orbiting spheres
-    spheres.push_back({{-3.0f, 1.0f, 2.0f}, 0.8f, {0.7f, 0.6f, 0.5f}, 2}); // Fuzzy metal
-    spheres.push_back({{3.0f, 0.8f, 2.0f}, 0.9f, {0.1f, 0.2f, 0.7f}, 0}); // Blue
-    spheres.push_back({{0.0f, 0.5f, 1.5f}, 0.6f, {0.65f, 0.05f, 0.05f}, 0}); // Red
-    spheres.push_back({{-1.5f, 0.3f, 2.0f}, 0.5f, {0.8f, 0.7f, 0.1f}, 0}); // Yellow
+            // Extract color
+            data.color[0] = triangle->material->albedo.x;
+            data.color[1] = triangle->material->albedo.y;
+            data.color[2] = triangle->material->albedo.z;
 
-    // Glass sphere
-    spheres.push_back({{1.0f, -1.5f, 2.5f}, 0.8f, {1.0f, 1.0f, 1.0f}, 3}); // Glass
+            // Determine material type (simplified for triangles)
+            data.material = 8; // Default to checkerboard for triangles (pyramid)
 
-    // Sphere behind glass
-    spheres.push_back({{0.5f, -2.0f, 1.5f}, 0.5f, {0.65f, 0.05f, 0.05f}, 0}); // Red
+            triangles.push_back(data);
+        }
+    }
 
-    // Small metal spheres
-    spheres.push_back({{-0.5f, 2.5f, 0.0f}, 0.2f, {0.8f, 0.8f, 0.8f}, 1}); // Metal
-    spheres.push_back({{-3.5f, 2.8f, 0.0f}, 0.2f, {0.8f, 0.8f, 0.8f}, 1}); // Metal
-
-    // Procedural texture spheres
-    // Checkerboard sphere
-    spheres.push_back({{-3.0f, 1.0f, -2.0f}, 0.8f, {0.8f, 0.2f, 0.2f}, 4}); // Checkerboard
-
-    // Noise sphere
-    spheres.push_back({{-3.5f, -2.0f, 2.0f}, 0.8f, {1.0f, 1.0f, 1.0f}, 5}); // Noise
-
-    // Gradient sphere
-    spheres.push_back({{-1.0f, -1.5f, 2.0f}, 0.8f, {0.6f, 0.2f, 0.8f}, 6}); // Gradient
-
-    // Stripe sphere
-    spheres.push_back({{0.5f, 1.5f, 2.0f}, 0.8f, {0.8f, 0.5f, 0.2f}, 7}); // Stripe
-
-    // === TRIANGLES ===
-
-    // Helper function for vector operations
-    auto cross = [](float a[3], float b[3], float result[3]) {
-        result[0] = a[1] * b[2] - a[2] * b[1];
-        result[1] = a[2] * b[0] - a[0] * b[2];
-        result[2] = a[0] * b[1] - a[1] * b[0];
-    };
-
-    auto normalize = [](float v[3], float result[3]) {
-        float len = sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
-        result[0] = v[0] / len;
-        result[1] = v[1] / len;
-        result[2] = v[2] / len;
-    };
-
-    auto sub = [](float a[3], float b[3], float result[3]) {
-        result[0] = a[0] - b[0];
-        result[1] = a[1] - b[1];
-        result[2] = a[2] - b[2];
-    };
-
-    // Pyramid triangles (checkerboard)
-    // Top: (-2.0, 4.0, 0.0), Base1: (-1.0, 2.0, -1.0), Base2: (-3.0, 2.0, -1.0), Base3: (-2.0, 2.0, 1.0)
-    float pyramid_top[3] = {-2.0f, 4.0f, 0.0f};
-    float pyramid_base1[3] = {-1.0f, 2.0f, -1.0f};
-    float pyramid_base2[3] = {-3.0f, 2.0f, -1.0f};
-    float pyramid_base3[3] = {-2.0f, 2.0f, 1.0f};
-
-    float edge1[3], edge2[3], pyramid_n0[3], pyramid_n1[3], pyramid_n2[3];
-    sub(pyramid_base1, pyramid_top, edge1);
-    sub(pyramid_base2, pyramid_top, edge2);
-    cross(edge1, edge2, pyramid_n0);
-    normalize(pyramid_n0, pyramid_n0);
-
-    sub(pyramid_base2, pyramid_top, edge1);
-    sub(pyramid_base3, pyramid_top, edge2);
-    cross(edge1, edge2, pyramid_n1);
-    normalize(pyramid_n1, pyramid_n1);
-
-    sub(pyramid_base3, pyramid_top, edge1);
-    sub(pyramid_base1, pyramid_top, edge2);
-    cross(edge1, edge2, pyramid_n2);
-    normalize(pyramid_n2, pyramid_n2);
-
-    float pyramid_n3[3] = {0.0f, 1.0f, 0.0f};
-
-    // Pyramid face 1
-    triangles.push_back({
-        {pyramid_top[0], pyramid_top[1], pyramid_top[2]},
-        {pyramid_base1[0], pyramid_base1[1], pyramid_base1[2]},
-        {pyramid_base2[0], pyramid_base2[1], pyramid_base2[2]},
-        {pyramid_n0[0], pyramid_n0[1], pyramid_n0[2]},
-        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
-    });
-
-    // Pyramid face 2
-    triangles.push_back({
-        {pyramid_top[0], pyramid_top[1], pyramid_top[2]},
-        {pyramid_base2[0], pyramid_base2[1], pyramid_base2[2]},
-        {pyramid_base3[0], pyramid_base3[1], pyramid_base3[2]},
-        {pyramid_n1[0], pyramid_n1[1], pyramid_n1[2]},
-        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
-    });
-
-    // Pyramid face 3
-    triangles.push_back({
-        {pyramid_top[0], pyramid_top[1], pyramid_top[2]},
-        {pyramid_base3[0], pyramid_base3[1], pyramid_base3[2]},
-        {pyramid_base1[0], pyramid_base1[1], pyramid_base1[2]},
-        {pyramid_n2[0], pyramid_n2[1], pyramid_n2[2]},
-        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
-    });
-
-    // Pyramid base
-    triangles.push_back({
-        {pyramid_base1[0], pyramid_base1[1], pyramid_base1[2]},
-        {pyramid_base3[0], pyramid_base3[1], pyramid_base3[2]},
-        {pyramid_base2[0], pyramid_base2[1], pyramid_base2[2]},
-        {pyramid_n3[0], pyramid_n3[1], pyramid_n3[2]},
-        {0.73f, 0.73f, 0.73f}, 8 // Checkerboard
-    });
-
-    // Gradient quad triangles (on right wall)
-    // Top-left: (4.0, 3.0, 1.0), Top-right: (4.0, 3.0, 5.0), Bottom-left: (4.0, -1.0, 1.0), Bottom-right: (4.0, -1.0, 5.0)
-    float quad_top_left[3] = {4.0f, 3.0f, 1.0f};
-    float quad_top_right[3] = {4.0f, 3.0f, 5.0f};
-    float quad_bottom_left[3] = {4.0f, -1.0f, 1.0f};
-    float quad_bottom_right[3] = {4.0f, -1.0f, 5.0f};
-    float quad_n[3] = {-1.0f, 0.0f, 0.0f};
-
-    triangles.push_back({
-        {quad_top_left[0], quad_top_left[1], quad_top_left[2]},
-        {quad_top_right[0], quad_top_right[1], quad_top_right[2]},
-        {quad_bottom_right[0], quad_bottom_right[1], quad_bottom_right[2]},
-        {quad_n[0], quad_n[1], quad_n[2]},
-        {0.73f, 0.73f, 0.73f}, 9 // Gradient
-    });
-
-    triangles.push_back({
-        {quad_top_left[0], quad_top_left[1], quad_top_left[2]},
-        {quad_bottom_right[0], quad_bottom_right[1], quad_bottom_right[2]},
-        {quad_bottom_left[0], quad_bottom_left[1], quad_bottom_left[2]},
-        {quad_n[0], quad_n[1], quad_n[2]},
-        {0.73f, 0.73f, 0.73f}, 9 // Gradient
-    });
+    std::cout << "✓ Extracted " << spheres.size() << " spheres and " << triangles.size() << " triangles from CPU scene" << std::endl;
 }
 
 int main(int argc, char* argv[]) {

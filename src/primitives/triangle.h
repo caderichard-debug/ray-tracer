@@ -11,8 +11,10 @@ class Triangle : public Primitive {
 private:
     Point3 v0, v1, v2;  // Triangle vertices
     Vec3 edge1, edge2;  // Precomputed edges for fast intersection
-    std::shared_ptr<Material> material;
     Vec3 normal;        // Precomputed normal
+
+public:
+    std::shared_ptr<Material> material;  // Made public for GPU renderer access
 
 public:
     Triangle(const Point3& vertex0, const Point3& vertex1, const Point3& vertex2,
