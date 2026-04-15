@@ -41,10 +41,76 @@ A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectoriza
 ## Quick Start
 
 ### Prerequisites
-- C++17 compiler (g++, clang++)
-- x86_64 CPU with AVX2 support (Intel Haswell+ or AMD Ryzen+)
-- SDL2 (for interactive mode)
-- Make
+
+This project requires the following dependencies:
+
+**Core Requirements:**
+- **C++17 compiler** (g++, clang++, or MSVC)
+- **x86_64 CPU** with AVX2 support (Intel Haswell+ or AMD Ryzen+)
+- **OpenMP** (usually included with compiler)
+- **SDL2** (for interactive mode)
+- **SDL2_ttf** (for UI text rendering)
+- **Make** (or CMake)
+
+#### Installing Dependencies by Platform
+
+**macOS (Homebrew):**
+```bash
+# Install compiler and dependencies
+brew install gcc sdl2 sdl2_ttf
+
+# OpenMP is included with GCC
+```
+
+**Ubuntu/Debian:**
+```bash
+# Install all dependencies
+sudo apt update
+sudo apt install build-essential libsdl2-dev libsdl2-ttf-dev libomp-dev
+
+# OpenMP is included with GCC
+```
+
+**Windows (MinGW-w64):**
+```bash
+# Install MinGW-w64 from https://www.mingw-w64.org/
+# Or use MSYS2: https://www.msys2.org/
+
+# In MSYS2 terminal:
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf
+
+# Or use vcpkg (recommended for Windows):
+# Install vcpkg from https://github.com/Microsoft/vcpkg
+./vcpkg/bootstrap-vcpkg.bat
+./vcpkg/vcpkg install sdl2 sdl2-ttf
+```
+
+**Windows (Visual Studio):**
+```bash
+# Install Visual Studio Community (free)
+# Install "Desktop development with C++" workload
+
+# Install vcpkg for dependencies
+git clone https://github.com/Microsoft/vcpkg
+.\vcpkg\bootstrap-vcpkg.bat
+.\vcpkg\vcpkg install sdl2 sdl2-ttf
+
+# Then open the project in Visual Studio
+```
+
+**Alternative: Using vcpkg (Cross-platform)**
+```bash
+# Install vcpkg
+git clone https://github.com/Microsoft/vcpkg
+cd vcpkg
+./bootstrap-vcpkg.sh  # or .bat on Windows
+
+# Install dependencies
+./vcpkg install sdl2 sdl2-ttf
+
+# Integrate with your build system
+./vcpkg integrate install
+```
 
 ### Build & Run
 
