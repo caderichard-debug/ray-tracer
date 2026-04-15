@@ -261,7 +261,7 @@ help:
 	@echo "  make gpu-interactive - Build INTERACTIVE GPU ray tracer (same scene as CPU + controls)"
 	@echo "  make gpu-interactive-full - Build INTERACTIVE GPU (full featured)"
 	@echo "  make gpu-working-fixed - Build WORKING GPU (fixed black screen - RECOMMENDED)"
-	@echo "  make gpu-infra-test - Build GPU infrastructure test"
+	@echo "  make ascii         - Build ASCII terminal ray tracer (RETRO STYLE)"
 	@echo "  make all           - Build all implemented phases"
 	@echo ""
 	@echo "Running:"
@@ -274,6 +274,7 @@ help:
 	@echo "  make run-gpu-interactive - Build and run INTERACTIVE GPU (basic)"
 	@echo "  make run-gpu-interactive-full - Build and run INTERACTIVE GPU (full featured)"
 	@echo "  make run-gpu-working-fixed - Build and run WORKING GPU (fixed black screen - RECOMMENDED)"
+	@echo "  make runa          - Build and run ASCII terminal ray tracer (RETRO!)"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
 	@echo "Testing:"
@@ -416,3 +417,23 @@ bench-help:
 	@echo "  phase1_output.ppm      - Phase 1 rendered image"
 	@echo "  phase2_output.ppm      - Phase 2 rendered image"
 	@echo ""
+
+# ASCII terminal ray tracer - Pure terminal rendering
+# Features: ASCII art output, terminal-based, animated camera
+.PHONY: ascii
+ascii: $(BUILD_DIR)
+	@echo "Building ASCII Terminal Ray Tracer"
+	@echo "Features: ASCII art output, terminal rendering, animated camera"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) \
+		src/main_ascii.cpp src/renderer/renderer.cpp \
+		-o $(BUILD_DIR)/raytracer_ascii $(LDFLAGS)
+	@echo "✓ ASCII Ray Tracer built: $(BUILD_DIR)/raytracer_ascii"
+	@ln -sf $(BUILD_DIR)/raytracer_ascii raytracer_ascii
+
+# Run ASCII ray tracer
+.PHONY: runa
+runa: ascii
+	@echo "Starting ASCII Terminal Ray Tracer..."
+	@echo "Features: ASCII art rendering, animated camera orbit"
+	@echo "Controls: Ctrl+C to stop"
+	./raytracer_ascii

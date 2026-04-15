@@ -17,6 +17,8 @@
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "material/material.h"
+#include "material/lambertian.h"
+#include "texture/texture.h"
 #include "math/vec3.h"
 #include "math/ray.h"
 
@@ -737,16 +739,16 @@ void setup_scene_data(
                 }
             } else if (auto glass = std::dynamic_pointer_cast<Dielectric>(sphere->mat)) {
                 data.material = 3; // Glass
-            } else if (std::dynamic_pointer_cast<Lambertian>(sphere->mat)) {
+            } else if (auto lambertian = std::dynamic_pointer_cast<Lambertian>(sphere->mat)) {
                 // Check if this is a procedural texture material
-                if (sphere->mat->albedo.x > 0.7 && sphere->mat->albedo.y < 0.3 && sphere->mat->albedo.z < 0.3) {
-                    data.material = 4; // Checkerboard (red base)
-                } else if (sphere->mat->albedo.x > 0.9 && sphere->mat->albedo.y > 0.9 && sphere->mat->albedo.z > 0.9) {
-                    data.material = 5; // Noise (white base)
-                } else if (sphere->mat->albedo.x > 0.5 && sphere->mat->albedo.y < 0.3 && sphere->mat->albedo.z > 0.5) {
-                    data.material = 6; // Gradient (purple base)
-                } else if (sphere->mat->albedo.x > 0.7 && sphere->mat->albedo.y > 0.4 && sphere->mat->albedo.y < 0.6 && sphere->mat->albedo.z < 0.3) {
-                    data.material = 7; // Stripe (orange base)
+                if (auto checker = std::dynamic_pointer_cast<CheckerTexture>(lambertian->texture)) {
+                    data.material = 4; // Checkerboard
+                } else if (auto noise = std::dynamic_pointer_cast<NoiseTexture>(lambertian->texture)) {
+                    data.material = 5; // Noise
+                } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->texture)) {
+                    data.material = 6; // Gradient
+                } else if (auto stripe = std::dynamic_pointer_cast<StripeTexture>(lambertian->texture)) {
+                    data.material = 7; // Stripe
                 } else {
                     data.material = 0; // Regular lambertian
                 }
@@ -780,8 +782,18 @@ void setup_scene_data(
             data.color[1] = triangle->material->albedo.y;
             data.color[2] = triangle->material->albedo.z;
 
-            // Determine material type (simplified for triangles)
-            data.material = 8; // Default to checkerboard for triangles (pyramid)
+            // Determine material type for triangles
+            if (auto lambertian = std::dynamic_pointer_cast<Lambertian>(triangle->material)) {
+                if (auto checker = std::dynamic_pointer_cast<CheckerTexture>(lambertian->texture)) {
+                    data.material = 8; // Checkerboard (pyramid)
+                } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->texture)) {
+                    data.material = 9; // Gradient (quad on right wall)
+                } else {
+                    data.material = 0; // Regular lambertian
+                }
+            } else {
+                data.material = 0; // Default lambertian
+            }
 
             triangles.push_back(data);
         }
