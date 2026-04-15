@@ -1267,9 +1267,9 @@ int main(int argc, char* argv[]) {
         preset.width,
         static_cast<int>(preset.width / (16.0f / 9.0f)),
 #ifdef USE_GPU_RENDERER
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN
+        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN
 #else
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_FULLSCREEN
 #endif
     );
 
@@ -1386,7 +1386,7 @@ int main(int argc, char* argv[]) {
 
     // Initialize controls panel
     ControlsPanel controls_panel;
-    bool show_controls = true;  // Show controls by default
+    bool show_controls = false;  // Hide controls by default
     if (controls_panel.init()) {
         std::cout << "Controls panel initialized (press C to toggle)\n";
     } else {
