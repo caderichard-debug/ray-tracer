@@ -78,6 +78,7 @@ interactive-gpu: $(BUILD_DIR)
 	@echo "Building Interactive Real-time Ray Tracer (GPU)"
 	@echo "Features: OpenGL compute shaders, SDL2 window, Camera controls, Quality levels 1-3"
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		-DGPU_RENDERING \
 		src/main_interactive.cpp src/renderer/renderer.cpp $(GPU_RENDERER_SRC) \
 		-o $(BUILD_DIR)/raytracer_interactive_gpu $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
 	@echo "✓ Interactive GPU built: $(BUILD_DIR)/raytracer_interactive_gpu"

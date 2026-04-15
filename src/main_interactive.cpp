@@ -25,6 +25,9 @@
 #include "scene/cornell_box.h"
 #include "renderer/renderer.h"
 #include "renderer/render_analysis.h"
+
+// Conditionally include GPU renderer
+#ifdef GPU_RENDERING
 #include "renderer/gpu_renderer.h"
 
 // Renderer type selection
@@ -32,6 +35,7 @@ enum class RendererType {
     CPU,
     GPU
 };
+#endif
 
 
 // Quality presets (resolution, samples, max_depth)
@@ -1029,6 +1033,7 @@ int main(int argc, char* argv[]) {
     ray_renderer.enable_reflections = enable_reflections;
     std::cout << "CPU Renderer initialized (OpenMP with " << omp_get_max_threads() << " threads)" << std::endl;
 
+#ifdef GPU_RENDERING
     // Initialize GPU renderer
     RendererType current_renderer = RendererType::CPU;  // Default to CPU
     std::unique_ptr<GPURenderer> gpu_renderer = nullptr;
@@ -1047,6 +1052,7 @@ int main(int argc, char* argv[]) {
         std::cout << "GPU Renderer not available: " << e.what() << std::endl;
         gpu_renderer = nullptr;
     }
+#endif
 
     // Main loop
     bool running = true;
@@ -1131,6 +1137,7 @@ int main(int argc, char* argv[]) {
                         need_render = true;
                         break;
                     }
+#ifdef GPU_RENDERING
                     case SDLK_r: {  // Toggle CPU/GPU renderer
                         if (gpu_renderer) {
                             if (current_renderer == RendererType::CPU) {
@@ -1149,6 +1156,7 @@ int main(int argc, char* argv[]) {
                         }
                         break;
                     }
+#endif
                     case SDLK_SPACE:
                         paused = !paused;
                         std::cout << (paused ? "Paused" : "Resumed") << std::endl;
@@ -1399,6 +1407,7 @@ int main(int argc, char* argv[]) {
             // Get camera from controller
             Camera cam = camera_controller.get_camera();
 
+#ifdef GPU_RENDERING
             // Choose rendering path based on current renderer
             if (current_renderer == RendererType::GPU && gpu_renderer) {
                 // GPU rendering path
@@ -1440,7 +1449,9 @@ int main(int argc, char* argv[]) {
                 }
 
                 std::cout << "GPU render complete" << std::endl;
-            } else {
+            } else
+#endif
+            {
                 // CPU rendering path
                 std::cout << "CPU rendering..." << std::endl;
 
