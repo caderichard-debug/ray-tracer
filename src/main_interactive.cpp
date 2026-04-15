@@ -1267,9 +1267,9 @@ int main(int argc, char* argv[]) {
         preset.width,
         static_cast<int>(preset.width / (16.0f / 9.0f)),
 #ifdef USE_GPU_RENDERER
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN
+        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_MAXIMIZED
 #else
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_FULLSCREEN
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED
 #endif
     );
 
