@@ -50,7 +50,7 @@ struct QualityPreset {
 };
 
 QualityPreset quality_levels[] = {
-    {1920, 1, 3, "Large Window (Default)"},
+    {960, 1, 3, "Large Window (Default)"},  // Medium resolution (960x540) with large window
     {640, 1, 3, "Low (Fast)"},
     {800, 4, 3, "Medium"},
     {1280, 16, 5, "High"},
@@ -1347,8 +1347,8 @@ int main(int argc, char* argv[]) {
             window_title.c_str(),
             SDL_WINDOWPOS_UNDEFINED,
             SDL_WINDOWPOS_UNDEFINED,
-            preset.width,
-            static_cast<int>(preset.width / (16.0f / 9.0f)),
+            1920,  // Always use large window size
+            1080,
             SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
         );
     #else
@@ -1356,8 +1356,8 @@ int main(int argc, char* argv[]) {
             window_title.c_str(),
             SDL_WINDOWPOS_UNDEFINED,
             SDL_WINDOWPOS_UNDEFINED,
-            preset.width,
-            static_cast<int>(preset.width / (16.0f / 9.0f)),
+            1920,  // Always use large window size
+            1080,
             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
         );
     #endif

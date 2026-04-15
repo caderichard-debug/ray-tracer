@@ -2295,7 +2295,7 @@ int main(int argc, char* argv[]) {
             glBindVertexArray(vao);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-            // Render OpenGL-based overlays
+            // Render OpenGL-based overlays BEFORE buffer swap
             // Both panels can now be visible independently
             if (help_overlay.is_showing()) {
                 std::cout << "Rendering help overlay (OpenGL)" << std::endl;
@@ -2306,6 +2306,7 @@ int main(int argc, char* argv[]) {
                 controls_panel.render(enable_reflections, lighting_mode, num_lights);
             }
 
+            // Now swap buffers to show everything including UI overlays
             SDL_GL_SwapWindow(window);
 
             // Calculate FPS
