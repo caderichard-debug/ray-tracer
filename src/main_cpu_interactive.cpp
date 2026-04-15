@@ -1086,8 +1086,8 @@ public:
             SDL_FreeSurface(frustum_text_surface);
         }
 
-        // Add padding at bottom
-        y_offset += 10;
+        // Add padding at bottom for scrolling
+        y_offset += 40;
 
         // Calculate actual content height and scrolling
         content_height = y_offset;
