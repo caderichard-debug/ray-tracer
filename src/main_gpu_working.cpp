@@ -331,6 +331,8 @@ struct SphereData {
     float radius;
     float color[3];
     int material;
+    float gradient_scale;   // For gradient textures
+    float gradient_offset;  // For gradient textures
 };
 
 struct TriangleData {
@@ -357,6 +359,8 @@ uniform vec3 sphere_centers[16];
 uniform float sphere_radii[16];
 uniform vec3 sphere_colors[16];
 uniform int sphere_materials[16];
+uniform float sphere_gradient_scale[16];
+uniform float sphere_gradient_offset[16];
 uniform int num_spheres;
 
 uniform vec3 tri_v0[20];
@@ -530,8 +534,9 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                     // Noise (black and white)
                     color = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
                 } else if (material == 6) {
-                    // Gradient (purple to yellow vertical) - use default scale/offset for spheres
-                    color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0), 0.25, 0.0);
+                    // Gradient (purple to yellow vertical) - use proper scale/offset from texture
+                    color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0),
+                                              sphere_gradient_scale[hit_object], sphere_gradient_offset[hit_object]);
                 } else if (material == 7) {
                     // Stripe (orange and white horizontal)
                     color = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
@@ -748,23 +753,39 @@ void setup_scene_data(
                 } else {
                     data.material = 2; // Fuzzy metal
                 }
+                data.gradient_scale = 0.25f;  // Default
+                data.gradient_offset = 0.0f;  // Default
             } else if (auto glass = std::dynamic_pointer_cast<Dielectric>(sphere->mat)) {
                 data.material = 3; // Glass
+                data.gradient_scale = 0.25f;  // Default
+                data.gradient_offset = 0.0f;  // Default
             } else if (auto lambertian = std::dynamic_pointer_cast<Lambertian>(sphere->mat)) {
                 // Check if this is a procedural texture material
                 if (auto checker = std::dynamic_pointer_cast<CheckerTexture>(lambertian->albedo_texture)) {
                     data.material = 4; // Checkerboard
+                    data.gradient_scale = 0.25f;  // Default
+                    data.gradient_offset = 0.0f;  // Default
                 } else if (auto noise = std::dynamic_pointer_cast<NoiseTexture>(lambertian->albedo_texture)) {
                     data.material = 5; // Noise
+                    data.gradient_scale = 0.25f;  // Default
+                    data.gradient_offset = 0.0f;  // Default
                 } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->albedo_texture)) {
                     data.material = 6; // Gradient
+                    data.gradient_scale = gradient->scale;
+                    data.gradient_offset = gradient->offset;
                 } else if (auto stripe = std::dynamic_pointer_cast<StripeTexture>(lambertian->albedo_texture)) {
                     data.material = 7; // Stripe
+                    data.gradient_scale = 0.25f;  // Default
+                    data.gradient_offset = 0.0f;  // Default
                 } else {
                     data.material = 0; // Regular lambertian
+                    data.gradient_scale = 0.25f;  // Default
+                    data.gradient_offset = 0.0f;  // Default
                 }
             } else {
                 data.material = 0; // Default lambertian
+                data.gradient_scale = 0.25f;  // Default
+                data.gradient_offset = 0.0f;  // Default
             }
 
             spheres.push_back(data);
@@ -1111,6 +1132,14 @@ int main(int argc, char* argv[]) {
                 name = "sphere_materials[" + std::to_string(i) + "]";
                 loc = glGetUniformLocation(program, name.c_str());
                 glUniform1i(loc, spheres[i].material);
+
+                name = "sphere_gradient_scale[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, spheres[i].gradient_scale);
+
+                name = "sphere_gradient_offset[" + std::to_string(i) + "]";
+                loc = glGetUniformLocation(program, name.c_str());
+                glUniform1f(loc, spheres[i].gradient_offset);
             }
 
             // Set triangle uniforms
