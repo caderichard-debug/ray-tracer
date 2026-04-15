@@ -10,9 +10,11 @@
 class Renderer {
 public:
     int max_depth; // Maximum recursion depth for reflections
+    bool enable_shadows; // Enable/disable shadow rays
+    bool enable_reflections; // Enable/disable reflection rays
 
-    Renderer() : max_depth(5) {}
-    Renderer(int depth) : max_depth(depth) {}
+    Renderer() : max_depth(5), enable_shadows(true), enable_reflections(true) {}
+    Renderer(int depth) : max_depth(depth), enable_shadows(true), enable_reflections(true) {}
 
     // Main ray tracing function
     Color ray_color(const Ray& r, const Scene& scene, int depth) const;

@@ -24,9 +24,12 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
             continue;
         }
 
-        // Shadow ray
-        Ray shadow_ray(rec.p, light_dir_normalized);
-        bool in_shadow = scene.is_shadowed(shadow_ray, light_distance);
+        // Shadow ray (if enabled)
+        bool in_shadow = false;
+        if (enable_shadows) {
+            Ray shadow_ray(rec.p, light_dir_normalized);
+            in_shadow = scene.is_shadowed(shadow_ray, light_distance);
+        }
 
         if (!in_shadow) {
             // Diffuse component (Lambertian)
@@ -65,13 +68,16 @@ Color Renderer::ray_color(const Ray& r, const Scene& scene, int depth) const {
     // Calculate shading at hit point
     Color color = compute_phong_shading(rec, scene);
 
-    // Handle reflections for metallic materials
+    // Handle reflections for metallic materials (if enabled)
     Ray scattered;
     Color attenuation;
-    if (rec.mat->scatter(r, rec, attenuation, scattered)) {
+    if (enable_reflections && rec.mat->scatter(r, rec, attenuation, scattered)) {
         // Recursively trace reflected ray
         Color reflected_color = ray_color(scattered, scene, depth - 1);
         color = color + attenuation * reflected_color;
+    } else if (!enable_reflections && rec.mat->scatter(r, rec, attenuation, scattered)) {
+        // Even when reflections are disabled, still attenuate for metallic appearance
+        color = color + 0.3f * attenuation * rec.mat->albedo;
     }
 
     return color;
