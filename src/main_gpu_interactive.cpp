@@ -535,8 +535,12 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                     color = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
                 } else if (material == 6) {
                     // Gradient (purple to yellow vertical) - use proper scale/offset from texture
-                    color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0),
-                                              sphere_gradient_scale[hit_object], sphere_gradient_offset[hit_object]);
+                    // Debug: test with simple gradient based on Y position
+                    float gradient_t = (hit_point.y + 2.3) / 1.6;  // Map Y from [-2.3, -0.7] to [0, 1]
+                    gradient_t = clamp(gradient_t, 0.0, 1.0);
+                    color = mix(vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), gradient_t);
+                    // Don't apply lighting to gradient texture - it should be self-illuminated
+                    apply_lighting = false;
                 } else if (material == 7) {
                     // Stripe (orange and white horizontal)
                     color = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
@@ -747,45 +751,56 @@ void setup_scene_data(
             data.color[2] = sphere->mat->albedo.z;
 
             // Determine material type
+            std::cout << "Sphere material type: ";
             if (auto metal = std::dynamic_pointer_cast<Metal>(sphere->mat)) {
                 if (metal->fuzz < 0.1) {
                     data.material = 1; // Perfect metal
+                    std::cout << "Perfect metal" << std::endl;
                 } else {
                     data.material = 2; // Fuzzy metal
+                    std::cout << "Fuzzy metal" << std::endl;
                 }
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
             } else if (auto glass = std::dynamic_pointer_cast<Dielectric>(sphere->mat)) {
                 data.material = 3; // Glass
+                std::cout << "Glass" << std::endl;
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
             } else if (auto lambertian = std::dynamic_pointer_cast<Lambertian>(sphere->mat)) {
+                std::cout << "Lambertian, checking texture..." << std::endl;
                 // Check if this is a procedural texture material
                 if (auto checker = std::dynamic_pointer_cast<CheckerTexture>(lambertian->albedo_texture)) {
                     data.material = 4; // Checkerboard
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
+                    std::cout << "  -> Checkerboard texture" << std::endl;
                 } else if (auto noise = std::dynamic_pointer_cast<NoiseTexture>(lambertian->albedo_texture)) {
                     data.material = 5; // Noise
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
+                    std::cout << "  -> Noise texture" << std::endl;
                 } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->albedo_texture)) {
                     data.material = 6; // Gradient
                     data.gradient_scale = gradient->scale;
                     data.gradient_offset = gradient->offset;
+                    std::cout << "  -> Gradient texture! scale=" << gradient->scale << " offset=" << gradient->offset << std::endl;
                 } else if (auto stripe = std::dynamic_pointer_cast<StripeTexture>(lambertian->albedo_texture)) {
                     data.material = 7; // Stripe
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
+                    std::cout << "  -> Stripe texture" << std::endl;
                 } else {
                     data.material = 0; // Regular lambertian
                     data.gradient_scale = 0.25f;  // Default
                     data.gradient_offset = 0.0f;  // Default
+                    std::cout << "  -> Regular lambertian (unknown texture)" << std::endl;
                 }
             } else {
                 data.material = 0; // Default lambertian
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
+                std::cout << "Unknown material type" << std::endl;
             }
 
             spheres.push_back(data);

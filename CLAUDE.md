@@ -32,7 +32,8 @@ ray-tracer/
 ### Core Renderer
 - **src/renderer/renderer.h** - Renderer class with ray_color() and compute_phong_shading()
 - **src/renderer/renderer.cpp** - Implementation with shadow ray culling and OpenMP
-- **src/main_interactive.cpp** - SDL2-based interactive mode with controls
+- **src/main_cpu_interactive.cpp** - SDL2-based interactive mode with controls (CPU)
+- **src/main_gpu_interactive.cpp** - OpenGL-based interactive mode with controls (GPU)
 
 ### Scene and Materials
 - **src/scene/scene.h** - Scene graph with hit() and is_shadowed()
@@ -113,7 +114,7 @@ make runi-gpu          # Run with GPU rendering
 ### Adding New Features
 1. Add feature toggle to Renderer class if needed
 2. Implement rendering logic in renderer.cpp
-3. Add UI controls to main_interactive.cpp ControlsPanel
+3. Add UI controls to main_cpu_interactive.cpp ControlsPanel
 4. Update settings panel with new controls
 5. Test with various quality levels
 6. Document in this file

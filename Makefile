@@ -66,7 +66,7 @@ interactive: $(BUILD_DIR)
 	@echo "Building Interactive Real-time Ray Tracer (CPU)"
 	@echo "Features: SDL2 window, Camera controls, Quality levels 1-3"
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) \
-		src/main_interactive.cpp src/renderer/renderer.cpp \
+		src/main_cpu_interactive.cpp src/renderer/renderer.cpp \
 		-o $(BUILD_DIR)/raytracer_interactive $(LDFLAGS) $(SDL_LDFLAGS)
 	@echo "✓ Interactive built: $(BUILD_DIR)/raytracer_interactive"
 	@ln -sf $(BUILD_DIR)/raytracer_interactive raytracer_interactive
@@ -79,22 +79,22 @@ interactive-gpu: $(BUILD_DIR)
 	@echo "Features: OpenGL compute shaders, SDL2 window, Camera controls, Quality levels 1-3"
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
 		-DGPU_RENDERING \
-		src/main_interactive.cpp src/renderer/renderer.cpp $(GPU_RENDERER_SRC) \
+		src/main_cpu_interactive.cpp src/renderer/renderer.cpp $(GPU_RENDERER_SRC) \
 		-o $(BUILD_DIR)/raytracer_interactive_gpu $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
 	@echo "✓ Interactive GPU built: $(BUILD_DIR)/raytracer_interactive_gpu"
 	@ln -sf $(BUILD_DIR)/raytracer_interactive_gpu raytracer_interactive_gpu
 
 
 # Working GPU ray tracer (GLSL 1.20 compatible) - Works with OpenGL 2.0+
-.PHONY: gpu-working
-gpu-working: $(BUILD_DIR)
-	@echo "Building Working GPU Ray Tracer (GLSL 1.20 - OpenGL 2.0+ Compatible)"
+.PHONY: gpu-interactive
+gpu-interactive: $(BUILD_DIR)
+	@echo "Building Interactive GPU Ray Tracer (GLSL 1.20 - OpenGL 2.0+ Compatible)"
 	@echo "Features: Exact CPU Cornell Box scene, Phong shading, uniform-based scene data"
 	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		src/main_gpu_working.cpp \
-		-o $(BUILD_DIR)/gpu_working $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ Working GPU Ray Tracer built: $(BUILD_DIR)/gpu_working"
-	@echo "Run with: ./build/gpu_working"
+		src/main_gpu_interactive.cpp \
+		-o $(BUILD_DIR)/gpu_interactive $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ Interactive GPU Ray Tracer built: $(BUILD_DIR)/gpu_interactive"
+	@echo "Run with: ./build/gpu_interactive"
 
 # Simple SDL test - renders a blue window without OpenGL
 .PHONY: sdl-test
@@ -165,13 +165,13 @@ runi-gpu: interactive-gpu
 	@echo "Expected performance: 60-300x faster than CPU depending on GPU"
 	./raytracer_interactive_gpu
 
-# Run working GPU ray tracer (GLSL 1.20 compatible)
-.PHONY: run-gpu-working
-run-gpu-working: gpu-working
-	@echo "Starting Working GPU Ray Tracer (GLSL 1.20 Compatible)..."
+# Run interactive GPU ray tracer (GLSL 1.20 compatible)
+.PHONY: run-gpu-interactive
+run-gpu-interactive: gpu-interactive
+	@echo "Starting Interactive GPU Ray Tracer (GLSL 1.20 Compatible)..."
 	@echo "Features: Exact CPU Cornell Box scene, Phong shading, uniform-based scene data"
 	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, ESC to quit"
-	./build/gpu_working
+	./build/gpu_interactive
 
 # Run with test scene
 .PHONY: test
@@ -257,10 +257,7 @@ help:
 	@echo "  make gpu-only      - Build GPU ray tracer (OpenGL 4.3+ compute shaders)"
 	@echo "  make gpu-legacy    - Build GPU ray tracer (OpenGL 2.0+ fragment shaders)"
 	@echo "  make gpu-fragment  - Build GPU ray tracer with full CPU feature parity (OpenGL 3.3+)"
-	@echo "  make gpu-working   - Build WORKING GPU ray tracer (GLSL 1.20 - OpenGL 2.0+)"
-	@echo "  make gpu-interactive - Build INTERACTIVE GPU ray tracer (same scene as CPU + controls)"
-	@echo "  make gpu-interactive-full - Build INTERACTIVE GPU (full featured)"
-	@echo "  make gpu-working-fixed - Build WORKING GPU (fixed black screen - RECOMMENDED)"
+	@echo "  make gpu-interactive - Build INTERACTIVE GPU ray tracer (GLSL 1.20 - OpenGL 2.0+)"
 	@echo "  make ascii         - Build ASCII terminal ray tracer (RETRO STYLE)"
 	@echo "  make all           - Build all implemented phases"
 	@echo ""
@@ -270,10 +267,7 @@ help:
 	@echo "  make runi-gpu      - Build and run interactive ray tracer (GPU)"
 	@echo "  make run-gpu-legacy - Build and run legacy GPU ray tracer"
 	@echo "  make run-gpu-fragment - Build and run GPU fragment ray tracer (full CPU parity)"
-	@echo "  make run-gpu-working - Build and run WORKING GPU ray tracer"
-	@echo "  make run-gpu-interactive - Build and run INTERACTIVE GPU (basic)"
-	@echo "  make run-gpu-interactive-full - Build and run INTERACTIVE GPU (full featured)"
-	@echo "  make run-gpu-working-fixed - Build and run WORKING GPU (fixed black screen - RECOMMENDED)"
+	@echo "  make run-gpu-interactive - Build and run INTERACTIVE GPU ray tracer"
 	@echo "  make runa          - Build and run ASCII terminal ray tracer (RETRO!)"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
