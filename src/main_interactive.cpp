@@ -415,13 +415,17 @@ public:
 
     void render(SDL_Renderer* renderer, int window_width, int window_height,
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
-                const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true) {
+                const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true
+#ifdef GPU_RENDERING
+                , RendererType current_renderer = RendererType::CPU
+#endif
+    ) {
         (void)window_height;  // Only used to calculate aspect ratio
         if (!initialized || !font || !title_font) return;
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(630, window_height - 20);
+        int panel_height = std::min(652, window_height - 20);  // Increased from 630 to accommodate renderer status
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
@@ -482,6 +486,30 @@ public:
         // Always show analysis mode
         const char* current_analysis = analysis_mode_name ? analysis_mode_name : "None";
         render_setting("Analysis:", current_analysis);
+
+#ifdef GPU_RENDERING
+        // Show current renderer mode
+        const char* renderer_mode = (current_renderer == RendererType::GPU) ? "GPU" : "CPU";
+        SDL_Color renderer_color = (current_renderer == RendererType::GPU) ?
+            SDL_Color({50, 200, 50, 255}) :  // Green for GPU
+            SDL_Color({200, 100, 50, 255}); // Orange for CPU
+
+        SDL_Surface* renderer_surface = TTF_RenderText_Blended(font, "Renderer:", title_color);
+        if (renderer_surface) {
+            SDL_Rect renderer_rect = {15, y_offset, renderer_surface->w, renderer_surface->h};
+            SDL_BlitSurface(renderer_surface, nullptr, surface, &renderer_rect);
+            SDL_FreeSurface(renderer_surface);
+
+            // Render the actual mode with color
+            SDL_Surface* mode_surface = TTF_RenderText_Blended(font, renderer_mode, renderer_color);
+            if (mode_surface) {
+                SDL_Rect mode_rect = {70, y_offset, mode_surface->w, mode_surface->h};
+                SDL_BlitSurface(mode_surface, nullptr, surface, &mode_rect);
+                SDL_FreeSurface(mode_surface);
+            }
+            y_offset += 22;
+        }
+#endif
 
         y_offset += 10;
 
@@ -968,14 +996,30 @@ int main(int argc, char* argv[]) {
     // Create window
     std::string window_title = "Real-time Ray Tracer - CPU (OpenMP)";
 
-    SDL_Window* window = SDL_CreateWindow(
-        window_title.c_str(),
-        SDL_WINDOWPOS_UNDEFINED,
-        SDL_WINDOWPOS_UNDEFINED,
-        preset.width,
-        static_cast<int>(preset.width / (16.0f / 9.0f)),
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED
-    );
+    // For GPU rendering, we need an OpenGL context
+    #ifdef GPU_RENDERING
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+
+        SDL_Window* window = SDL_CreateWindow(
+            window_title.c_str(),
+            SDL_WINDOWPOS_UNDEFINED,
+            SDL_WINDOWPOS_UNDEFINED,
+            preset.width,
+            static_cast<int>(preset.width / (16.0f / 9.0f)),
+            SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+        );
+    #else
+        SDL_Window* window = SDL_CreateWindow(
+            window_title.c_str(),
+            SDL_WINDOWPOS_UNDEFINED,
+            SDL_WINDOWPOS_UNDEFINED,
+            preset.width,
+            static_cast<int>(preset.width / (16.0f / 9.0f)),
+            SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+        );
+    #endif
 
     if (!window) {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
@@ -1034,24 +1078,14 @@ int main(int argc, char* argv[]) {
     std::cout << "CPU Renderer initialized (OpenMP with " << omp_get_max_threads() << " threads)" << std::endl;
 
 #ifdef GPU_RENDERING
-    // Initialize GPU renderer
+    // Initialize GPU renderer (but don't crash if it fails)
     RendererType current_renderer = RendererType::CPU;  // Default to CPU
     std::unique_ptr<GPURenderer> gpu_renderer = nullptr;
 
-    // Try to initialize GPU renderer
-    try {
-        gpu_renderer = std::make_unique<GPURenderer>();
-        if (gpu_renderer->initialize(image_width, image_height)) {
-            gpu_renderer->set_scene(std::make_shared<Scene>(scene));
-            std::cout << "GPU Renderer initialized successfully" << std::endl;
-        } else {
-            std::cout << "GPU Renderer initialization failed, using CPU only" << std::endl;
-            gpu_renderer = nullptr;
-        }
-    } catch (const std::exception& e) {
-        std::cout << "GPU Renderer not available: " << e.what() << std::endl;
-        gpu_renderer = nullptr;
-    }
+    // Note: GPU renderer requires OpenGL context, which isn't available
+    // with the current SDL2 renderer setup. GPU rendering is disabled for now.
+    std::cout << "GPU Renderer: Not available with current SDL2 setup" << std::endl;
+    std::cout << "GPU Renderer: CPU rendering only" << std::endl;
 #endif
 
     // Main loop
@@ -1570,8 +1604,14 @@ int main(int argc, char* argv[]) {
         // Render controls panel if active
         if (show_controls) {
             const char* mode_name = analysis.get_mode_name();
+#ifdef GPU_RENDERING
+            controls_panel.render(renderer, window_width, window_height,
+                                 current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
+                                 current_renderer);
+#else
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections);
+#endif
         }
 
         // Render help overlay if active

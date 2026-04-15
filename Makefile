@@ -96,6 +96,40 @@ gpu-infra-test: $(BUILD_DIR)
 	@echo "✓ GPU Infrastructure Test built: $(BUILD_DIR)/gpu_infra_test"
 	@echo "Run with: ./build/gpu_infra_test"
 
+# Standalone GPU ray tracer (compute shaders only) - REQUIRES OpenGL 4.3+
+.PHONY: gpu-only
+gpu-only: $(BUILD_DIR)
+	@echo "Building Standalone GPU Ray Tracer (OpenGL 4.3+ Compute Shaders)"
+	@echo "Features: OpenGL compute shaders, ray tracing, no CPU fallback"
+	@echo "WARNING: Requires OpenGL 4.3+ or higher"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		src/main_gpu_only.cpp \
+		-o $(BUILD_DIR)/gpu_only $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ Standalone GPU Ray Tracer built: $(BUILD_DIR)/gpu_only"
+	@echo "Run with: ./build/gpu_only"
+
+# Legacy GPU ray tracer (fragment shaders) - Works with OpenGL 2.0+
+.PHONY: gpu-legacy
+gpu-legacy: $(BUILD_DIR)
+	@echo "Building Legacy GPU Ray Tracer (OpenGL 2.0+ Fragment Shaders)"
+	@echo "Features: Fragment shader ray tracing, works on older GPUs"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		src/main_legacy_gpu.cpp \
+		-o $(BUILD_DIR)/gpu_legacy $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ Legacy GPU Ray Tracer built: $(BUILD_DIR)/gpu_legacy"
+	@echo "Run with: ./build/gpu_legacy"
+
+# GPU ray tracer with full CPU feature parity (fragment shaders) - Works with OpenGL 3.3+
+.PHONY: gpu-fragment
+gpu-fragment: $(BUILD_DIR)
+	@echo "Building GPU Ray Tracer with Full CPU Feature Parity (OpenGL 3.3+ Fragment Shaders)"
+	@echo "Features: Phong shading, shadows, reflections, triangles, dielectric materials, anti-aliasing"
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
+		src/main_gpu_fragment.cpp \
+		-o $(BUILD_DIR)/gpu_fragment $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
+	@echo "✓ GPU Fragment Ray Tracer built: $(BUILD_DIR)/gpu_fragment"
+	@echo "Run with: ./build/gpu_fragment"
+
 # Simple GPU test - renders a green window to verify OpenGL works
 .PHONY: gpu-test
 gpu-test: $(BUILD_DIR)
@@ -174,6 +208,22 @@ runi-gpu: interactive-gpu
 	@echo "GPU Renderer: Press R to toggle between CPU/GPU rendering"
 	@echo "Expected performance: 60-300x faster than CPU depending on GPU"
 	./raytracer_interactive_gpu
+
+# Run legacy GPU ray tracer (OpenGL 2.0+ compatible)
+.PHONY: run-gpu-legacy
+run-gpu-legacy: gpu-legacy
+	@echo "Starting Legacy GPU Ray Tracer..."
+	@echo "Features: Fragment shader ray tracing, compatible with older GPUs"
+	@echo "Controls: ESC to quit"
+	./build/gpu_legacy
+
+# Run GPU fragment ray tracer with full CPU feature parity (OpenGL 3.3+)
+.PHONY: run-gpu-fragment
+run-gpu-fragment: gpu-fragment
+	@echo "Starting GPU Fragment Ray Tracer (Full CPU Feature Parity)..."
+	@echo "Features: Phong shading, shadows, reflections, triangles, dielectric materials"
+	@echo "Controls: ESC to quit"
+	./build/gpu_fragment
 
 # Run with test scene
 .PHONY: test
@@ -256,6 +306,9 @@ help:
 	@echo "  make phase2        - Build Phase 2 (basic rendering) [default]"
 	@echo "  make interactive   - Build real-time interactive ray tracer (CPU)"
 	@echo "  make interactive-gpu - Build real-time interactive ray tracer (GPU)"
+	@echo "  make gpu-only      - Build GPU ray tracer (OpenGL 4.3+ compute shaders)"
+	@echo "  make gpu-legacy    - Build GPU ray tracer (OpenGL 2.0+ fragment shaders)"
+	@echo "  make gpu-fragment  - Build GPU ray tracer with full CPU feature parity (OpenGL 3.3+)"
 	@echo "  make gpu-infra-test - Build GPU infrastructure test"
 	@echo "  make all           - Build all implemented phases"
 	@echo ""
@@ -263,6 +316,8 @@ help:
 	@echo "  make run           - Build and run batch ray tracer"
 	@echo "  make runi          - Build and run interactive ray tracer (CPU)"
 	@echo "  make runi-gpu      - Build and run interactive ray tracer (GPU)"
+	@echo "  make run-gpu-legacy - Build and run legacy GPU ray tracer"
+	@echo "  make run-gpu-fragment - Build and run GPU fragment ray tracer (full CPU parity)"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
 	@echo "Testing:"
@@ -289,6 +344,10 @@ help:
 	@echo "  H             - Toggle help overlay"
 	@echo "  Space         - Pause rendering"
 	@echo "  ESC           - Quit"
+	@echo ""
+	@echo "GPU Options:"
+	@echo "  make run-gpu-legacy - Run legacy GPU ray tracer (works with OpenGL 2.0+)"
+	@echo "  make gpu-only       - Run modern GPU ray tracer (requires OpenGL 4.3+)"
 
 # Create build directory
 $(BUILD_DIR):
