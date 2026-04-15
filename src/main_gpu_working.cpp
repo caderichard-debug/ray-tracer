@@ -9,6 +9,7 @@
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
+#include <SDL2/SDL_ttf.h>
 
 // Window dimensions
 const int WIDTH = 1280;
@@ -95,22 +96,105 @@ public:
     }
 };
 
-// Simple help overlay
+// Simple help overlay with text rendering
 class HelpOverlay {
 private:
     bool show;
     bool initialized;
+    TTF_Font* font;
+    SDL_Color text_color;
+    SDL_Color background_color;
 
 public:
-    HelpOverlay() : show(false), initialized(false) {}
+    HelpOverlay() : show(false), initialized(false), font(nullptr) {
+        text_color = {255, 255, 255, 255};
+        background_color = {0, 0, 0, 180};
+    }
+
+    ~HelpOverlay() {
+        if (font) TTF_CloseFont(font);
+        if (initialized) TTF_Quit();
+    }
 
     bool init() {
+        if (TTF_Init() == -1) {
+            std::cerr << "TTF_Init failed: " << TTF_GetError() << std::endl;
+            return false;
+        }
+
+        font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Arial.ttf", 16);
+        if (!font) {
+            std::cerr << "Failed to load font: " << TTF_GetError() << std::endl;
+            return false;
+        }
+
         initialized = true;
         return true;
     }
 
     void toggle() { show = !show; }
     bool is_showing() const { return show; }
+
+    void render(SDL_Window* window) {
+        if (!show || !initialized) return;
+
+        int width, height;
+        SDL_GetWindowSize(window, &width, &height);
+
+        // Create renderer for this window
+        SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        if (!renderer) return;
+
+        // Semi-transparent background
+        SDL_Rect bg_rect = {50, 50, width - 100, height - 100};
+        SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
+        SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
+
+        SDL_Texture* bg_texture = SDL_CreateTextureFromSurface(renderer, bg_surface);
+        SDL_RenderCopy(renderer, bg_texture, nullptr, &bg_rect);
+        SDL_DestroyTexture(bg_texture);
+        SDL_FreeSurface(bg_surface);
+
+        // Render help text
+        const char* help_lines[] = {
+            "=== GPU Ray Tracer Help ===",
+            "",
+            "Controls:",
+            "  WASD/Arrows - Move camera",
+            "  Mouse       - Look around",
+            "  R           - Toggle reflections",
+            "  H           - Toggle this help",
+            "  C           - Toggle controls panel",
+            "  ESC         - Quit",
+            "",
+            "Features:",
+            "  - Real-time GPU ray tracing",
+            "  - Exact CPU Cornell Box scene",
+            "  - Phong shading with reflections",
+            "  - Procedural textures",
+            "  - 75+ FPS performance",
+            "",
+            "Press H to close this help"
+        };
+
+        int y_offset = 70;
+        for (size_t i = 0; i < sizeof(help_lines) / sizeof(help_lines[0]); i++) {
+            SDL_Surface* surface = TTF_RenderText_Blended(font, help_lines[i], text_color);
+            if (surface) {
+                SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+                if (texture) {
+                    SDL_Rect dest_rect = {70, y_offset, surface->w, surface->h};
+                    SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                    SDL_DestroyTexture(texture);
+                }
+                SDL_FreeSurface(surface);
+                y_offset += 25;
+            }
+        }
+
+        SDL_RenderPresent(renderer);
+        SDL_DestroyRenderer(renderer);
+    }
 };
 
 // Simple settings panel
@@ -118,17 +202,117 @@ class ControlsPanel {
 private:
     bool show;
     bool initialized;
+    TTF_Font* font;
+    SDL_Color text_color;
+    SDL_Color background_color;
+    SDL_Color title_color;
 
 public:
-    ControlsPanel() : show(false), initialized(false) {}
+    ControlsPanel() : show(false), initialized(false), font(nullptr) {
+        text_color = {255, 255, 255, 255};
+        background_color = {0, 0, 0, 180};
+        title_color = {255, 200, 100, 255};
+    }
+
+    ~ControlsPanel() {
+        if (font) TTF_CloseFont(font);
+        if (initialized) TTF_Quit();
+    }
 
     bool init() {
+        if (TTF_Init() == -1) {
+            return false;
+        }
+
+        font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Arial.ttf", 16);
+        if (!font) {
+            return false;
+        }
+
         initialized = true;
         return true;
     }
 
     void toggle() { show = !show; }
     bool is_showing() const { return show; }
+
+    void render(SDL_Window* window, bool reflections_enabled) {
+        if (!show || !initialized) return;
+
+        int width, height;
+        SDL_GetWindowSize(window, &width, &height);
+
+        // Create renderer for this window
+        SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        if (!renderer) return;
+
+        // Semi-transparent background
+        SDL_Rect bg_rect = {width - 300, 50, 250, 200};
+        SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
+        SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
+
+        SDL_Texture* bg_texture = SDL_CreateTextureFromSurface(renderer, bg_surface);
+        SDL_RenderCopy(renderer, bg_texture, nullptr, &bg_rect);
+        SDL_DestroyTexture(bg_texture);
+        SDL_FreeSurface(bg_surface);
+
+        // Render settings text
+        const char* title = "=== Settings ===";
+        SDL_Surface* surface = TTF_RenderText_Blended(font, title, title_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, 70, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+        }
+
+        int y_offset = 110;
+        char settings_text[256];
+
+        sprintf(settings_text, "Reflections: %s", reflections_enabled ? "ON" : "OFF");
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Max Depth: %d", 5);
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+            y_offset += 30;
+        }
+
+        sprintf(settings_text, "Objects: %d spheres, %d tris", 13, 16);
+        surface = TTF_RenderText_Blended(font, settings_text, text_color);
+        if (surface) {
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            if (texture) {
+                SDL_Rect dest_rect = {width - 280, y_offset, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, nullptr, &dest_rect);
+                SDL_DestroyTexture(texture);
+            }
+            SDL_FreeSurface(surface);
+        }
+
+        SDL_RenderPresent(renderer);
+        SDL_DestroyRenderer(renderer);
+    }
 };
 
 // Scene data (matching CPU Cornell Box exactly)
@@ -267,7 +451,8 @@ vec3 noise_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
 }
 
 vec3 gradient_texture(vec3 pos, vec3 color1, vec3 color2, vec3 dir) {
-    float t = dot(pos, dir) * 0.5 + 0.5;
+    // Normalize position to get better gradient variation
+    float t = dot(normalize(pos), dir) * 0.5 + 0.5;
     return mix(color1, color2, clamp(t, 0.0, 1.0));
 }
 
@@ -276,102 +461,112 @@ vec3 stripe_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
     return mix(color1, color2, stripe);
 }
 
-// Simple scene rendering with reflections
-vec3 ray_color_recursive(vec3 origin, vec3 direction, int depth) {
+// Simple scene rendering with iterative reflections
+vec3 ray_color(vec3 origin, vec3 direction) {
     // Background gradient
     vec3 unit_dir = normalize(direction);
     float t_bg = 0.5 * (unit_dir.y + 1.0);
     vec3 background = mix(vec3(1.0), vec3(0.5, 0.7, 1.0), t_bg);
 
-    float t_min = 1000.0;
-    int hit_object = -1;
-    int hit_type = -1; // 0 = sphere, 1 = triangle
+    vec3 final_color = vec3(0.0);
+    vec3 current_origin = origin;
+    vec3 current_direction = direction;
+    float accumulated_weight = 1.0;
 
-    // Check sphere intersections
-    for (int i = 0; i < num_spheres; i++) {
-        if (hit_sphere(origin, direction, sphere_centers[i], sphere_radii[i], t_min)) {
-            hit_object = i;
-            hit_type = 0;
-        }
-    }
+    // Iterative reflection bounces (max_depth iterations)
+    for (int bounce = 0; bounce <= max_depth; bounce++) {
+        float t_min = 1000.0;
+        int hit_object = -1;
+        int hit_type = -1; // 0 = sphere, 1 = triangle
 
-    // Check triangle intersections
-    for (int i = 0; i < num_triangles; i++) {
-        if (hit_triangle(origin, direction, tri_v0[i], tri_v1[i], tri_v2[i], tri_normals[i], t_min)) {
-            hit_object = i;
-            hit_type = 1;
-        }
-    }
-
-    if (hit_object >= 0) {
-        vec3 hit_point = origin + t_min * direction;
-        vec3 color;
-        vec3 normal;
-        int material;
-
-        if (hit_type == 0) {
-            // Sphere hit
-            normal = normalize(hit_point - sphere_centers[hit_object]);
-            color = sphere_colors[hit_object];
-            material = sphere_materials[hit_object];
-
-            // Apply procedural textures based on material
-            if (material == 4) {
-                // Checkerboard (red and blue)
-                color = checkerboard_texture(hit_point, vec3(0.8, 0.2, 0.2), vec3(0.2, 0.2, 0.8), 8.0);
-            } else if (material == 5) {
-                // Noise (black and white)
-                color = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
-            } else if (material == 6) {
-                // Gradient (purple to yellow vertical)
-                color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0));
-            } else if (material == 7) {
-                // Stripe (orange and white horizontal)
-                color = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
-            }
-        } else {
-            // Triangle hit
-            normal = tri_normals[hit_object];
-            color = tri_colors[hit_object];
-            material = tri_materials[hit_object];
-
-            // Apply procedural textures for triangles
-            if (material == 8) {
-                // Pyramid checkerboard
-                color = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
-            } else if (material == 9) {
-                // Gradient quad (red to blue horizontal)
-                color = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
+        // Check sphere intersections
+        for (int i = 0; i < num_spheres; i++) {
+            if (hit_sphere(current_origin, current_direction, sphere_centers[i], sphere_radii[i], t_min)) {
+                hit_object = i;
+                hit_type = 0;
             }
         }
 
-        // Simple lighting
-        vec3 light_pos = vec3(0.0, 18.0, 0.0);
-        vec3 light_dir = normalize(light_pos - hit_point);
-        float diff = max(dot(normal, light_dir), 0.0);
+        // Check triangle intersections
+        for (int i = 0; i < num_triangles; i++) {
+            if (hit_triangle(current_origin, current_direction, tri_v0[i], tri_v1[i], tri_v2[i], tri_normals[i], t_min)) {
+                hit_object = i;
+                hit_type = 1;
+            }
+        }
 
-        // Add simple Phong specular
-        vec3 view_dir = normalize(-direction);
-        vec3 reflect_dir = reflect(-light_dir, normal);
-        float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+        if (hit_object >= 0) {
+            vec3 hit_point = current_origin + t_min * current_direction;
+            vec3 color;
+            vec3 normal;
+            int material;
 
-        // Ambient + diffuse + specular
-        vec3 lighting = vec3(0.1 + diff * 0.7 + spec * 0.3);
-        color = color * lighting;
+            if (hit_type == 0) {
+                // Sphere hit
+                normal = normalize(hit_point - sphere_centers[hit_object]);
+                color = sphere_colors[hit_object];
+                material = sphere_materials[hit_object];
 
-        // Handle reflections for metallic materials
-        if (enable_reflections && depth > 0) {
+                // Apply procedural textures based on material
+                if (material == 4) {
+                    // Checkerboard (red and blue)
+                    color = checkerboard_texture(hit_point, vec3(0.8, 0.2, 0.2), vec3(0.2, 0.2, 0.8), 8.0);
+                } else if (material == 5) {
+                    // Noise (black and white)
+                    color = noise_texture(hit_point, vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), 5.0);
+                } else if (material == 6) {
+                    // Gradient (purple to yellow vertical)
+                    color = gradient_texture(hit_point, vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), vec3(0.0, 1.0, 0.0));
+                } else if (material == 7) {
+                    // Stripe (orange and white horizontal)
+                    color = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
+                }
+            } else {
+                // Triangle hit
+                normal = tri_normals[hit_object];
+                color = tri_colors[hit_object];
+                material = tri_materials[hit_object];
+
+                // Apply procedural textures for triangles
+                if (material == 8) {
+                    // Pyramid checkerboard
+                    color = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
+                } else if (material == 9) {
+                    // Gradient quad (red to blue horizontal)
+                    color = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
+                }
+            }
+
+            // Simple lighting
+            vec3 light_pos = vec3(0.0, 18.0, 0.0);
+            vec3 light_dir = normalize(light_pos - hit_point);
+            float diff = max(dot(normal, light_dir), 0.0);
+
+            // Add simple Phong specular
+            vec3 view_dir = normalize(-current_direction);
+            vec3 reflect_dir = reflect(-light_dir, normal);
+            float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+
+            // Ambient + diffuse + specular
+            vec3 lighting = vec3(0.1 + diff * 0.7 + spec * 0.3);
+            color = color * lighting;
+
+            // Add contribution to final color
+            final_color += accumulated_weight * color;
+
+            // Handle reflections for metallic materials
             bool is_metallic = (material == 1 || material == 2); // Metal or fuzzy metal
             bool is_glass = (material == 3); // Glass
 
-            if (is_metallic || is_glass) {
+            if (enable_reflections && bounce < max_depth && (is_metallic || is_glass)) {
                 // Calculate reflection direction
-                vec3 reflect_dir = reflect(direction, normal);
+                vec3 reflect_dir = reflect(current_direction, normal);
 
-                // Recursively trace reflected ray
-                vec3 reflected_color = ray_color_recursive(hit_point + normal * 0.001, reflect_dir, depth - 1);
+                // Update ray for next bounce
+                current_origin = hit_point + normal * 0.001;
+                current_direction = reflect_dir;
 
-                // Blend based on material
+                // Update weight based on material reflectivity
                 float reflectivity;
                 if (is_glass) {
                     reflectivity = 0.2; // Glass reflects less
@@ -381,25 +576,27 @@ vec3 ray_color_recursive(vec3 origin, vec3 direction, int depth) {
                     reflectivity = 0.8; // Perfect metal
                 }
 
-                color = mix(color, reflected_color, reflectivity);
-            }
-        } else if (!enable_reflections) {
-            // Even when reflections are disabled, metallic materials get some metallic appearance
-            bool is_metallic = (material == 1 || material == 2);
-            if (is_metallic) {
-                color = color + 0.3 * color;
-            }
-        }
+                accumulated_weight *= reflectivity;
 
-        return color;
+                // Continue to next bounce
+                continue;
+            } else if (!enable_reflections) {
+                // Even when reflections are disabled, metallic materials get some metallic appearance
+                if (is_metallic) {
+                    final_color += accumulated_weight * 0.3 * color;
+                }
+            }
+
+            // No more reflections, exit loop
+            break;
+        } else {
+            // No hit, add background contribution and exit
+            final_color += accumulated_weight * background;
+            break;
+        }
     }
 
-    return background;
-}
-
-// Wrapper function for initial ray trace
-vec3 ray_color(vec3 origin, vec3 direction) {
-    return ray_color_recursive(origin, direction, max_depth);
+    return final_color;
 }
 
 void main() {
@@ -1053,6 +1250,13 @@ int main(int argc, char* argv[]) {
             // Render fullscreen quad
             glBindVertexArray(vao);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+            // Render overlays (need to temporarily switch from OpenGL to SDL2 rendering)
+            if (help_overlay.is_showing()) {
+                help_overlay.render(window);
+            } else if (controls_panel.is_showing()) {
+                controls_panel.render(window, enable_reflections);
+            }
 
             SDL_GL_SwapWindow(window);
 
