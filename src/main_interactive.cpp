@@ -676,7 +676,7 @@ public:
 
         // Panel positioned in top-right corner, scales with window size
         int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(550, window_height - 20);
+        int panel_height = std::min(455, window_height - 20);
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
@@ -1050,7 +1050,7 @@ public:
         }
 
         // Manually layout debug buttons in 1 row
-        int button_width = 85;  // Wider for longer text
+        int button_width = 85;
         int button_height = 24;
         int button_spacing = 5;
         int start_x = 15;
@@ -1236,7 +1236,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Initial quality level
-    int current_quality = 0; // Start at "Preview (Ultra Fast)" quality
+    int current_quality = 1; // Start at "Low (Fast)" quality
     QualityPreset preset = quality_levels[current_quality];
 
     // Rendering feature toggles
