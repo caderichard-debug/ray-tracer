@@ -557,10 +557,10 @@ public:
 
         // Create smaller semi-transparent background
         SDL_Rect overlay_rect = {
-            (window_width - 400) / 2,
-            (window_height - 360) / 2,
-            400,
-            360
+            (window_width - 420) / 2,
+            (window_height - 340) / 2,
+            420,
+            340
         };
 
         SDL_Surface* surface = SDL_CreateRGBSurface(0, overlay_rect.w, overlay_rect.h, 32, 0, 0, 0, 0);
@@ -570,10 +570,10 @@ public:
         SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 200, 200, 200, 180));
 
         // Render title
-        const char* title_text = "CONTROLS";
+        const char* title_text = "HELP";
         SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
         if (title_surface) {
-            SDL_Rect title_rect = {(400 - title_surface->w) / 2, 12, title_surface->w, title_surface->h};
+            SDL_Rect title_rect = {(420 - title_surface->w) / 2, 12, title_surface->w, title_surface->h};
             SDL_BlitSurface(title_surface, nullptr, surface, &title_rect);
             SDL_FreeSurface(title_surface);
         }
@@ -591,7 +591,7 @@ public:
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, controls_text[i], text_color);
 
             if (text_surface) {
-                SDL_Rect text_rect = {(400 - text_surface->w) / 2, y_offset, text_surface->w, text_surface->h};
+                SDL_Rect text_rect = {(420 - text_surface->w) / 2, y_offset, text_surface->w, text_surface->h};
                 SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
                 SDL_FreeSurface(text_surface);
             }
@@ -715,7 +715,7 @@ public:
         SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 50, 50, 60, 230));
 
         // Render title
-        const char* title_text = "INTERACTIVE CONTROLS";
+        const char* title_text = "SETTINGS";
         SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
         if (title_surface) {
             SDL_Rect title_rect = {15, 10, title_surface->w, title_surface->h};
