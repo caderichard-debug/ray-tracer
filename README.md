@@ -41,11 +41,11 @@ A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectoriza
 
 - **ASCII Terminal Mode**: Retro text-based rendering
   - Pure terminal rendering (no GUI required)
-  - WASD + arrow key camera controls
+  - Automatic camera animation (orbits scene)
   - Real-time ASCII art output
   - Cross-platform (macOS/Linux/Windows)
   - Adaptive terminal sizing
-  - Interactive first-person controls
+  - Quality presets (1-3)
 
 ## Quick Start
 

@@ -510,6 +510,7 @@ vec3 ray_color(vec3 origin, vec3 direction) {
             vec3 color;
             vec3 normal;
             int material;
+            bool apply_lighting = true;  // Declare before if/else blocks
 
             if (hit_type == 0) {
                 // Sphere hit
@@ -538,7 +539,6 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                 material = tri_materials[hit_object];
 
                 // Apply procedural textures for triangles
-                bool apply_lighting = true;
                 if (material == 8) {
                     // Pyramid checkerboard
                     color = checkerboard_texture(hit_point, vec3(0.1, 0.1, 0.1), vec3(0.9, 0.9, 0.9), 6.0);
