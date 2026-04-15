@@ -171,6 +171,10 @@ uniform vec3 tri_colors[20];
 uniform int tri_materials[20];
 uniform int num_triangles;
 
+// Rendering options
+uniform bool enable_reflections;
+uniform int max_depth;
+
 // Simple ray-sphere intersection
 bool hit_sphere(vec3 origin, vec3 direction, vec3 center, float radius, inout float t) {
     vec3 oc = origin - center;
@@ -272,8 +276,8 @@ vec3 stripe_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
     return mix(color1, color2, stripe);
 }
 
-// Simple scene rendering
-vec3 ray_color(vec3 origin, vec3 direction) {
+// Simple scene rendering with reflections
+vec3 ray_color_recursive(vec3 origin, vec3 direction, int depth) {
     // Background gradient
     vec3 unit_dir = normalize(direction);
     float t_bg = 0.5 * (unit_dir.y + 1.0);
@@ -352,12 +356,50 @@ vec3 ray_color(vec3 origin, vec3 direction) {
         float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
 
         // Ambient + diffuse + specular
-        color = color * (0.1 + diff * 0.7 + spec * 0.3);
+        vec3 lighting = vec3(0.1 + diff * 0.7 + spec * 0.3);
+        color = color * lighting;
+
+        // Handle reflections for metallic materials
+        if (enable_reflections && depth > 0) {
+            bool is_metallic = (material == 1 || material == 2); // Metal or fuzzy metal
+            bool is_glass = (material == 3); // Glass
+
+            if (is_metallic || is_glass) {
+                // Calculate reflection direction
+                vec3 reflect_dir = reflect(direction, normal);
+
+                // Recursively trace reflected ray
+                vec3 reflected_color = ray_color_recursive(hit_point + normal * 0.001, reflect_dir, depth - 1);
+
+                // Blend based on material
+                float reflectivity;
+                if (is_glass) {
+                    reflectivity = 0.2; // Glass reflects less
+                } else if (material == 2) {
+                    reflectivity = 0.6; // Fuzzy metal
+                } else {
+                    reflectivity = 0.8; // Perfect metal
+                }
+
+                color = mix(color, reflected_color, reflectivity);
+            }
+        } else if (!enable_reflections) {
+            // Even when reflections are disabled, metallic materials get some metallic appearance
+            bool is_metallic = (material == 1 || material == 2);
+            if (is_metallic) {
+                color = color + 0.3 * color;
+            }
+        }
 
         return color;
     }
 
     return background;
+}
+
+// Wrapper function for initial ray trace
+vec3 ray_color(vec3 origin, vec3 direction) {
+    return ray_color_recursive(origin, direction, max_depth);
 }
 
 void main() {
@@ -823,6 +865,14 @@ int main(int argc, char* argv[]) {
     GLint num_spheres_loc = glGetUniformLocation(program, "num_spheres");
     GLint num_triangles_loc = glGetUniformLocation(program, "num_triangles");
 
+    // Rendering option uniforms
+    GLint enable_reflections_loc = glGetUniformLocation(program, "enable_reflections");
+    GLint max_depth_loc = glGetUniformLocation(program, "max_depth");
+
+    // Rendering settings (matching CPU version)
+    bool enable_reflections = true;
+    int max_depth = 5;
+
     // Setup scene data
     std::vector<SphereData> spheres;
     std::vector<TriangleData> triangles;
@@ -844,7 +894,9 @@ int main(int argc, char* argv[]) {
     std::cout << "  Click window to capture mouse" << std::endl;
     std::cout << "  WASD/Arrows - Move (slower)" << std::endl;
     std::cout << "  Mouse       - Look around" << std::endl;
+    std::cout << "  R           - Toggle reflections" << std::endl;
     std::cout << "  H           - Help" << std::endl;
+    std::cout << "  C           - Controls panel" << std::endl;
     std::cout << "  ESC         - Quit" << std::endl;
     std::cout << "==============================\n" << std::endl;
 
@@ -880,6 +932,10 @@ int main(int argc, char* argv[]) {
                     help_overlay.toggle();
                 } else if (event.key.keysym.sym == SDLK_c) {
                     controls_panel.toggle();
+                } else if (event.key.keysym.sym == SDLK_r) {
+                    enable_reflections = !enable_reflections;
+                    std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
+                    need_render = true;
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
@@ -943,6 +999,10 @@ int main(int argc, char* argv[]) {
             // Set scene uniforms
             glUniform1i(num_spheres_loc, spheres.size());
             glUniform1i(num_triangles_loc, triangles.size());
+
+            // Set rendering option uniforms
+            glUniform1i(enable_reflections_loc, enable_reflections ? 1 : 0);
+            glUniform1i(max_depth_loc, max_depth);
 
             // Set sphere uniforms
             for (size_t i = 0; i < spheres.size(); i++) {
