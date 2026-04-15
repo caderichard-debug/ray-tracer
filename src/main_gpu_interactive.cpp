@@ -129,6 +129,19 @@
 #define MOTION_BLUR_STRENGTH 0.5  // Default motion blur strength
 #endif
 
+// Phase 5: Adaptive Quality
+#ifndef ENABLE_ADAPTIVE_QUALITY
+#define ENABLE_ADAPTIVE_QUALITY 0  // Enable adaptive quality
+#endif
+
+#ifndef TARGET_FPS
+#define TARGET_FPS 60  // Target FPS for adaptive quality
+#endif
+
+#ifndef ADAPTIVE_QUALITY_AGGRESSIVENESS
+#define ADAPTIVE_QUALITY_AGGRESSIVENESS 0.5  // How aggressively to adjust (0.1-1.0)
+#endif
+
 #ifndef TONE_MAPPING_OPERATOR
 #define TONE_MAPPING_OPERATOR 1  // 0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted
 #endif
@@ -604,6 +617,10 @@ uniform float dof_aperture;              // Aperture size (0.01-0.5)
 uniform bool enable_motion_blur;         // Enable motion blur
 uniform float motion_blur_strength;      // Motion blur intensity (0.0-1.0)
 uniform vec2 motion_vector;              // Motion direction vector
+
+// Phase 5: Adaptive Quality
+uniform bool enable_adaptive_quality;    // Enable adaptive quality
+uniform float quality_scale;             // Quality scale (0.5-1.5)
 
 uniform int tone_mapping_op;             // Tone mapping operator (0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted)
 uniform float exposure;                  // Exposure compensation (0.1-2.0)
@@ -2201,6 +2218,10 @@ int main(int argc, char* argv[]) {
     GLint motion_blur_strength_loc = glGetUniformLocation(program, "motion_blur_strength");
     GLint motion_vector_loc = glGetUniformLocation(program, "motion_vector");
 
+    // Phase 5: Adaptive Quality
+    GLint enable_adaptive_quality_loc = glGetUniformLocation(program, "enable_adaptive_quality");
+    GLint quality_scale_loc = glGetUniformLocation(program, "quality_scale");
+
     GLint tone_mapping_op_loc = glGetUniformLocation(program, "tone_mapping_op");
     GLint exposure_loc = glGetUniformLocation(program, "exposure");
     GLint contrast_loc = glGetUniformLocation(program, "contrast");
@@ -2292,6 +2313,17 @@ int main(int argc, char* argv[]) {
     float previous_mouse_x = 0.0f;  // Previous mouse position X
     float previous_mouse_y = 0.0f;  // Previous mouse position Y
 
+    // Phase 5: Adaptive Quality
+    bool enable_adaptive_quality = ENABLE_ADAPTIVE_QUALITY ? true : false;
+    float target_fps = TARGET_FPS;  // Target FPS
+    float adaptive_aggressiveness = ADAPTIVE_QUALITY_AGGRESSIVENESS;  // Adjustment aggressiveness
+    float quality_scale = 1.0f;  // Current quality scale (1.0 = normal)
+
+    // FPS tracking for adaptive quality
+    auto last_fps_update = std::chrono::steady_clock::now();
+    float fps_smooth = 60.0f;  // Smoothed FPS
+    int frame_count = 0;  // Frame counter for FPS calculation
+
     int tone_mapping_op = TONE_MAPPING_OPERATOR;          // Tone mapping operator
     float exposure = 1.0f;                                // Exposure compensation
     float contrast = 1.0f;                                // Contrast adjustment
@@ -2359,7 +2391,6 @@ int main(int argc, char* argv[]) {
     SDL_Event event;
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    int frame_count = 0;
     float fps = 0.0f;
     auto last_frame_time = std::chrono::high_resolution_clock::now();
 
@@ -2509,6 +2540,38 @@ int main(int argc, char* argv[]) {
                     if (motion_blur_strength < 1.0f) {
                         motion_blur_strength = std::min(1.0f, motion_blur_strength + 0.1f);
                         std::cout << "Motion Blur Strength: " << motion_blur_strength << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_a) {  // A key for Adaptive Quality (Phase 5)
+                    enable_adaptive_quality = !enable_adaptive_quality;
+                    std::cout << "Adaptive Quality: " << (enable_adaptive_quality ? "ON" : "OFF") << std::endl;
+                    if (enable_adaptive_quality) {
+                        std::cout << "  Target FPS: " << target_fps << std::endl;
+                        std::cout << "  Current Quality Scale: " << quality_scale << std::endl;
+                    }
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_LEFTBRACKET) {  // [ key for target FPS down
+                    if (target_fps > 30.0f) {
+                        target_fps = std::max(30.0f, target_fps - 15.0f);
+                        std::cout << "Target FPS: " << target_fps << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_RIGHTBRACKET) {  // ] key for target FPS up
+                    if (target_fps < 120.0f) {
+                        target_fps = std::min(120.0f, target_fps + 15.0f);
+                        std::cout << "Target FPS: " << target_fps << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_MINUS) {  // - key for aggressiveness down
+                    if (adaptive_aggressiveness > 0.1f) {
+                        adaptive_aggressiveness = std::max(0.1f, adaptive_aggressiveness - 0.1f);
+                        std::cout << "Adaptive Aggressiveness: " << adaptive_aggressiveness << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_EQUALS) {  // = key for aggressiveness up
+                    if (adaptive_aggressiveness < 1.0f) {
+                        adaptive_aggressiveness = std::min(1.0f, adaptive_aggressiveness + 0.1f);
+                        std::cout << "Adaptive Aggressiveness: " << adaptive_aggressiveness << std::endl;
                         need_render = true;
                     }
                 } else if (event.key.keysym.sym == SDLK_t) {  // T key to cycle tone mapping
@@ -2685,6 +2748,10 @@ int main(int argc, char* argv[]) {
             glUniform1f(motion_blur_strength_loc, motion_blur_strength);
             glUniform2f(motion_vector_loc, motion_vector_x, motion_vector_y);
 
+            // Phase 5: Adaptive Quality
+            glUniform1i(enable_adaptive_quality_loc, enable_adaptive_quality ? 1 : 0);
+            glUniform1f(quality_scale_loc, quality_scale);
+
             glUniform1i(tone_mapping_op_loc, tone_mapping_op);
             glUniform1f(exposure_loc, exposure);
             glUniform1f(contrast_loc, contrast);
@@ -2789,9 +2856,55 @@ int main(int argc, char* argv[]) {
                 fps = frame_count / elapsed;
                 frame_count = 0;
                 last_frame_time = now;
-                std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
-                         << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
-                         << "     " << std::flush;
+
+                // Phase 5: Adaptive Quality - Auto-adjust to maintain target FPS
+                if (enable_adaptive_quality && frame_count > 5) {  // Wait for stable FPS
+                    float fps_diff = fps - target_fps;
+
+                    if (fps_diff < -10.0f) {  // FPS too low, reduce quality
+                        quality_scale = std::max(0.5f, quality_scale - adaptive_aggressiveness * 0.1f);
+                        std::cout << "\r[Adaptive Quality] " << std::fixed << std::setprecision(2)
+                                 << "FPS: " << fps << " (Below target) | Quality: " << quality_scale
+                                 << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
+                                 << "     " << std::flush;
+
+                        // Reduce expensive features
+                        if (quality_scale < 0.7f) {
+                            if (enable_gi) { enable_gi = false; std::cout << "\n[Adaptive] Disabled GI"; }
+                            if (enable_ssr) { enable_ssr = false; std::cout << "\n[Adaptive] Disabled SSR"; }
+                        }
+                        if (quality_scale < 0.6f) {
+                            if (enable_bloom) { enable_bloom = false; std::cout << "\n[Adaptive] Disabled Bloom"; }
+                            if (enable_ssao) { enable_ssao = false; std::cout << "\n[Adaptive] Disabled SSAO"; }
+                        }
+                    } else if (fps_diff > 15.0f) {  // FPS high, increase quality
+                        quality_scale = std::min(1.5f, quality_scale + adaptive_aggressiveness * 0.05f);
+                        std::cout << "\r[Adaptive Quality] " << std::fixed << std::setprecision(2)
+                                 << "FPS: " << fps << " (Above target) | Quality: " << quality_scale
+                                 << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
+                                 << "     " << std::flush;
+
+                        // Enable features back when quality is high
+                        if (quality_scale > 0.9f) {
+                            if (!enable_gi) { enable_gi = true; std::cout << "\n[Adaptive] Enabled GI"; }
+                            if (!enable_ssr) { enable_ssr = true; std::cout << "\n[Adaptive] Enabled SSR"; }
+                        }
+                        if (quality_scale > 0.8f) {
+                            if (!enable_bloom) { enable_bloom = true; std::cout << "\n[Adaptive] Enabled Bloom"; }
+                            if (!enable_ssao) { enable_ssao = true; std::cout << "\n[Adaptive] Enabled SSAO"; }
+                        }
+                    } else {
+                        // FPS within target range, show normal display
+                        std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
+                                 << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
+                                 << "     " << std::flush;
+                    }
+                } else {
+                    // Normal display without adaptive quality
+                    std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
+                             << " | Cam: " << camera.position[0] << ", " << camera.position[1] << ", " << camera.position[2]
+                             << "     " << std::flush;
+                }
             }
 
             need_render = false;
