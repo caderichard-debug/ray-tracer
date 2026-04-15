@@ -789,16 +789,22 @@ void setup_scene_data(
             data.color[2] = triangle->material->albedo.z;
 
             // Determine material type for triangles
+            std::cout << "Triangle material type: ";
             if (auto lambertian = std::dynamic_pointer_cast<Lambertian>(triangle->material)) {
+                std::cout << "Lambertian, checking texture..." << std::endl;
                 if (auto checker = std::dynamic_pointer_cast<CheckerTexture>(lambertian->albedo_texture)) {
                     data.material = 8; // Checkerboard (pyramid)
+                    std::cout << "  -> Checkerboard texture" << std::endl;
                 } else if (auto gradient = std::dynamic_pointer_cast<GradientTexture>(lambertian->albedo_texture)) {
                     data.material = 9; // Gradient (quad on right wall)
+                    std::cout << "  -> Gradient texture!" << std::endl;
                 } else {
                     data.material = 0; // Regular lambertian
+                    std::cout << "  -> Regular lambertian (unknown texture)" << std::endl;
                 }
             } else {
                 data.material = 0; // Default lambertian
+                std::cout << "Not Lambertian" << std::endl;
             }
 
             triangles.push_back(data);

@@ -31,12 +31,21 @@ A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectoriza
   - OpenMP multi-threading (8 threads)
 
 - **Interactive Mode**: Real-time exploration
-  - SDL2-based window system
+  - SDL2-based window system with full color graphics
   - WASD + mouse camera controls
   - 6 quality levels (320x180 to 1920x1080)
   - Real-time FPS display
   - Dynamic quality switching
   - Pause/resume rendering
+  - Advanced rendering features (progressive, adaptive, wavefront)
+
+- **ASCII Terminal Mode**: Retro text-based rendering
+  - Pure terminal rendering (no GUI required)
+  - WASD + arrow key camera controls
+  - Real-time ASCII art output
+  - Cross-platform (macOS/Linux/Windows)
+  - Adaptive terminal sizing
+  - Interactive first-person controls
 
 ## Quick Start
 
@@ -124,9 +133,13 @@ make phase2
 # Run with custom settings
 ./raytracer -w 1920 -s 64 -d 8 -o my_scene
 
-# Build and run interactive ray tracer
+# Build and run interactive ray tracer (SDL2 graphics)
 make interactive
 make runi
+
+# Build and run ASCII terminal ray tracer (retro style)
+make ascii
+make runa
 ```
 
 **⚠️ IMPORTANT:** When the interactive ray tracer starts, **press H** immediately to see the help overlay with all controls! The help overlay shows:
