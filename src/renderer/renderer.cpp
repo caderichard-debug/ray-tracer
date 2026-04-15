@@ -90,17 +90,17 @@ float Renderer::compute_variance(const std::vector<Color>& samples) const {
 
 Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) const {
     // Start with ambient component
-    Color color = scene.ambient_light * rec.mat->albedo;
+    Color color = AVX2::mul_color_avx2(scene.ambient_light, rec.mat->albedo);
 
     // Add contribution from each light
     for (const auto& light : scene.lights) {
         // Vector from hit point to light
         Vec3 light_dir = light.position - rec.p;
         float light_distance = light_dir.length();
-        Vec3 light_dir_normalized = light_dir.normalized();  // Use regular normalize for precision
+        Vec3 light_dir_normalized = AVX2::normalize_avx2(light_dir);
 
         // Early culling: if surface faces away from light, skip shadow ray
-        float dot_product = dot(rec.normal, light_dir_normalized);  // Use regular dot for precision
+        float dot_product = AVX2::dot_product_avx2(rec.normal, light_dir_normalized);
         if (dot_product <= 0.0f) {
             // Surface faces away from light - no contribution, just ambient
             continue;
@@ -114,17 +114,21 @@ Color Renderer::compute_phong_shading(const HitRecord& rec, const Scene& scene) 
         }
 
         if (!in_shadow) {
-            // Diffuse component (Lambertian)
-            float diffuse_intensity = dot_product; // Use precomputed dot
-            Color diffuse = diffuse_intensity * light.intensity * rec.mat->albedo;
+            // Diffuse component (Lambertian) - use SIMD color operations
+            float diffuse_intensity = dot_product;
+            Color diffuse_light = AVX2::mul_color_avx2(light.intensity, rec.mat->albedo);
+            Color diffuse = AVX2::scale_avx2(diffuse_light, diffuse_intensity);
 
-            // Specular component (Phong) - use material properties
-            Vec3 view_dir = (-light_dir_normalized).normalized();
+            // Specular component (Phong) - use SIMD operations
+            Vec3 view_dir = AVX2::normalize_avx2(-light_dir_normalized);
             Vec3 reflect_dir = AVX2::reflect_avx2(-light_dir_normalized, rec.normal);
-            float spec = std::pow(std::max(0.0f, dot(view_dir, reflect_dir)), rec.mat->shininess);
-            Color specular = rec.mat->specular_intensity * spec * light.intensity;
+            float view_dot_reflect = AVX2::dot_product_avx2(view_dir, reflect_dir);
+            float spec = std::pow(std::max(0.0f, view_dot_reflect), rec.mat->shininess);
+            Color specular = AVX2::scale_avx2(AVX2::mul_color_avx2(rec.mat->specular_intensity, light.intensity), spec);
 
-            color = color + diffuse + specular;
+            // Accumulate using SIMD
+            color = AVX2::add_avx2(color, diffuse);
+            color = AVX2::add_avx2(color, specular);
         }
     }
 
@@ -241,12 +245,10 @@ void Renderer::render_wavefront(const Camera& cam, const Scene& scene, std::vect
 #endif
 
                     float scale = 1.0f / samples;
-                    pixel_color = pixel_color * scale;
+                    pixel_color = AVX2::scale_avx2(pixel_color, scale);
 
-                    // Gamma correction
-                    pixel_color.x = std::sqrt(pixel_color.x);
-                    pixel_color.y = std::sqrt(pixel_color.y);
-                    pixel_color.z = std::sqrt(pixel_color.z);
+                    // Gamma correction using SIMD
+                    pixel_color = AVX2::sqrt_avx2(pixel_color);
 
                     framebuffer[height - 1 - j][i] = pixel_color;
                 }
