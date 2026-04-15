@@ -126,7 +126,7 @@ int main() {
     setup_cornell_box_scene(scene);
 
     // Setup camera - original position moved left
-    Point3 lookfrom(-4, 1, 4);  // Moved left to -4 instead of 0
+    Point3 lookfrom(-4, 1, 4);  // Back to original position, moved left
     Point3 lookat(0, 0.5, 0);
     Vec3 vup(0, 1, 0);
     float dist_to_focus = (lookfrom - lookat).length();
@@ -152,7 +152,7 @@ int main() {
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
     // Render loop (limited frames for testing)
-    for (int frame = 0; frame < 100; frame++) {
+    for (int frame = 0; frame < 75; frame++) {
         auto frame_start = std::chrono::high_resolution_clock::now();
 
         // Clear screen once per frame
@@ -222,7 +222,7 @@ int main() {
         cam = Camera(lookfrom, lookat, vup, vfov, aspect_ratio, aperture, dist_to_focus);
 
         // Small delay to control frame rate
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     return 0;
