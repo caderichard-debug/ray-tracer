@@ -153,7 +153,7 @@ phase6:
 	@echo "⚠️  Phase 6 not yet implemented"
 
 # Run current phase
-.PHONY: run runi test-int
+.PHONY: run runi runi-gpu test-int
 run: phase2
 	@echo "Running ray tracer (Phase 2)..."
 	./$(BINARY) > output.ppm
@@ -162,8 +162,17 @@ run: phase2
 # Run interactive real-time ray tracer (CPU)
 runi: interactive
 	@echo "Starting interactive real-time ray tracer (CPU)..."
-	@echo "Controls: WASD=Move, Mouse=Look, 1-3=Quality, H=Help, Space=Pause, ESC=Quit"
+	@echo "Controls: WASD=Move, Mouse=Look, 1-3=Quality, R=Toggle GPU, H=Help, Space=Pause, ESC=Quit"
 	./raytracer_interactive
+
+# Run interactive real-time ray tracer (GPU)
+runi-gpu: interactive-gpu
+	@echo "Starting interactive real-time ray tracer (GPU)..."
+	@echo "Controls: WASD=Move, Mouse=Look, 1-3=Quality, R=Toggle GPU, H=Help, Space=Pause, ESC=Quit"
+	@echo ""
+	@echo "GPU Renderer: Press R to toggle between CPU/GPU rendering"
+	@echo "Expected performance: 60-300x faster than CPU depending on GPU"
+	./raytracer_interactive_gpu
 
 # Run with test scene
 .PHONY: test
@@ -251,7 +260,8 @@ help:
 	@echo ""
 	@echo "Running:"
 	@echo "  make run           - Build and run batch ray tracer"
-	@echo "  make runi          - Build and run interactive ray tracer"
+	@echo "  make runi          - Build and run interactive ray tracer (CPU)"
+	@echo "  make runi-gpu      - Build and run interactive ray tracer (GPU)"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
 	@echo "Testing:"
@@ -268,12 +278,13 @@ help:
 	@echo ""
 	@echo "Documentation: docs/index.md"
 	@echo ""
-	@echo "Interactive Controls (make runi):"
+	@echo "Interactive Controls (make runi/runi-gpu):"
 	@echo "  WASD          - Move camera"
 	@echo "  Arrow Keys    - Move up/down"
 	@echo "  Mouse         - Look around (when captured)"
 	@echo "  Left Click    - Capture/release mouse"
 	@echo "  1-3           - Quality level (capped for real-time)"
+	@echo "  R             - Toggle CPU/GPU renderer (GPU mode only)"
 	@echo "  H             - Toggle help overlay"
 	@echo "  Space         - Pause rendering"
 	@echo "  ESC           - Quit"
