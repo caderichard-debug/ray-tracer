@@ -2,46 +2,42 @@
 #define SHADER_MANAGER_H
 
 #include <string>
-#include <GL/glew.h>
+#include <vector>
+#include <OpenGL/gl3.h>
 
-// Shader Manager handles loading, compiling, and linking OpenGL shaders
 class ShaderManager {
 public:
     ShaderManager();
     ~ShaderManager();
 
-    // Load and compile a compute shader from file
-    GLuint load_compute_shader(const std::string& filename);
+    // Load and compile a shader from file
+    GLuint load_shader(GLenum type, const std::string& filename);
 
-    // Load and compile a vertex shader from file
-    GLuint load_vertex_shader(const std::string& filename);
+    // Load and compile a shader from source string
+    GLuint compile_shader(GLenum type, const std::string& source, const std::string& name);
 
-    // Load and compile a fragment shader from file
-    GLuint load_fragment_shader(const std::string& filename);
+    // Link shaders into a program
+    GLuint link_program(const std::vector<GLuint>& shaders, const std::string& program_name);
 
-    // Create a program from vertex and fragment shaders
-    GLuint create_program(GLuint vertex_shader, GLuint fragment_shader);
+    // Load a compute shader from file
+    GLuint load_compute_program(const std::string& filename);
 
-    // Create a compute program
-    GLuint create_compute_program(GLuint compute_shader);
+    // Load vertex and fragment shaders from files
+    GLuint load_render_program(const std::string& vertex_file, const std::string& fragment_file);
 
-    // Read shader source from file
-    std::string read_shader_file(const std::string& filename);
+    // Check for OpenGL errors
+    static bool check_gl_error(const std::string& operation);
 
-    // Check for shader compilation errors
-    bool check_compile_errors(GLuint shader, const std::string& type);
-
-    // Check for program linking errors
-    bool check_link_errors(GLuint program);
-
-    // Delete a shader
-    void delete_shader(GLuint shader);
-
-    // Delete a program
-    void delete_program(GLuint program);
+    // Get shader compilation/linking log
+    static std::string get_shader_info_log(GLuint shader);
+    static std::string get_program_info_log(GLuint program);
 
 private:
-    std::string base_path;
+    std::vector<GLuint> created_shaders;
+    std::vector<GLuint> created_programs;
+
+    // Read file contents
+    std::string read_file(const std::string& filename);
 };
 
 #endif // SHADER_MANAGER_H

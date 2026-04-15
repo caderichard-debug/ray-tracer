@@ -1,523 +1,316 @@
 #include "gpu_renderer.h"
 #include "shader_manager.h"
 #include <iostream>
-#include <chrono>
-#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <cmath>
 
-// Quad vertices for screen-filling triangle
-static const float quad_vertices[] = {
-    -1.0f, -1.0f,
-     3.0f, -1.0f,
-    -1.0f,  3.0f
+// Structure definitions for GPU buffers (must match shader layouts)
+struct GPUCamera {
+    float position[4];
+    float lookat[4];
+    float vup[4];
+    float vfov;
+    float aspect_ratio;
+    float padding[2];
+};
+
+struct GPUSphere {
+    float center[4];
+    float radius;
+    int material_id;
+    float padding[3];
+};
+
+struct GPUTriangle {
+    float v0[4];
+    float v1[4];
+    float v2[4];
+    float normal[4];
+    int material_id;
+    float padding[3];
+};
+
+struct GPUMaterial {
+    float albedo[4];
+    float fuzz;
+    int type;
+    float padding[2];
+};
+
+struct GPULight {
+    float position[4];
+    float intensity[4];
 };
 
 GPURenderer::GPURenderer()
-    : compute_program(0)
-    , display_program(0)
-    , output_texture(0)
-    , vao(0)
-    , vbo(0)
-    , sphere_ssbo(0)
-    , triangle_ssbo(0)
-    , material_ssbo(0)
-    , light_ssbo(0)
-    , camera_ubo(0)
-    , num_spheres(0)
-    , num_triangles(0)
-    , num_lights(0)
-    , width(0)
-    , height(0)
-    , last_render_time(0.0f)
-    , last_ray_count(0)
-    , perf_tracker("GPU", 1, 1, 1, 1)
-    , initialized(false)
-    , use_compute_shader(true)
-    , sdl_window(nullptr)
-    , gl_context(nullptr)
-    , owns_context(false)
-    , fragment_program(0)
-    , vao_fallback(0)
-    , vbo_fallback(0)
-{
+    : compute_program(0), vertex_program(0), fragment_program(0),
+      sphere_buffer(0), triangle_buffer(0), material_buffer(0),
+      light_buffer(0), camera_buffer(0), output_texture(0), vao(0),
+      width(0), height(0), initialized(false), scene_uploaded(false),
+      timer_active(false) {
+    shader_manager = std::make_unique<ShaderManager>();
 }
 
 GPURenderer::~GPURenderer() {
     cleanup();
 }
 
-bool GPURenderer::initialize(SDL_Window* window, int width, int height) {
+bool GPURenderer::initialize(int w, int h) {
     if (initialized) {
-        std::cerr << "GPURenderer already initialized" << std::endl;
-        return false;
+        std::cerr << "GPU renderer already initialized" << std::endl;
+        return true;
     }
 
-    this->sdl_window = window;
-    this->width = width;
-    this->height = height;
+    width = w;
+    height = h;
+
+    std::cout << "Initializing GPU renderer..." << std::endl;
 
     if (!init_opengl()) {
         std::cerr << "Failed to initialize OpenGL" << std::endl;
         return false;
     }
 
-    if (!create_shaders()) {
-        std::cerr << "Failed to create shaders" << std::endl;
+    if (!init_shaders()) {
+        std::cerr << "Failed to initialize shaders" << std::endl;
         return false;
     }
 
-    if (!create_buffers(width, height)) {
-        std::cerr << "Failed to create buffers" << std::endl;
+    if (!init_buffers()) {
+        std::cerr << "Failed to initialize buffers" << std::endl;
         return false;
     }
 
-    if (!create_display_quad()) {
-        std::cerr << "Failed to create display quad" << std::endl;
-        return false;
-    }
+    // Create timer queries for performance measurement
+    glGenQueries(2, timer_queries);
 
     initialized = true;
+    std::cout << "✓ GPU renderer initialized" << std::endl;
     return true;
 }
 
 bool GPURenderer::init_opengl() {
-    // If window already has a context, use it
-    gl_context = SDL_GL_GetCurrentContext();
-    if (gl_context) {
-        std::cout << "Using existing OpenGL context" << std::endl;
-        owns_context = false;
-    } else {
-        // Create a new context for the window
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);  // macOS supports up to 4.1
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    // Check OpenGL version
+    const GLubyte* version = glGetString(GL_VERSION);
+    std::cout << "OpenGL Version: " << version << std::endl;
 
-        gl_context = SDL_GL_CreateContext(sdl_window);
-        if (!gl_context) {
-            std::cerr << "Failed to create OpenGL context: " << SDL_GetError() << std::endl;
-            return false;
-        }
-        owns_context = true;
-    }
+    GLint major, minor;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
 
-    // Initialize GLEW
-    glewExperimental = GL_TRUE;
-    GLenum err = glewInit();
-    if (err != GLEW_OK) {
-        std::cerr << "Failed to initialize GLEW: " << glewGetErrorString(err) << std::endl;
+    if (major < 4 || (major == 4 && minor < 3)) {
+        std::cerr << "OpenGL 4.3+ required, got " << major << "." << minor << std::endl;
         return false;
     }
 
-    std::cout << "OpenGL Context Initialized:" << std::endl;
-    std::cout << "  Version: " << glGetString(GL_VERSION) << std::endl;
-    std::cout << "  Renderer: " << glGetString(GL_RENDERER) << std::endl;
-    std::cout << "  GLSL Version: " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
+    // Check compute shader support
+    GLint max_compute_work_group_count[3];
+    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &max_compute_work_group_count[0]);
+    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &max_compute_work_group_count[1]);
+    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &max_compute_work_group_count[2]);
 
-    // Set up OpenGL state for rendering
-    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
-
-    // Check for compute shader support
-    GLint num_extensions;
-    glGetIntegerv(GL_NUM_EXTENSIONS, &num_extensions);
-    bool has_compute = false;
-    for (int i = 0; i < num_extensions; i++) {
-        const char* ext = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, i));
-        if (strcmp(ext, "GL_ARB_compute_shader") == 0) {
-            has_compute = true;
-            break;
-        }
-    }
-
-    if (!has_compute) {
-        std::cerr << "Warning: Compute shaders not supported, using fragment shader fallback" << std::endl;
-    } else {
-        std::cout << "  Compute Shaders: Supported" << std::endl;
-    }
+    std::cout << "Max compute work group count: ["
+              << max_compute_work_group_count[0] << ", "
+              << max_compute_work_group_count[1] << ", "
+              << max_compute_work_group_count[2] << "]" << std::endl;
 
     return true;
 }
 
-bool GPURenderer::create_shaders() {
-    ShaderManager sm;
-
-    // Try compute shader first
-    GLuint compute_shader = sm.load_compute_shader("raytrace.comp");
-    if (compute_shader) {
-        compute_program = sm.create_compute_program(compute_shader);
-        if (compute_program) {
-            sm.delete_shader(compute_shader);
-            std::cout << "Using compute shader ray tracing" << std::endl;
-            use_compute_shader = true;
-            return create_display_shaders(sm);
-        }
-    }
-
-    std::cout << "Compute shaders not available, falling back to fragment shader ray tracing" << std::endl;
-    use_compute_shader = false;
-
-    // Fall back to fragment shader approach
-    GLuint vertex_shader = sm.load_vertex_shader("quad.vert");
-    if (!vertex_shader) {
-        std::cerr << "Failed to load vertex shader" << std::endl;
-        return false;
-    }
-
-    GLuint fragment_shader = sm.load_fragment_shader("raytrace.frag");
-    if (!fragment_shader) {
-        std::cerr << "Failed to load fragment shader" << std::endl;
-        sm.delete_shader(vertex_shader);
-        return false;
-    }
-
-    fragment_program = sm.create_program(vertex_shader, fragment_shader);
-    sm.delete_shader(vertex_shader);
-    sm.delete_shader(fragment_shader);
-
-    if (!fragment_program) {
-        std::cerr << "Failed to create fragment program" << std::endl;
-        return false;
-    }
-
-    std::cout << "Fragment shader ray tracing initialized" << std::endl;
+bool GPURenderer::init_shaders() {
+    // TODO: Load actual shader files once created
+    // For now, create a placeholder
+    std::cout << "Shader loading not yet implemented" << std::endl;
     return true;
 }
 
-bool GPURenderer::create_display_shaders(ShaderManager& sm) {
-    // Create display shader program (for compute shader output)
-    GLuint vertex_shader = sm.load_vertex_shader("quad.vert");
-    if (!vertex_shader) {
-        std::cerr << "Failed to load vertex shader" << std::endl;
-        return false;
-    }
-
-    GLuint fragment_shader = sm.load_fragment_shader("quad.frag");
-    if (!fragment_shader) {
-        std::cerr << "Failed to load fragment shader" << std::endl;
-        sm.delete_shader(vertex_shader);
-        return false;
-    }
-
-    display_program = sm.create_program(vertex_shader, fragment_shader);
-    sm.delete_shader(vertex_shader);
-    sm.delete_shader(fragment_shader);
-
-    if (!display_program) {
-        std::cerr << "Failed to create display program" << std::endl;
-        return false;
-    }
-
-    return true;
-}
-
-bool GPURenderer::create_buffers(int width, int height) {
-    // Create output texture (RGBA32F for HDR)
+bool GPURenderer::init_buffers() {
+    // Create output texture
     glGenTextures(1, &output_texture);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, output_texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindImageTexture(0, output_texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
-    // Create SSBOs for scene data (will be populated in set_scene)
-    glGenBuffers(1, &sphere_ssbo);
-    glGenBuffers(1, &triangle_ssbo);
-    glGenBuffers(1, &material_ssbo);
-    glGenBuffers(1, &light_ssbo);
-    glGenBuffers(1, &camera_ubo);
+    // Create SSBOs
+    glGenBuffers(1, &sphere_buffer);
+    glGenBuffers(1, &triangle_buffer);
+    glGenBuffers(1, &material_buffer);
+    glGenBuffers(1, &light_buffer);
+    glGenBuffers(1, &camera_buffer);
 
-    std::cout << "Buffers created successfully" << std::endl;
-    return true;
-}
-
-bool GPURenderer::create_display_quad() {
-    // Create VAO and VBO for screen quad
+    // Create VAO for screen quad
     glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
-
-    // Position attribute
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     return true;
 }
 
-void GPURenderer::set_scene(const Scene& scene) {
-    upload_scene_data(scene);
+void GPURenderer::set_scene(const std::shared_ptr<Scene>& scene_ptr) {
+    scene = scene_ptr;
+    scene_uploaded = false;
 }
 
-void GPURenderer::upload_scene_data(const Scene& scene) {
-    (void)scene; // TODO: Extract proper scene data
-
-    // Count scene elements
-    num_spheres = 0;
-    num_triangles = 0;
-
-    for (const auto& obj : scene.objects) {
-        (void)obj; // TODO: Extract primitive type and count
-        num_spheres++;
+void GPURenderer::upload_scene() {
+    if (!scene || scene_uploaded) {
+        return;
     }
 
-    num_lights = scene.lights.size();
+    std::cout << "Uploading scene to GPU..." << std::endl;
 
-    // Prepare scene data for upload
-    std::vector<float> sphere_data;
-    sphere_data.reserve(num_spheres * 4); // vec4 per sphere
+    // TODO: Upload scene data to GPU buffers
+    // This will be implemented once we have the compute shader
 
-    // Extract sphere data from scene
-    for (const auto& obj : scene.objects) {
-        // Simplified: assuming all objects are spheres for demo
-        // In real implementation, check type and extract accordingly
-        sphere_data.push_back(0.0f); // x
-        sphere_data.push_back(0.0f); // y
-        sphere_data.push_back(0.0f); // z
-        sphere_data.push_back(0.5f); // radius
+    scene_uploaded = true;
+    std::cout << "✓ Scene uploaded to GPU" << std::endl;
+}
+
+void GPURenderer::upload_camera(const Camera& camera) {
+    GPUCamera gpu_camera;
+
+    // Copy camera data
+    Vec3 pos = camera.get_origin();
+    Vec3 look = camera.get_target();
+    Vec3 up = camera.get_up();
+    float vfov = camera.get_vfov();
+    float aspect = camera.get_aspect();
+
+    gpu_camera.position[0] = pos.x();
+    gpu_camera.position[1] = pos.y();
+    gpu_camera.position[2] = pos.z();
+    gpu_camera.position[3] = 1.0f;
+
+    gpu_camera.lookat[0] = look.x();
+    gpu_camera.lookat[1] = look.y();
+    gpu_camera.lookat[2] = look.z();
+    gpu_camera.lookat[3] = 1.0f;
+
+    gpu_camera.vup[0] = up.x();
+    gpu_camera.vup[1] = up.y();
+    gpu_camera.vup[2] = up.z();
+    gpu_camera.vup[3] = 1.0f;
+
+    gpu_camera.vfov = vfov;
+    gpu_camera.aspect_ratio = aspect;
+    gpu_camera.padding[0] = 0.0f;
+    gpu_camera.padding[1] = 0.0f;
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, camera_buffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(GPUCamera), &gpu_camera, GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, camera_buffer);
+}
+
+void GPURenderer::render(const Camera& camera, std::vector<std::vector<Color>>& framebuffer) {
+    if (!initialized) {
+        std::cerr << "GPU renderer not initialized" << std::endl;
+        return;
     }
 
-    // Create Cornell box spheres for demo
-    sphere_data.clear();
-    sphere_data.reserve(20 * 4);
+    if (!scene) {
+        std::cerr << "No scene set" << std::endl;
+        return;
+    }
 
-    // Center sphere
-    sphere_data.insert(sphere_data.end(), {0.0f, 0.0f, 0.0f, 0.5f});
-    // Red sphere
-    sphere_data.insert(sphere_data.end(), {-1.2f, 0.2f, -0.5f, 0.35f});
-    // Blue sphere
-    sphere_data.insert(sphere_data.end(), {1.2f, -0.1f, -0.8f, 0.4f});
-    // Small sphere
-    sphere_data.insert(sphere_data.end(), {0.0f, -0.5f, 0.5f, 0.25f});
-    // Yellow sphere
-    sphere_data.insert(sphere_data.end(), {-0.6f, -0.4f, 0.8f, 0.2f});
+    // Start performance tracking
+    performance.start_render();
 
-    num_spheres = sphere_data.size() / 4;
+    // Upload scene if needed
+    if (!scene_uploaded) {
+        upload_scene();
+    }
 
-    // Upload sphere data as texture buffer (for fragment shader compatibility)
-    glGenBuffers(1, &sphere_ssbo);
-    glBindBuffer(GL_TEXTURE_BUFFER, sphere_ssbo);
-    glBufferData(GL_TEXTURE_BUFFER, sphere_data.size() * sizeof(float), sphere_data.data(), GL_STATIC_DRAW);
+    // Upload camera
+    upload_camera(camera);
 
-    // Create texture buffer texture
-    GLuint sphere_texture;
-    glGenTextures(1, &sphere_texture);
-    glBindTexture(GL_TEXTURE_BUFFER, sphere_texture);
-    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, sphere_ssbo);
-
-    // Upload triangle data (empty for now)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, triangle_ssbo);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, 0, nullptr, GL_STATIC_DRAW);
-
-    // Upload material data (empty for now)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, material_ssbo);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, 0, nullptr, GL_STATIC_DRAW);
-
-    // Upload light data (empty for now)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, light_ssbo);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, 0, nullptr, GL_STATIC_DRAW);
-
-    std::cout << "Scene data uploaded: " << num_spheres << " spheres" << std::endl;
-}
-
-void GPURenderer::upload_camera_data(const Camera& camera) {
-    // Camera uniform block
-    struct CameraData {
-        float position[4];
-        float lookat[4];
-        float vup[4];
-        float vfov;
-        float aspect_ratio;
-        float aperture;
-        float dist_to_focus;
-        float padding_;
-    };
-
-    CameraData cam_data;
-
-    // Copy camera position
-    cam_data.position[0] = camera.lookfrom.x;
-    cam_data.position[1] = camera.lookfrom.y;
-    cam_data.position[2] = camera.lookfrom.z;
-    cam_data.position[3] = 0.0f;
-
-    // Copy camera look target
-    cam_data.lookat[0] = camera.lookat.x;
-    cam_data.lookat[1] = camera.lookat.y;
-    cam_data.lookat[2] = camera.lookat.z;
-    cam_data.lookat[3] = 0.0f;
-
-    // Copy camera up vector
-    cam_data.vup[0] = camera.vup.x;
-    cam_data.vup[1] = camera.vup.y;
-    cam_data.vup[2] = camera.vup.z;
-    cam_data.vup[3] = 0.0f;
-
-    cam_data.vfov = camera.vfov;
-    cam_data.aspect_ratio = camera.aspect_ratio;
-    cam_data.aperture = camera.aperture;
-    cam_data.dist_to_focus = camera.focus_dist;
-    cam_data.padding_ = 0.0f;
-
-    glBindBuffer(GL_UNIFORM_BUFFER, camera_ubo);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(CameraData), &cam_data, GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 4, camera_ubo);
-}
-
-void GPURenderer::dispatch_compute(int samples_per_pixel, int max_depth) {
-    glUseProgram(compute_program);
-
-    // Set uniforms
-    glUniform2i(glGetUniformLocation(compute_program, "resolution"), width, height);
-    glUniform1i(glGetUniformLocation(compute_program, "num_spheres"), num_spheres);
-    glUniform1i(glGetUniformLocation(compute_program, "num_triangles"), num_triangles);
-    glUniform1i(glGetUniformLocation(compute_program, "num_lights"), num_lights);
-    glUniform1i(glGetUniformLocation(compute_program, "max_depth"), max_depth);
-    glUniform1i(glGetUniformLocation(compute_program, "samples_per_pixel"), samples_per_pixel);
-
-    // Set ambient light
-    glUniform3f(glGetUniformLocation(compute_program, "ambient_light"), 0.1f, 0.1f, 0.1f);
-
-    // Bind output texture
-    glBindImageTexture(0, output_texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glBindTextureUnit(0, output_texture);
+    // Start GPU timer
+    if (!timer_active) {
+        glBeginQuery(GL_TIME_ELAPSED, timer_queries[0]);
+        timer_active = true;
+    }
 
     // Dispatch compute shader
-    int workgroup_size = 16;
-    int num_groups_x = (width + workgroup_size - 1) / workgroup_size;
-    int num_groups_y = (height + workgroup_size - 1) / workgroup_size;
+    dispatch_compute();
 
-    glDispatchCompute(num_groups_x, num_groups_y, 1);
+    // Stop GPU timer
+    glEndQuery(GL_TIME_ELAPSED);
 
-    // Wait for compute to finish
-    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-    glUseProgram(0);
+    // Read back framebuffer
+    read_framebuffer(framebuffer);
+
+    // Get GPU timing
+    GLuint64 gpu_time_ns = 0;
+    glGetQueryObjectui64v(timer_queries[0], GL_QUERY_RESULT, &gpu_time_ns);
+    double gpu_time_ms = gpu_time_ns / 1e6;
+
+    // Stop performance tracking
+    performance.stop_render(width * height, gpu_time_ms);
+
+    std::cout << "GPU render time: " << gpu_time_ms << " ms" << std::endl;
 }
 
-void GPURenderer::render(const Camera& camera, const Scene& scene, int samples_per_pixel, int max_depth) {
-    (void)scene; // Scene data already uploaded via set_scene()
-    (void)samples_per_pixel; // Handled by shader
+void GPURenderer::dispatch_compute() {
+    // TODO: Implement actual compute shader dispatch
+    // This will be implemented once we have the compute shader
+    std::cout << "Compute dispatch not yet implemented" << std::endl;
+}
 
-    if (!initialized) {
-        std::cerr << "GPURenderer not initialized" << std::endl;
+void GPURenderer::read_framebuffer(std::vector<std::vector<Color>>& framebuffer) {
+    // Resize framebuffer if needed
+    if (framebuffer.size() != static_cast<size_t>(height) ||
+        framebuffer[0].size() != static_cast<size_t>(width)) {
+        framebuffer.resize(height, std::vector<Color>(width));
+    }
+
+    // TODO: Read back from GPU texture
+    // This will be implemented once we have the compute shader
+    std::cout << "Framebuffer readback not yet implemented" << std::endl;
+}
+
+void GPURenderer::resize(int w, int h) {
+    if (width == w && height == h) {
         return;
     }
 
-    auto start = std::chrono::high_resolution_clock::now();
+    width = w;
+    height = h;
 
-    // Upload camera data
-    upload_camera_data(camera);
-
-    if (use_compute_shader) {
-        // Dispatch compute shader (original path)
-        dispatch_compute(samples_per_pixel, max_depth);
-    } else {
-        // Render with fragment shader
-        render_fragment(camera, max_depth);
-    }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    last_render_time = std::chrono::duration<float>(end - start).count();
-
-    // Calculate ray count
-    last_ray_count = (uint64_t)width * height * samples_per_pixel;
-}
-
-void GPURenderer::render_fragment(const Camera& camera, int max_depth) {
-    (void)camera; // Camera data is already uploaded via uniform buffer
-    (void)max_depth;
-
-    // Clear screen with a visible color to test
-    glClearColor(0.8f, 0.3f, 0.2f, 1.0f);  // Red/orange clear color
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    // Set viewport
-    glViewport(0, 0, width, height);
-
-    // Use fragment program
-    glUseProgram(fragment_program);
-    if (fragment_program == 0) {
-        std::cerr << "Fragment program is 0, not using it" << std::endl;
-        return;
-    }
-
-    // Set resolution uniform
-    GLint res_loc = glGetUniformLocation(fragment_program, "resolution");
-    if (res_loc >= 0) {
-        glUniform2i(res_loc, width, height);
-    }
-
-    // Draw full-screen quad
-    glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    glBindVertexArray(0);
-
-    glUseProgram(0);
-
-    // Check for OpenGL errors
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        std::cerr << "OpenGL error during render: " << err << std::endl;
-    }
-}
-
-void GPURenderer::get_framebuffer(unsigned char* data, int width, int height) {
-    (void)width;  // Use class member width instead
-    (void)height; // Use class member height instead
-
-    // Read back texture data
+    // Resize output texture
     glBindTexture(GL_TEXTURE_2D, output_texture);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void GPURenderer::display() {
-    if (use_compute_shader) {
-        // Display compute shader output
-        glUseProgram(display_program);
-
-        // Bind output texture
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, output_texture);
-        glUniform1i(glGetUniformLocation(display_program, "u_texture"), 0);
-
-        // Draw quad
-        glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        glBindVertexArray(0);
-
-        glUseProgram(0);
-    }
-    // Fragment shader renders directly to screen, no display step needed
-}
-
 void GPURenderer::cleanup() {
-    if (vbo) glDeleteBuffers(1, &vbo);
-    if (vao) glDeleteVertexArrays(1, &vao);
-    if (vao_fallback) glDeleteVertexArrays(1, &vao_fallback);
-    if (vbo_fallback) glDeleteBuffers(1, &vbo_fallback);
-    if (output_texture) glDeleteTextures(1, &output_texture);
-    if (sphere_ssbo) glDeleteBuffers(1, &sphere_ssbo);
-    if (triangle_ssbo) glDeleteBuffers(1, &triangle_ssbo);
-    if (material_ssbo) glDeleteBuffers(1, &material_ssbo);
-    if (light_ssbo) glDeleteBuffers(1, &light_ssbo);
-    if (camera_ubo) glDeleteBuffers(1, &camera_ubo);
-    if (compute_program) glDeleteProgram(compute_program);
-    if (display_program) glDeleteProgram(display_program);
-    if (fragment_program) glDeleteProgram(fragment_program);
-
-    if (gl_context && owns_context) {
-        SDL_GL_DeleteContext(gl_context);
-        gl_context = nullptr;
+    if (!initialized) {
+        return;
     }
 
-    // Don't destroy the window - it's owned by the main application
-    sdl_window = nullptr;
+    // Delete timer queries
+    if (timer_active) {
+        glDeleteQueries(2, timer_queries);
+        timer_active = false;
+    }
+
+    // Delete buffers
+    if (sphere_buffer) glDeleteBuffers(1, &sphere_buffer);
+    if (triangle_buffer) glDeleteBuffers(1, &triangle_buffer);
+    if (material_buffer) glDeleteBuffers(1, &material_buffer);
+    if (light_buffer) glDeleteBuffers(1, &light_buffer);
+    if (camera_buffer) glDeleteBuffers(1, &camera_buffer);
+
+    // Delete texture
+    if (output_texture) glDeleteTextures(1, &output_texture);
+
+    // Delete VAO
+    if (vao) glDeleteVertexArrays(1, &vao);
+
+    // Delete programs (handled by shader manager)
+    compute_program = 0;
+    vertex_program = 0;
+    fragment_program = 0;
 
     initialized = false;
+    std::cout << "GPU renderer cleaned up" << std::endl;
 }

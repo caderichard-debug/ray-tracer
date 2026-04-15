@@ -88,28 +88,6 @@ sdl-test: $(BUILD_DIR)
 	@echo "✓ SDL Test built: $(BUILD_DIR)/sdl_test"
 	@echo "Run with: ./build/sdl_test"
 
-# Working GPU ray tracer - simple fragment shader ray tracing
-.PHONY: working-gpu
-working-gpu: $(BUILD_DIR)
-	@echo "Building Working GPU Ray Tracer"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) \
-		src/main_working_gpu.cpp \
-		-o $(BUILD_DIR)/working_gpu $(LDFLAGS) $(SDL_LDFLAGS) -framework OpenGL
-	@echo "✓ Working GPU built: $(BUILD_DIR)/working_gpu"
-	@echo "Run with: ./build/working_gpu"
-
-# Interactive real-time ray tracer with GPU compute shader support
-.PHONY: interactive-gpu
-interactive-gpu: $(BUILD_DIR)
-	@echo "Building Interactive Real-time Ray Tracer (GPU)"
-	@echo "Features: SDL2 window, OpenGL fragment shaders, Quality levels 1-3"
-	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) $(SDL_INCLUDES) $(OPENGL_INCLUDES) \
-		-DUSE_GPU_RENDERER \
-		src/main_interactive.cpp src/renderer/renderer.cpp \
-		-o $(BUILD_DIR)/raytracer_interactive_gpu $(LDFLAGS) $(SDL_LDFLAGS) $(OPENGL_LDFLAGS)
-	@echo "✓ Interactive GPU built: $(BUILD_DIR)/raytracer_interactive_gpu"
-	@ln -sf $(BUILD_DIR)/raytracer_interactive_gpu raytracer_interactive_gpu
-
 # Phase 3: SIMD Vectorization (to be implemented)
 # Features: AVX2 Vec3, Ray packets, Vectorized intersection
 .PHONY: phase3
@@ -148,7 +126,7 @@ phase6:
 	@echo "⚠️  Phase 6 not yet implemented"
 
 # Run current phase
-.PHONY: run runi runi-gpu test-int
+.PHONY: run runi test-int
 run: phase2
 	@echo "Running ray tracer (Phase 2)..."
 	./$(BINARY) > output.ppm
@@ -159,13 +137,6 @@ runi: interactive
 	@echo "Starting interactive real-time ray tracer (CPU)..."
 	@echo "Controls: WASD=Move, Mouse=Look, 1-3=Quality, H=Help, Space=Pause, ESC=Quit"
 	./raytracer_interactive
-
-# Run interactive real-time ray tracer (GPU - EXPERIMENTAL)
-runi-gpu: interactive-gpu
-	@echo "Starting interactive real-time ray tracer (GPU)..."
-	@echo "⚠️  GPU mode is experimental - may have rendering issues"
-	@echo "Controls: WASD=Move, Mouse=Look, 1-3=Quality, H=Help, Space=Pause, ESC=Quit"
-	./raytracer_interactive_gpu
 
 # Run with test scene
 .PHONY: test
@@ -217,9 +188,8 @@ info:
 	@echo ""
 	@echo "Phases:"
 	@echo "  Phase 1: $(shell [ -f $(BUILD_DIR)/raytracer_phase1 ] && echo '✓ Built' || echo '✗ Not built')"
-	@echo "  Phase 2: $(shell [ -f $(BUILD_DIR)/raytracer_phase2 ] && echo '✓ Built' || echo '✗ Not built')"
-	@echo "  Interactive (CPU): $(shell [ -f $(BUILD_DIR)/raytracer_interactive ] && echo '✓ Built' || echo '✗ Not built')"
-	@echo "  Interactive (GPU): $(shell [ -f $(BUILD_DIR)/raytracer_interactive_gpu ] && echo '✓ Built' || echo '✗ Not built')"
+	@echo "  Phase 2: $(shell [ - $(BUILD_DIR)/raytracer_phase2 ] && echo '✓ Built' || echo '✗ Not built')"
+	@echo "  Interactive: $(shell [ -f $(BUILD_DIR)/raytracer_interactive ] && echo '✓ Built' || echo '✗ Not built')"
 	@echo ""
 	@echo "Binary: $(BINARY) -> $(shell ls -l $(BINARY) 2>/dev/null | awk '{print $$NF}' || echo 'Not built')"
 
@@ -247,14 +217,12 @@ help:
 	@echo "Building:"
 	@echo "  make phase1        - Build Phase 1 (scalar foundation)"
 	@echo "  make phase2        - Build Phase 2 (basic rendering) [default]"
-	@echo "  make interactive   - Build real-time interactive ray tracer (CPU)"
-	@echo "  make interactive-gpu - Build real-time interactive ray tracer (GPU)"
+	@echo "  make interactive   - Build real-time interactive ray tracer"
 	@echo "  make all           - Build all implemented phases"
 	@echo ""
 	@echo "Running:"
 	@echo "  make run           - Build and run batch ray tracer"
-	@echo "  make runi          - Build and run interactive ray tracer (CPU)"
-	@echo "  make runi-gpu      - Build and run interactive ray tracer (GPU)"
+	@echo "  make runi          - Build and run interactive ray tracer"
 	@echo "  make test          - Run Cornell box test scene"
 	@echo ""
 	@echo "Testing:"
@@ -280,10 +248,6 @@ help:
 	@echo "  H             - Toggle help overlay"
 	@echo "  Space         - Pause rendering"
 	@echo "  ESC           - Quit"
-	@echo ""
-	@echo "GPU Rendering (make runi-gpu):"
-	@echo "  Uses OpenGL 4.3+ compute shaders for 60-300x faster rendering"
-	@echo "  Requires: OpenGL 4.3+, GLEW"
 
 # Create build directory
 $(BUILD_DIR):

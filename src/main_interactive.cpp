@@ -15,10 +15,6 @@
 #include "math/vec3.h"
 #include "math/ray.h"
 
-// Simple file logger
-#ifdef USE_GPU_RENDERER
-std::ofstream gpu_log;
-#endif
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "primitives/primitive.h"
@@ -30,264 +26,6 @@ std::ofstream gpu_log;
 #include "renderer/renderer.h"
 #include "renderer/render_analysis.h"
 
-#ifdef USE_GPU_RENDERER
-#include <SDL2/SDL_opengl.h>
-#include <OpenGL/gl3.h>
-#include <OpenGL/gl3ext.h>
-
-// Simple GPU ray tracer shader code
-const char* gpu_vertex_shader = R"(
-#version 330 core
-layout(location = 0) in vec2 a_position;
-out vec2 v_uv;
-void main() {
-    v_uv = a_position * 0.5 + 0.5;
-    gl_Position = vec4(a_position, 0.0, 1.0);
-}
-)";
-
-const char* gpu_fragment_shader = R"(
-#version 330 core
-in vec2 v_uv;
-out vec4 frag_color;
-
-uniform vec2 resolution;
-uniform float time;
-
-// Scene data
-uniform vec3 sphere_centers[10];
-uniform float sphere_radii[10];
-uniform vec3 sphere_colors[10];
-uniform int sphere_types[10];  // 0 = Lambertian (diffuse), 1 = Metal (reflective)
-uniform float sphere_fuzz[10]; // Roughness for metal materials
-uniform int sphere_count;
-uniform int samples_per_pixel;
-uniform int max_depth;
-
-uniform vec3 camera_pos;
-uniform vec3 camera_target;
-uniform vec3 camera_up;
-uniform float vfov;
-uniform float aspect_ratio;
-
-// Ray structure
-struct Ray {
-    vec3 origin;
-    vec3 direction;
-};
-
-// Hit record
-struct HitRecord {
-    vec3 p;
-    vec3 normal;
-    float t;
-    int material_id;
-    bool front_face;
-};
-
-Ray get_ray(vec2 uv) {
-    vec3 w = normalize(camera_target - camera_pos);
-    vec3 u = normalize(cross(w, camera_up));
-    vec3 v = cross(u, w);
-
-    float half_height = tan(radians(vfov) / 2.0);
-    float half_width = aspect_ratio * half_height;
-
-    vec3 ray_origin = camera_pos;
-    vec3 ray_direction = normalize(
-        half_width * 2.0 * (uv.x - 0.5) * u +
-        half_height * 2.0 * (uv.y - 0.5) * v + w
-    );
-
-    Ray r;
-    r.origin = ray_origin;
-    r.direction = ray_direction;
-    return r;
-}
-
-bool hit_sphere(vec3 center, float radius, Ray r, float t_min, float t_max, inout HitRecord rec) {
-    vec3 oc = r.origin - center;
-    float a = dot(r.direction, r.direction);
-    float half_b = dot(oc, r.direction);
-    float c = dot(oc, oc) - radius * radius;
-
-    float discriminant = half_b * half_b - a * c;
-    if (discriminant < 0.0) {
-        return false;
-    }
-
-    float sqrt_d = sqrt(discriminant);
-    float root = (-half_b - sqrt_d) / a;
-
-    if (root < t_min || root > t_max) {
-        root = (-half_b + sqrt_d) / a;
-        if (root < t_min || root > t_max) {
-            return false;
-        }
-    }
-
-    rec.t = root;
-    rec.p = r.origin + root * r.direction;
-    vec3 outward_normal = (rec.p - center) / radius;
-    rec.front_face = dot(r.direction, outward_normal) < 0.0;
-    rec.normal = rec.front_face ? outward_normal : -outward_normal;
-    rec.material_id = 0;
-
-    return true;
-}
-
-bool scene_hit(Ray r, float t_min, float t_max, inout HitRecord rec) {
-    HitRecord temp_rec;
-    bool hit_anything = false;
-    float closest_so_far = t_max;
-
-    for (int i = 0; i < sphere_count; i++) {
-        if (hit_sphere(sphere_centers[i], sphere_radii[i], r, t_min, closest_so_far, temp_rec)) {
-            hit_anything = true;
-            closest_so_far = temp_rec.t;
-            rec = temp_rec;
-            rec.material_id = i;
-        }
-    }
-
-    return hit_anything;
-}
-
-// Random number generation (must be declared before ray_color)
-float rand_seed = 0.0;
-
-float random_float() {
-    rand_seed = fract(sin(dot(vec2(rand_seed, rand_seed * 0.1), vec2(12.9898, 78.233))) * 43758.5453);
-    return rand_seed;
-}
-
-vec3 random_in_unit_sphere() {
-    vec3 p;
-    do {
-        p = 2.0 * vec3(random_float(), random_float(), random_float()) - 1.0;
-    } while (dot(p, p) >= 1.0);
-    return p;
-}
-
-vec3 ray_color(Ray r, int depth) {
-    HitRecord rec;
-
-    // Background gradient
-    if (!scene_hit(r, 0.001, 1000.0, rec)) {
-        vec3 unit_direction = normalize(r.direction);
-        float t = 0.5 * (unit_direction.y + 1.0);
-        return mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
-    }
-
-    vec3 albedo = sphere_colors[rec.material_id];
-    int mat_type = sphere_types[rec.material_id];
-    float fuzz = sphere_fuzz[rec.material_id];
-
-    vec3 color;
-
-    if (mat_type == 1) {
-        // Metal: Strong diffuse component for visible fuzz
-        vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
-        vec3 ambient = vec3(0.15, 0.15, 0.15);
-        float diff = max(dot(rec.normal, light_dir), 0.0) * 0.8;  // Strong diffuse
-        vec3 view_dir = normalize(-r.direction);
-        vec3 reflect_dir = reflect(-light_dir, rec.normal);
-        float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);  // Softer highlight
-
-        // Strong base metal color with diffuse (makes fuzz very visible)
-        color = ambient * albedo + diff * albedo + spec * vec3(0.3, 0.3, 0.3);
-
-        // Add reflection for metal materials
-        if (depth > 1) {
-            vec3 reflected_dir = reflect(normalize(r.direction), rec.normal);
-
-            // Add strong fuzz for rough metals
-            if (fuzz > 0.0) {
-                // Very strong perturbation for visible fuzz effect
-                vec3 fuzz_offset = fuzz * 1.2 * normalize(vec3(
-                    sin(rec.p.x * 6.0),
-                    sin(rec.p.y * 6.0),
-                    sin(rec.p.z * 6.0)
-                ));
-                reflected_dir = normalize(reflected_dir + fuzz_offset);
-            }
-
-            Ray reflected_ray;
-            reflected_ray.origin = rec.p + 0.1 * rec.normal;
-            reflected_ray.direction = normalize(reflected_dir);
-
-            HitRecord ref_rec;
-            vec3 ref_color;
-
-            if (scene_hit(reflected_ray, 0.001, 1000.0, ref_rec)) {
-                // Hit an object - get its color
-                if (ref_rec.material_id != rec.material_id) {
-                    vec3 ref_albedo = sphere_colors[ref_rec.material_id];
-                    int ref_mat_type = sphere_types[ref_rec.material_id];
-
-                    // Simple shading for reflected object
-                    vec3 ref_light_dir = normalize(vec3(1.0, 1.0, 1.0));
-                    vec3 ref_ambient = vec3(0.1, 0.1, 0.1);
-                    float ref_diff = max(dot(ref_rec.normal, ref_light_dir), 0.0);
-
-                    ref_color = ref_ambient * ref_albedo + ref_diff * ref_albedo;
-                } else {
-                    // Self-reflection - use background
-                    vec3 unit_direction = normalize(reflected_dir);
-                    float t = 0.5 * (unit_direction.y + 1.0);
-                    ref_color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
-                }
-            } else {
-                // Didn't hit anything - use background gradient
-                vec3 unit_direction = normalize(reflected_dir);
-                float t = 0.5 * (unit_direction.y + 1.0);
-                ref_color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.7, 1.0), t);
-            }
-
-            // Less reflective, more base color (40% reflection, 60% diffuse)
-            color = mix(ref_color, color, 0.6);
-        }
-    } else {
-        // Lambertian (diffuse): Full diffuse shading, no reflections
-        vec3 light_dir = normalize(vec3(1.0, 1.0, 1.0));
-        vec3 light_color = vec3(1.0, 1.0, 1.0);
-        vec3 ambient = vec3(0.1, 0.1, 0.1);
-        float diff = max(dot(rec.normal, light_dir), 0.0);
-
-        color = ambient * albedo + diff * light_color * albedo;
-    }
-
-    return color;
-}
-
-void main() {
-    // Initialize random seed based on pixel position
-    rand_seed = fract(sin(dot(v_uv, vec2(12.9898, 78.233))) * 43758.5453);
-
-    vec3 color = vec3(0.0);
-
-    // Multi-sample anti-aliasing
-    for (int s = 0; s < samples_per_pixel; s++) {
-        // Add random jitter for anti-aliasing
-        vec2 jitter = vec2(random_float() - 0.5, random_float() - 0.5) / resolution;
-
-        // Generate ray for this sample
-        Ray r = get_ray(v_uv + jitter);
-
-        // Ray trace with configured max depth
-        color += ray_color(r, max_depth);
-    }
-
-    // Average samples
-    color = color / float(samples_per_pixel);
-
-    // Gamma correction
-    color = sqrt(color);
-
-    frag_color = vec4(color, 1.0);
-}
-)";
-#endif
 
 // Quality presets (resolution, samples, max_depth)
 struct QualityPreset {
@@ -363,32 +101,6 @@ bool validate_current_settings(const QualityPreset& preset) {
     return true;
 }
 
-#ifdef USE_GPU_RENDERER
-// Save GPU framebuffer to PNG file
-void save_gpu_framebuffer(int width, int height, const char* filename) {
-    // Allocate buffer for pixel data
-    std::vector<unsigned char> pixels(width * height * 3);
-
-    // Read pixels from framebuffer (bottom-left origin)
-    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-
-    // Flip vertically (OpenGL has bottom-left origin, PNG has top-left)
-    std::vector<unsigned char> flipped_pixels(width * height * 3);
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            int src_idx = ((height - 1 - y) * width + x) * 3;
-            int dst_idx = (y * width + x) * 3;
-            flipped_pixels[dst_idx + 0] = pixels[src_idx + 0]; // R
-            flipped_pixels[dst_idx + 1] = pixels[src_idx + 1]; // G
-            flipped_pixels[dst_idx + 2] = pixels[src_idx + 2]; // B
-        }
-    }
-
-    // Save as PNG
-    stbi_write_png(filename, width, height, 3, flipped_pixels.data(), width * 3);
-    std::cout << "Saved framebuffer to " << filename << std::endl;
-}
-#else
 // Save CPU renderer texture to PNG file
 void save_cpu_screenshot(SDL_Renderer* renderer, SDL_Texture* texture, int width, int height, const char* filename) {
     (void)texture;  // Unused parameter - we read from renderer instead
@@ -415,7 +127,6 @@ void save_cpu_screenshot(SDL_Renderer* renderer, SDL_Texture* texture, int width
     stbi_write_png(filename, width, height, 3, flipped_pixels.data(), width * 3);
     std::cout << "Screenshot saved: " << filename << std::endl;
 }
-#endif
 
 // Camera controller
 class CameraController {
@@ -1243,22 +954,8 @@ int main(int argc, char* argv[]) {
     bool enable_shadows = true;
     bool enable_reflections = true;
 
-    // Setup OpenGL for GPU rendering
-#ifdef USE_GPU_RENDERER
-    // Use OpenGL 3.3 for maximum compatibility
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-#endif
-
     // Create window
-    const char* window_title =
-#ifdef USE_GPU_RENDERER
-        "Real-time Ray Tracer - GPU (OpenGL Compute Shaders)";
-#else
-        "Real-time Ray Tracer - CPU (OpenMP)";
-#endif
+    const char* window_title = "Real-time Ray Tracer - CPU (OpenMP)";
 
     SDL_Window* window = SDL_CreateWindow(
         window_title,
@@ -1266,11 +963,7 @@ int main(int argc, char* argv[]) {
         SDL_WINDOWPOS_UNDEFINED,
         preset.width,
         static_cast<int>(preset.width / (16.0f / 9.0f)),
-#ifdef USE_GPU_RENDERER
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_MAXIMIZED
-#else
         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED
-#endif
     );
 
     if (!window) {
@@ -1279,35 +972,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-#ifdef USE_GPU_RENDERER
-    // Show the window explicitly
-    SDL_ShowWindow(window);
-    SDL_RaiseWindow(window);
-
-    // Create OpenGL context
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    if (!gl_context) {
-        std::cerr << "Failed to create OpenGL context: " << SDL_GetError() << std::endl;
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
-    }
-
-    std::cout << "OpenGL 3.3 context created successfully" << std::endl;
-    std::cout << "GPU mode: Showing animated test pattern" << std::endl;
-
-#ifdef USE_GPU_RENDERER
-    gpu_log.open("gpu_rendering.log");
-    gpu_log << "GPU Ray Tracer Logging Started" << std::endl;
-    gpu_log << "OpenGL 3.3 context created" << std::endl;
-#endif
-#endif
-
-    // Create renderer and texture (CPU mode only)
+    // Create renderer and texture
     int image_width = preset.width;
     int image_height = static_cast<int>(preset.width / (16.0f / 9.0f));
 
-#ifndef USE_GPU_RENDERER
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
         std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << std::endl;
@@ -1334,13 +1002,6 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
-#else
-    // GPU mode uses OpenGL rendering directly
-    SDL_Renderer* renderer = nullptr;
-    SDL_Texture* texture = nullptr;
-    (void)renderer; // Unused in GPU mode
-    (void)texture;  // Unused in GPU mode
-#endif
 
     // Setup scene - use shared Cornell Box scene
     Scene scene;
@@ -1356,25 +1017,16 @@ int main(int argc, char* argv[]) {
     std::vector<unsigned char> framebuffer(image_width * image_height * 3);
 
     // Initialize renderer
-#ifdef USE_GPU_RENDERER
-    std::cout << "GPU Renderer initialized (OpenGL 3.3)" << std::endl;
-#else
     Renderer ray_renderer(preset.max_depth);
     ray_renderer.enable_shadows = enable_shadows;
     ray_renderer.enable_reflections = enable_reflections;
     std::cout << "CPU Renderer initialized (OpenMP with " << omp_get_max_threads() << " threads)" << std::endl;
-#endif
 
     // Main loop
     bool running = true;
     bool paused = false;
     bool need_render = true;
     bool show_help = false;
-
-#ifdef USE_GPU_RENDERER
-    std::cout << "Starting main loop with GPU rendering..." << std::endl;
-    std::cout << "Window should be visible now" << std::endl;
-#endif
 
     // Initialize help overlay
     HelpOverlay help_overlay;
@@ -1408,21 +1060,6 @@ int main(int argc, char* argv[]) {
     int frame_count = 0;
     float fps = 0.0f;
 
-#ifdef USE_GPU_RENDERER
-    // GPU scene data (will be populated during initialization)
-    int gpu_sphere_count = 0;
-    Vec3 gpu_sphere_centers[10];
-    float gpu_sphere_radii[10];
-    Vec3 gpu_sphere_colors[10];
-    int gpu_sphere_types[10];  // 0 = Lambertian, 1 = Metal
-    float gpu_sphere_fuzz[10]; // Roughness for metals
-
-    // Force window to front and make sure it's visible
-    SDL_RaiseWindow(window);
-    SDL_SetWindowInputFocus(window);
-    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
-#endif
-
     std::cout << "\n";
     std::cout << "=== REAL-TIME RAY TRACER ===\n";
     std::cout << "Controls:\n";
@@ -1445,11 +1082,6 @@ int main(int argc, char* argv[]) {
     std::cout << "\n";
 
     while (running) {
-#ifdef USE_GPU_RENDERER
-        // Pump events even if we don't process them
-        SDL_PumpEvents();
-#endif
-
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
@@ -1483,11 +1115,7 @@ int main(int argc, char* argv[]) {
                         auto time = std::chrono::system_clock::to_time_t(now);
                         std::stringstream ss;
                         ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
-#ifdef USE_GPU_RENDERER
-                        save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
-#else
                         save_cpu_screenshot(renderer, texture, image_width, image_height, ss.str().c_str());
-#endif
                         break;
                     }
                     case SDLK_1: case SDLK_2: case SDLK_3:
@@ -1540,18 +1168,12 @@ int main(int argc, char* argv[]) {
                             current_quality = new_quality;
                             preset = quality_levels[current_quality];
 
-#ifdef USE_GPU_RENDERER
-                            // GPU renderer doesn't need re-initialization for quality changes
-                            std::cout << "Quality: " << preset.name << " (" << preset.samples
-                                     << " samples, depth " << preset.max_depth << ")" << std::endl;
-#else
                             // Update CPU renderer (keep window size, only change quality)
                             ray_renderer = Renderer(preset.max_depth);
                             ray_renderer.enable_shadows = enable_shadows;
                             ray_renderer.enable_reflections = enable_reflections;
                             std::cout << "Quality: " << preset.name << " (" << preset.samples
                                      << " samples, depth " << preset.max_depth << ")" << std::endl;
-#endif
                             need_render = true;
                         }
                         break;
@@ -1565,16 +1187,11 @@ int main(int argc, char* argv[]) {
                         if (click_result.quality_changed) {
                             current_quality = click_result.new_quality;
                             preset = quality_levels[current_quality];
-#ifdef USE_GPU_RENDERER
-                            std::cout << "Quality: " << preset.name << " (" << preset.samples
-                                     << " samples, depth " << preset.max_depth << ")" << std::endl;
-#else
                             ray_renderer = Renderer(preset.max_depth);
                             ray_renderer.enable_shadows = enable_shadows;
                             ray_renderer.enable_reflections = enable_reflections;
                             std::cout << "Quality: " << preset.name << " (" << preset.samples
                                      << " samples, depth " << preset.max_depth << ")" << std::endl;
-#endif
                             need_render = true;
                         } else if (click_result.samples_changed) {
                             // Safety check for samples
@@ -1597,27 +1214,19 @@ int main(int argc, char* argv[]) {
                             }
                         } else if (click_result.depth_changed) {
                             preset.max_depth = click_result.new_depth;
-#ifdef USE_GPU_RENDERER
-                            std::cout << "Depth: " << preset.max_depth << std::endl;
-#else
                             ray_renderer = Renderer(preset.max_depth);
                             ray_renderer.enable_shadows = enable_shadows;
                             ray_renderer.enable_reflections = enable_reflections;
                             std::cout << "Depth: " << preset.max_depth << std::endl;
-#endif
                             need_render = true;
                         } else if (click_result.shadows_changed) {
                             enable_shadows = !enable_shadows;
-#ifndef USE_GPU_RENDERER
                             ray_renderer.enable_shadows = enable_shadows;
-#endif
                             std::cout << "Shadows: " << (enable_shadows ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.reflections_changed) {
                             enable_reflections = !enable_reflections;
-#ifndef USE_GPU_RENDERER
                             ray_renderer.enable_reflections = enable_reflections;
-#endif
                             std::cout << "Reflections: " << (enable_reflections ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.analysis_mode_changed) {
@@ -1635,11 +1244,7 @@ int main(int argc, char* argv[]) {
                             auto time = std::chrono::system_clock::to_time_t(now);
                             std::stringstream ss;
                             ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
-#ifdef USE_GPU_RENDERER
-                            save_gpu_framebuffer(image_width, image_height, ss.str().c_str());
-#else
                             save_cpu_screenshot(renderer, texture, image_width, image_height, ss.str().c_str());
-#endif
                         } else if (click_result.resolution_changed) {
                             int new_width = click_result.new_resolution;
                             if (!is_samples_safe(preset.samples, new_width)) {
@@ -1658,7 +1263,6 @@ int main(int argc, char* argv[]) {
                                 std::cout << "Total pixels: " << (image_width * image_height) << "\n";
                                 std::cout << "========================\n";
 
-#ifndef USE_GPU_RENDERER
                                 // Recreate texture with new dimensions (window size doesn't change)
                                 if (texture) {
                                     SDL_DestroyTexture(texture);
@@ -1681,11 +1285,6 @@ int main(int argc, char* argv[]) {
                                     SDL_Quit();
                                     return 1;
                                 }
-#else
-                                // GPU mode uses OpenGL rendering directly
-                                (void)renderer; // Unused in GPU mode
-                                (void)texture;  // Unused in GPU mode
-#endif
                                 analysis.resize(image_width, image_height);
                                 std::cout << "Resolution: " << image_width << "x" << image_height << "\n" << std::endl;
                                 need_render = true;
@@ -1703,19 +1302,10 @@ int main(int argc, char* argv[]) {
                 }
             } else if (event.type == SDL_MOUSEMOTION) {
                 if (SDL_GetRelativeMouseMode()) {
-#ifdef USE_GPU_RENDERER
-                    // GPU: Inverted vertical look
                     camera_controller.rotate(
                         event.motion.xrel * 0.1f,
                         -event.motion.yrel * 0.1f
                     );
-#else
-                    // CPU: Standard vertical look
-                    camera_controller.rotate(
-                        event.motion.xrel * 0.1f,
-                        -event.motion.yrel * 0.1f
-                    );
-#endif
                     need_render = true;
                 }
             }
@@ -1742,19 +1332,11 @@ int main(int argc, char* argv[]) {
             need_render = true;
         }
         if (keystates[SDL_SCANCODE_UP]) {
-#ifdef USE_GPU_RENDERER
-            camera_controller.move_up(-move_speed * 0.5f);  // Inverted and slower for GPU
-#else
             camera_controller.move_up(move_speed);
-#endif
             need_render = true;
         }
         if (keystates[SDL_SCANCODE_DOWN]) {
-#ifdef USE_GPU_RENDERER
-            camera_controller.move_up(move_speed * 0.5f);  // Inverted and slower for GPU
-#else
             camera_controller.move_up(-move_speed);
-#endif
             need_render = true;
         }
 
@@ -1770,292 +1352,9 @@ int main(int argc, char* argv[]) {
 
             auto render_start = std::chrono::high_resolution_clock::now();
 
-            // Get camera from controller (needed by both GPU and CPU paths)
+            // Get camera from controller
             Camera cam = camera_controller.get_camera();
 
-#ifdef USE_GPU_RENDERER
-            // Simple GPU rendering - just show test pattern for now
-            static bool gpu_initialized = false;
-            static GLuint gpu_program = 0;
-            static GLuint gpu_vao = 0, gpu_vbo = 0;
-
-            if (!gpu_initialized) {
-                // Extract scene data for GPU
-                std::vector<Vec3> sphere_centers_vec;
-                std::vector<float> sphere_radii_vec;
-                std::vector<Vec3> sphere_colors_vec;
-                std::vector<int> sphere_types_vec;  // 0 = Lambertian, 1 = Metal
-                std::vector<float> sphere_fuzz_vec; // Roughness for metals
-
-                for (const auto& obj : scene.objects) {
-                    // Try to cast to sphere
-                    auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
-                    if (sphere) {
-                        sphere_centers_vec.push_back(sphere->center);
-                        sphere_radii_vec.push_back(sphere->radius);
-                        sphere_colors_vec.push_back(sphere->mat->albedo);
-
-                        // Extract material type
-                        auto lambertian = std::dynamic_pointer_cast<Lambertian>(sphere->mat);
-                        auto metal = std::dynamic_pointer_cast<Metal>(sphere->mat);
-
-                        if (metal) {
-                            sphere_types_vec.push_back(1);  // Metal
-                            sphere_fuzz_vec.push_back(metal->fuzz);
-                        } else {
-                            sphere_types_vec.push_back(0);  // Lambertian (default)
-                            sphere_fuzz_vec.push_back(0.0f);
-                        }
-                    }
-                }
-
-                gpu_sphere_count = sphere_centers_vec.size();
-                std::cout << "Uploaded " << gpu_sphere_count << " spheres to GPU" << std::endl;
-
-                // Copy vector data to arrays (THIS WAS MISSING!)
-                for (size_t i = 0; i < sphere_centers_vec.size() && i < 10; i++) {
-                    gpu_sphere_centers[i] = sphere_centers_vec[i];
-                    gpu_sphere_radii[i] = sphere_radii_vec[i];
-                    gpu_sphere_colors[i] = sphere_colors_vec[i];
-                    gpu_sphere_types[i] = sphere_types_vec[i];
-                    gpu_sphere_fuzz[i] = sphere_fuzz_vec[i];
-                }
-
-                // Load OpenGL functions using SDL
-                auto glCreateShader = (GLuint (*)(GLenum))SDL_GL_GetProcAddress("glCreateShader");
-                auto glShaderSource = (void (*)(GLuint, GLsizei, const GLchar *const *, const GLint *))SDL_GL_GetProcAddress("glShaderSource");
-                auto glCompileShader = (void (*)(GLuint))SDL_GL_GetProcAddress("glCompileShader");
-                auto glCreateProgram = (GLuint (*)())SDL_GL_GetProcAddress("glCreateProgram");
-                auto glAttachShader = (void (*)(GLuint, GLuint))SDL_GL_GetProcAddress("glAttachShader");
-                auto glLinkProgram = (void (*)(GLuint))SDL_GL_GetProcAddress("glLinkProgram");
-                auto glDeleteShader = (void (*)(GLuint))SDL_GL_GetProcAddress("glDeleteShader");
-                auto glUseProgram = (void (*)(GLuint))SDL_GL_GetProcAddress("glUseProgram");
-                auto glDrawArrays = (void (*)(GLenum, GLint, GLsizei))SDL_GL_GetProcAddress("glDrawArrays");
-                auto glViewport = (void (*)(GLint, GLint, GLsizei, GLsizei))SDL_GL_GetProcAddress("glViewport");
-                auto glClearColor = (void (*)(GLfloat, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glClearColor");
-                auto glClear = (void (*)(GLbitfield))SDL_GL_GetProcAddress("glClear");
-                auto glGenVertexArrays = (void (*)(GLsizei, GLuint *))SDL_GL_GetProcAddress("glGenVertexArrays");
-                auto glBindVertexArray = (void (*)(GLuint))SDL_GL_GetProcAddress("glBindVertexArray");
-                auto glGenBuffers = (void (*)(GLsizei, GLuint *))SDL_GL_GetProcAddress("glGenBuffers");
-                auto glBindBuffer = (void (*)(GLenum, GLuint))SDL_GL_GetProcAddress("glBindBuffer");
-                auto glBufferData = (void (*)(GLenum, GLsizei, const void *, GLenum))SDL_GL_GetProcAddress("glBufferData");
-                auto glVertexAttribPointer = (void (*)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void *))SDL_GL_GetProcAddress("glVertexAttribPointer");
-                auto glEnableVertexAttribArray = (void (*)(GLuint))SDL_GL_GetProcAddress("glEnableVertexAttribArray");
-                auto glGetShaderiv = (void (*)(GLuint, GLenum, GLint *))SDL_GL_GetProcAddress("glGetShaderiv");
-                auto glGetShaderInfoLog = (void (*)(GLuint, GLsizei, GLsizei *, char *))SDL_GL_GetProcAddress("glGetShaderInfoLog");
-                auto glGetProgramiv = (void (*)(GLuint, GLenum, GLint *))SDL_GL_GetProcAddress("glGetProgramiv");
-                auto glGetProgramInfoLog = (void (*)(GLuint, GLsizei, GLsizei *, char *))SDL_GL_GetProcAddress("glGetProgramInfoLog");
-
-                if (!glCreateShader || !glCreateProgram || !glUseProgram) {
-                    std::cerr << "Failed to load OpenGL functions" << std::endl;
-                    continue;
-                }
-
-                // Compile vertex shader
-                GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-                glShaderSource(vs, 1, &gpu_vertex_shader, nullptr);
-                glCompileShader(vs);
-
-                // Check vertex shader compilation
-                GLint vs_success;
-                glGetShaderiv(vs, GL_COMPILE_STATUS, &vs_success);
-                if (!vs_success) {
-                    char info_log[512];
-                    glGetShaderInfoLog(vs, 512, nullptr, info_log);
-                    std::cerr << "Vertex shader compilation failed: " << info_log << std::endl;
-                    continue;
-                }
-
-                // Compile fragment shader
-                GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-                glShaderSource(fs, 1, &gpu_fragment_shader, nullptr);
-                glCompileShader(fs);
-
-                // Check fragment shader compilation
-                GLint fs_success;
-                glGetShaderiv(fs, GL_COMPILE_STATUS, &fs_success);
-                if (!fs_success) {
-                    char info_log[512];
-                    glGetShaderInfoLog(fs, 512, nullptr, info_log);
-                    std::cerr << "Fragment shader compilation failed: " << info_log << std::endl;
-                    continue;
-                }
-
-                gpu_program = glCreateProgram();
-                glAttachShader(gpu_program, vs);
-                glAttachShader(gpu_program, fs);
-                glLinkProgram(gpu_program);
-
-#ifdef USE_GPU_RENDERER
-                gpu_log << "Shader program created, id=" << gpu_program << std::endl;
-#endif
-
-                // Check link status
-                GLint link_success;
-                glGetProgramiv(gpu_program, GL_LINK_STATUS, &link_success);
-                if (!link_success) {
-                    char info_log[512];
-                    glGetProgramInfoLog(gpu_program, 512, nullptr, info_log);
-                    std::cerr << "Shader program linking failed: " << info_log << std::endl;
-#ifdef USE_GPU_RENDERER
-                    gpu_log << "Shader program linking failed: " << info_log << std::endl;
-#endif
-                    continue;
-                }
-
-#ifdef USE_GPU_RENDERER
-                gpu_log << "Shader program linked successfully" << std::endl;
-#endif
-
-                glDeleteShader(vs);
-                glDeleteShader(fs);
-
-                // Create quad
-                float quad[] = {-1, -1, 3, -1, -1, 3};
-                glGenVertexArrays(1, &gpu_vao);
-                glGenBuffers(1, &gpu_vbo);
-                glBindVertexArray(gpu_vao);
-                glBindBuffer(GL_ARRAY_BUFFER, gpu_vbo);
-                glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
-                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
-                glEnableVertexAttribArray(0);
-                glBindVertexArray(0);
-
-                gpu_initialized = true;
-                std::cout << "GPU renderer initialized" << std::endl;
-            }
-
-            // Load functions again for rendering
-            auto glUseProgram = (void (*)(GLuint))SDL_GL_GetProcAddress("glUseProgram");
-            auto glGetUniformLocation = (GLint (*)(GLuint, const GLchar *))SDL_GL_GetProcAddress("glGetUniformLocation");
-            auto glUniform2f = (void (*)(GLint, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform2f");
-            auto glUniform1f = (void (*)(GLint, GLfloat))SDL_GL_GetProcAddress("glUniform1f");
-            auto glUniform1i = (void (*)(GLint, GLint))SDL_GL_GetProcAddress("glUniform1i");
-            auto glUniform3f = (void (*)(GLint, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glUniform3f");
-            auto glUniform3fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform3fv");
-            auto glUniform1fv = (void (*)(GLint, GLsizei, const GLfloat *))SDL_GL_GetProcAddress("glUniform1fv");
-            auto glDrawArrays = (void (*)(GLenum, GLint, GLsizei))SDL_GL_GetProcAddress("glDrawArrays");
-            auto glViewport = (void (*)(GLint, GLint, GLsizei, GLsizei))SDL_GL_GetProcAddress("glViewport");
-            auto glClearColor = (void (*)(GLfloat, GLfloat, GLfloat, GLfloat))SDL_GL_GetProcAddress("glClearColor");
-            auto glClear = (void (*)(GLbitfield))SDL_GL_GetProcAddress("glClear");
-            auto glBindVertexArray = (void (*)(GLuint))SDL_GL_GetProcAddress("glBindVertexArray");
-
-            // Render
-            glViewport(0, 0, image_width, image_height);
-            glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            glUseProgram(gpu_program);
-
-#ifdef USE_GPU_RENDERER
-            gpu_log << "Setting camera uniforms" << std::endl;
-#endif
-
-            // Set camera uniforms
-            GLint cam_pos_loc = glGetUniformLocation(gpu_program, "camera_pos");
-            GLint cam_target_loc = glGetUniformLocation(gpu_program, "camera_target");
-            GLint cam_up_loc = glGetUniformLocation(gpu_program, "camera_up");
-            GLint vfov_loc = glGetUniformLocation(gpu_program, "vfov");
-            GLint aspect_loc = glGetUniformLocation(gpu_program, "aspect_ratio");
-
-#ifdef USE_GPU_RENDERER
-            gpu_log << "  camera_pos loc: " << cam_pos_loc << std::endl;
-            gpu_log << "  camera_target loc: " << cam_target_loc << std::endl;
-            gpu_log << "  camera_up loc: " << cam_up_loc << std::endl;
-            gpu_log << "  vfov loc: " << vfov_loc << std::endl;
-            gpu_log << "  aspect_ratio loc: " << aspect_loc << std::endl;
-#endif
-
-            glUniform3f(cam_pos_loc, cam.lookfrom.x, cam.lookfrom.y, cam.lookfrom.z);
-            glUniform3f(cam_target_loc, cam.lookat.x, cam.lookat.y, cam.lookat.z);
-            glUniform3f(cam_up_loc, cam.vup.x, cam.vup.y, cam.vup.z);
-            glUniform1f(vfov_loc, cam.vfov);
-            glUniform1f(aspect_loc, cam.aspect_ratio);
-            glUniform2f(glGetUniformLocation(gpu_program, "resolution"), (float)image_width, (float)image_height);
-
-            // Set sphere uniforms
-            glUniform1i(glGetUniformLocation(gpu_program, "sphere_count"), gpu_sphere_count);
-            glUniform1i(glGetUniformLocation(gpu_program, "samples_per_pixel"), preset.samples);
-            glUniform1i(glGetUniformLocation(gpu_program, "max_depth"), preset.max_depth);
-
-#ifdef USE_GPU_RENDERER
-            gpu_log << "Quality: " << preset.name << " (samples=" << preset.samples
-                     << ", depth=" << preset.max_depth << ")" << std::endl;
-            gpu_log << "Setting " << gpu_sphere_count << " spheres" << std::endl;
-            gpu_log << "Camera: " << cam.lookfrom.x << ", " << cam.lookfrom.y << ", " << cam.lookfrom.z << std::endl;
-
-            // Upload sphere data (this is inefficient but works for demo)
-            for (int i = 0; i < gpu_sphere_count; i++) {
-                std::string loc = "sphere_centers[" + std::to_string(i) + "]";
-                GLint loc_id = glGetUniformLocation(gpu_program, loc.c_str());
-                gpu_log << "Sphere " << i << " center: (" << gpu_sphere_centers[i].x << ", " << gpu_sphere_centers[i].y << ", " << gpu_sphere_centers[i].z << ") radius: " << gpu_sphere_radii[i] << std::endl;
-                if (loc_id >= 0) {
-                    glUniform3f(loc_id,
-                               gpu_sphere_centers[i].x, gpu_sphere_centers[i].y, gpu_sphere_centers[i].z);
-                } else {
-                    gpu_log << "  Warning: uniform " << loc << " not found (id=" << loc_id << ")" << std::endl;
-                }
-
-                loc = "sphere_radii[" + std::to_string(i) + "]";
-                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
-                if (loc_id >= 0) {
-                    glUniform1f(loc_id, gpu_sphere_radii[i]);
-                }
-
-                loc = "sphere_colors[" + std::to_string(i) + "]";
-                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
-                if (loc_id >= 0) {
-                    glUniform3f(loc_id,
-                               gpu_sphere_colors[i].x, gpu_sphere_colors[i].y, gpu_sphere_colors[i].z);
-                }
-
-                // Set material type and fuzz
-                loc = "sphere_types[" + std::to_string(i) + "]";
-                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
-                if (loc_id >= 0) {
-                    glUniform1i(loc_id, gpu_sphere_types[i]);
-                }
-
-                loc = "sphere_fuzz[" + std::to_string(i) + "]";
-                loc_id = glGetUniformLocation(gpu_program, loc.c_str());
-                if (loc_id >= 0) {
-                    glUniform1f(loc_id, gpu_sphere_fuzz[i]);
-                }
-            }
-
-            gpu_log << "Drawing..." << std::endl;
-            gpu_log.flush();
-#endif
-
-            glBindVertexArray(gpu_vao);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
-            glBindVertexArray(0);
-
-            SDL_GL_SwapWindow(window);
-
-            // Calculate render time
-            auto render_end_gpu = std::chrono::high_resolution_clock::now();
-            double render_time_gpu = std::chrono::duration<double>(render_end_gpu - render_start).count();
-
-            frame_count++;
-            auto now_gpu = std::chrono::high_resolution_clock::now();
-            double elapsed_gpu = std::chrono::duration<double>(now_gpu - last_frame_time).count();
-            if (elapsed_gpu >= 1.0) {
-                fps = frame_count / elapsed_gpu;
-                frame_count = 0;
-                last_frame_time = now_gpu;
-
-                // Print status
-                std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
-                         << " | Render: " << std::setprecision(3) << render_time_gpu << "s"
-                         << " | Quality: " << preset.name
-                         << " | GPU TEST MODE"
-                         << "     " << std::flush;
-            }
-
-            need_render = false;
-            continue;
-#else
             // CPU rendering path
             #pragma omp parallel for schedule(dynamic, 4)
             for (int j = image_height - 1; j >= 0; --j) {
@@ -2129,7 +1428,6 @@ int main(int argc, char* argv[]) {
             SDL_LockTexture(texture, NULL, &pixels, &pitch);
             memcpy(pixels, framebuffer.data(), framebuffer.size());
             SDL_UnlockTexture(texture);
-#endif
 
             // Calculate render time
             auto render_end = std::chrono::high_resolution_clock::now();
@@ -2155,8 +1453,7 @@ int main(int argc, char* argv[]) {
             need_render = false;
         }
 
-        // Copy texture to renderer (CPU mode only)
-#ifndef USE_GPU_RENDERER
+        // Copy texture to renderer
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, NULL, NULL);
 
@@ -2176,26 +1473,14 @@ int main(int argc, char* argv[]) {
         }
 
         SDL_RenderPresent(renderer);
-#else
-        // GPU mode - render a test frame initially to ensure window is visible
-        static bool first_frame = true;
-        if (first_frame) {
-            std::cout << "Rendering first frame to ensure window is visible..." << std::endl;
-            first_frame = false;
-        }
-#endif
 
         // Small delay to prevent 100% CPU usage
         SDL_Delay(1);
     }
 
     // Cleanup
-#ifdef USE_GPU_RENDERER
-    // GPU cleanup - OpenGL context will be destroyed by SDL
-#else
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
-#endif
     SDL_DestroyWindow(window);
     SDL_Quit();
 
