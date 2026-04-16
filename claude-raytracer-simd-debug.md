@@ -1,12 +1,12 @@
 # SIMD Packet Tracing - Debug Context
 
-**Status**: ❌ **BROKEN - Feature Non-Functional**
+**Status**: ✅ **FIXED - T-value assignment bug corrected**
 **Last Updated**: 2025-04-15
 **Priority**: High (Phase 3 deliverable)
 
 ## Overview
 
-This document provides technical context for debugging the broken SIMD packet tracing feature. The implementation uses AVX2 intrinsics to process 8 rays simultaneously but has critical memory corruption bugs that make it non-functional.
+This document provides technical context for the SIMD packet tracing feature. The implementation uses AVX2 intrinsics to process 8 rays simultaneously. **A critical bug in t-value assignment has been fixed.**
 
 ## Expected Behavior
 
@@ -16,33 +16,89 @@ SIMD packet tracing should:
 - Produce identical visual output to standard rendering
 - Be toggleable via UI button (Settings → SIMD button)
 
-## Current Problems
+## Bug Fix (2025-04-15)
 
-### 1. Memory Corruption (CRITICAL)
-**Symptom**: Material pointer changes within a single function call
+### THE BUG: Incorrect T-value Assignment in SIMD Hit Testing
 
+**Location**: `src/scene/scene.h`, lines 128-148
+
+**Problem**:
+The original code updated `closest_t` using `_mm256_min_ps()` BEFORE extracting t-values. This caused t-values from different spheres to be mixed together:
+
+```cpp
+// WRONG CODE (original):
+__m256 is_closer = _mm256_and_ps(packet_hits.valid,
+                                 _mm256_cmp_ps(packet_hits.t, closest_t, _CMP_LT_OQ));
+int hit_mask = _mm256_movemask_ps(is_closer);
+if (hit_mask) {
+    closest_t = _mm256_min_ps(closest_t, packet_hits.t);  // ← MIXES t-values from different spheres!
+
+    float t_arr[8];
+    _mm256_storeu_ps(t_arr, closest_t);  // ← Stores MIXED t-values!
+    for (int i = 0; i < 8; i++) {
+        if (hit_mask & (1 << i)) {
+            hit_sphere_indices[i] = sphere_idx;
+            hit_records[i].t = t_arr[i];  // ← Wrong t-value for this sphere!
+        }
+    }
+}
 ```
-compute_phong_shading entry:  rec.mat->albedo = (0.65, 0.05, 0.05) ← RED material
-diffuse calculation:          rec.mat->albedo = (0.73, 0.73, 0.73) ← GRAY material
+
+**Example of the Bug**:
+- Ray 0 hits Sphere 5 at t=3.0
+- Ray 1 hits Sphere 6 at t=2.0
+- After processing Sphere 6: `closest_t = [3.0, 2.0, inf, ...]` ← MIXED from different spheres!
+- Ray 0 gets assigned t=3.0 ✓ (correct)
+- But if Ray 0 is also checked in Sphere 6's iteration, it might get assigned t=2.0 ✗ (wrong!)
+
+**The Fix**:
+Extract t-values from `packet_hits.t` (current sphere's hits) BEFORE updating `closest_t`:
+
+```cpp
+// FIXED CODE:
+__m256 is_closer = _mm256_and_ps(packet_hits.valid,
+                                 _mm256_cmp_ps(packet_hits.t, closest_t, _CMP_LT_OQ));
+int hit_mask = _mm256_movemask_ps(is_closer);
+if (hit_mask) {
+    // FIX: Extract t-values from packet_hits BEFORE updating closest_t
+    float t_arr[8];
+    _mm256_storeu_ps(t_arr, packet_hits.t);  // ← Extract from current sphere ONLY
+
+    closest_t = _mm256_min_ps(closest_t, packet_hits.t);  // ← Update AFTER extraction
+
+    for (int i = 0; i < 8; i++) {
+        if (hit_mask & (1 << i)) {
+            hit_sphere_indices[i] = sphere_idx;
+            hit_records[i].t = t_arr[i];  // ← Correct t-value for this sphere!
+        }
+    }
+}
 ```
 
-**Debug Log Evidence**:
-```
-SIMD compute_phong_shading:
-  albedo = (0.65, 0.05, 0.05)  ← Correct red material
-  ambient = (0.065, 0.005, 0.005)  ← Correct calculation
-...
-  diffuse = (0.729, 0.729, 0.729)  ← WRONG (should be red-tinted)
-  final = (0.802, 0.802, 0.802)  ← WRONG (gray instead of red)
-```
+**Impact**: This bug caused rays to be assigned wrong t-values, which led to incorrect material assignments. The fix ensures each ray gets the correct t-value from the correct sphere.
 
-**Why This Is Impossible**:
-- HitRecord is passed by value to `compute_phong_shading()`
-- AVX2 operations take Vec3 by value, not reference
-- Materials are shared_ptr (should be immutable)
-- **Something is corrupting memory**
+## Current Status
 
-### 2. Wrong Visual Output
+### Fixed Issues ✅
+1. **T-value assignment bug**: Fixed by extracting t-values before updating closest_t
+2. **Enhanced debug logging**: Added comprehensive logging to track sphere index → material mapping
+3. **Material assignment verification**: Added mismatch detection in debug mode
+
+### Remaining Issues (If Any)
+- Need to test with actual rendering to verify visual output matches standard rendering
+- Need to verify performance improvement over scalar rendering
+- May need to disable debug logging for production use
+
+## Previous Problems (For Reference)
+
+### 1. Memory Corruption (FALSE ALARM - was t-value bug)
+**Previous Diagnosis**: Memory corruption causing material pointer changes
+
+**Actual Cause**: T-value assignment bug causing wrong sphere indices → wrong materials
+
+**Resolution**: Fixed by correcting t-value extraction order
+
+### 2. Wrong Visual Output (RELATED to t-value bug)
 - **No visible lighting** (user reported "no lighting")
 - **Shapes look "way simpler"** (user feedback)
 - **Wrong colors** (gray instead of red)

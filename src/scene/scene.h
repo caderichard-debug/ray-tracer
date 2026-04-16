@@ -132,12 +132,16 @@ public:
             int hit_mask = _mm256_movemask_ps(is_closer);
             if (hit_mask) {
                 total_simd_hits += __builtin_popcount(hit_mask);
-                // Update closest t values
+
+                // FIX: Extract t-values from packet_hits BEFORE updating closest_t
+                // This ensures each ray gets the correct t-value from the correct sphere
+                float t_arr[8];
+                _mm256_storeu_ps(t_arr, packet_hits.t);
+
+                // Update closest t values for next iteration
                 closest_t = _mm256_min_ps(closest_t, packet_hits.t);
 
-                // Track which sphere each ray hit (store t values AFTER updating closest_t)
-                float t_arr[8];
-                _mm256_storeu_ps(t_arr, closest_t);
+                // Track which sphere each ray hit and assign correct t-value
                 for (int i = 0; i < 8; i++) {
                     if (hit_mask & (1 << i)) {
                         hit_sphere_indices[i] = sphere_idx;
@@ -149,27 +153,63 @@ public:
         }
 
         // Set materials based on which sphere each ray hit (FIX: Set materials AFTER all spheres tested)
-        for (int i = 0; i < 8; i++) {
-            if (hit_sphere_indices[i] >= 0) {
-                hit_records[i].mat = original_spheres[hit_sphere_indices[i]]->mat;
-            }
-        }
-
         // Debug: log material assignments for all rays
         static bool debug_mat_assign_once = true;
         if (debug_mat_assign_once) {
             std::ofstream debug_log("simd_debug.log", std::ios::app);
-            debug_log << "SIMD: Material assignments:" << std::endl;
+            debug_log << "SIMD: Material assignments (detailed):" << std::endl;
+            for (int i = 0; i < 8; i++) {
+                if (hit_sphere_indices[i] >= 0) {
+                    // Log BEFORE assignment
+                    debug_log << "  Ray " << i << ": sphere_idx=" << hit_sphere_indices[i];
+                    debug_log << " original_sphere_mat_albedo=("
+                              << original_spheres[hit_sphere_indices[i]]->mat->albedo.x << ","
+                              << original_spheres[hit_sphere_indices[i]]->mat->albedo.y << ","
+                              << original_spheres[hit_sphere_indices[i]]->mat->albedo.z << ")";
+                }
+            }
+            debug_log << std::endl;
+
+            // Now assign materials
+            for (int i = 0; i < 8; i++) {
+                if (hit_sphere_indices[i] >= 0) {
+                    hit_records[i].mat = original_spheres[hit_sphere_indices[i]]->mat;
+                }
+            }
+
+            // Log AFTER assignment
+            debug_log << "SIMD: After material assignment:" << std::endl;
             for (int i = 0; i < 8; i++) {
                 debug_log << "  Ray " << i << ": sphere_idx=" << hit_sphere_indices[i];
                 if (hit_records[i].mat) {
-                    debug_log << " mat_albedo=(" << hit_records[i].mat->albedo.x << "," << hit_records[i].mat->albedo.y << "," << hit_records[i].mat->albedo.z << ")" << std::endl;
+                    debug_log << " hit_record_mat_albedo=("
+                              << hit_records[i].mat->albedo.x << ","
+                              << hit_records[i].mat->albedo.y << ","
+                              << hit_records[i].mat->albedo.z << ")";
+                    // Verify they match
+                    if (hit_sphere_indices[i] >= 0) {
+                        auto& orig_albedo = original_spheres[hit_sphere_indices[i]]->mat->albedo;
+                        auto& hit_albedo = hit_records[i].mat->albedo;
+                        if (orig_albedo.x != hit_albedo.x ||
+                            orig_albedo.y != hit_albedo.y ||
+                            orig_albedo.z != hit_albedo.z) {
+                            debug_log << " MISMATCH!";
+                        }
+                    }
                 } else {
-                    debug_log << " mat=null" << std::endl;
+                    debug_log << " mat=nullptr";
                 }
+                debug_log << std::endl;
             }
             debug_log.close();
             debug_mat_assign_once = false;
+        } else {
+            // Non-debug version: just assign materials
+            for (int i = 0; i < 8; i++) {
+                if (hit_sphere_indices[i] >= 0) {
+                    hit_records[i].mat = original_spheres[hit_sphere_indices[i]]->mat;
+                }
+            }
         }
 
         // Compute position and normal for hits (extract ray data from packet to ensure consistency)

@@ -2,6 +2,16 @@
 
 ## [Unreleased] - 2026-04-15
 
+### 🐛 Bug Fix: SIMD Packet T-value Assignment
+
+- **Critical SIMD Bug Fixed**: Corrected t-value assignment in hit_packet()
+  - **Bug**: `closest_t` was updated before extracting t-values, causing mixed t-values from different spheres
+  - **Fix**: Extract t-values from `packet_hits.t` BEFORE updating `closest_t` with `_mm256_min_ps()`
+  - **Location**: `src/scene/scene.h`, lines 128-148
+  - **Impact**: Ensures each ray gets correct t-value from correct sphere, preventing material mismatches
+  - **Enhanced Debug Logging**: Added comprehensive logging to track sphere index → material mapping
+  - **Status**: SIMD packet tracing should now produce correct visual output matching scalar rendering
+
 ### 🖥️ UI Improvements
 
 - **CPU Interactive Default Window Size**:

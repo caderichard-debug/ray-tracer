@@ -142,6 +142,15 @@
 #define ADAPTIVE_QUALITY_AGGRESSIVENESS 0.5  // How aggressively to adjust (0.1-1.0)
 #endif
 
+// Phase 5: Lens Flares
+#ifndef ENABLE_LENS_FLARES
+#define ENABLE_LENS_FLARES 0  // Enable lens flares
+#endif
+
+#ifndef LENS_FLARE_INTENSITY
+#define LENS_FLARE_INTENSITY 1.0  // Default lens flare intensity
+#endif
+
 #ifndef TONE_MAPPING_OPERATOR
 #define TONE_MAPPING_OPERATOR 1  // 0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted
 #endif
@@ -621,6 +630,11 @@ uniform vec2 motion_vector;              // Motion direction vector
 // Phase 5: Adaptive Quality
 uniform bool enable_adaptive_quality;    // Enable adaptive quality
 uniform float quality_scale;             // Quality scale (0.5-1.5)
+
+// Phase 5: Lens Flares
+uniform bool enable_lens_flares;         // Enable lens flares
+uniform float lens_flare_intensity;      // Lens flare intensity (0.0-2.0)
+uniform vec2 light_position;             // Main light position on screen
 
 uniform int tone_mapping_op;             // Tone mapping operator (0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted)
 uniform float exposure;                  // Exposure compensation (0.1-2.0)
@@ -1481,6 +1495,42 @@ vec3 apply_motion_blur(vec3 color, vec2 uv) {
     return blurred_color / (blur_samples * 2.0 + 1.0);
 }
 
+// Phase 5: Lens Flares (dramatic light effects)
+vec3 apply_lens_flares(vec3 color, vec2 uv) {
+    if (!enable_lens_flares || lens_flare_intensity <= 0.0) {
+        return color;  // No lens flares
+    }
+
+    // Calculate direction from light position
+    vec2 delta = uv - light_position;
+    float dist = length(delta);
+    vec2 light_dir = normalize(delta);
+
+    // Multiple flare types
+    vec3 flare_color = vec3(0.0);
+
+    // 1. Main halo (bright circle around light)
+    float halo = 1.0 / (dist * 2.0 + 0.1);
+    halo = clamp(halo, 0.0, 1.0);
+    flare_color += vec3(1.0, 0.9, 0.7) * halo * 0.3;
+
+    // 2. Streak flare (horizontal/vertical streaks)
+    float streak = abs(light_dir.x) + abs(light_dir.y);
+    streak = pow(1.0 - streak, 8.0);
+    flare_color += vec3(1.0, 0.8, 0.6) * streak * 0.2;
+
+    // 3. Ghost flares (reflected circles)
+    for (int i = 1; i <= 3; i++) {
+        float ghost_dist = dist - float(i) * 0.15;
+        float ghost = exp(-ghost_dist * ghost_dist * 50.0);
+        vec2 ghost_pos = uv - light_dir * float(i) * 0.15;
+        flare_color += vec3(0.8, 0.6, 0.4) * ghost * 0.15 / float(i);
+    }
+
+    // Apply intensity and blend
+    return color + flare_color * lens_flare_intensity * 0.5;
+}
+
 // Full Phase 4 post-processing pipeline
 vec3 apply_post_processing(vec3 color, vec2 uv) {
     // Phase 5: Apply chromatic aberration (first, before other effects)
@@ -1516,6 +1566,9 @@ vec3 apply_post_processing(vec3 color, vec2 uv) {
 
     // Phase 5: Apply motion blur (after DOF, before vignette)
     color = apply_motion_blur(color, uv);
+
+    // Phase 5: Apply lens flares (after motion blur, before vignette)
+    color = apply_lens_flares(color, uv);
 
     // Apply vignette
     color = apply_vignette(color, uv);
@@ -2222,6 +2275,11 @@ int main(int argc, char* argv[]) {
     GLint enable_adaptive_quality_loc = glGetUniformLocation(program, "enable_adaptive_quality");
     GLint quality_scale_loc = glGetUniformLocation(program, "quality_scale");
 
+    // Phase 5: Lens Flares
+    GLint enable_lens_flares_loc = glGetUniformLocation(program, "enable_lens_flares");
+    GLint lens_flare_intensity_loc = glGetUniformLocation(program, "lens_flare_intensity");
+    GLint light_position_loc = glGetUniformLocation(program, "light_position");
+
     GLint tone_mapping_op_loc = glGetUniformLocation(program, "tone_mapping_op");
     GLint exposure_loc = glGetUniformLocation(program, "exposure");
     GLint contrast_loc = glGetUniformLocation(program, "contrast");
@@ -2323,6 +2381,12 @@ int main(int argc, char* argv[]) {
     auto last_fps_update = std::chrono::steady_clock::now();
     float fps_smooth = 60.0f;  // Smoothed FPS
     int frame_count = 0;  // Frame counter for FPS calculation
+
+    // Phase 5: Lens Flares
+    bool enable_lens_flares = ENABLE_LENS_FLARES ? true : false;
+    float lens_flare_intensity = LENS_FLARE_INTENSITY;  // Lens flare intensity
+    float light_position_x = 0.5f;  // Light position X (screen space)
+    float light_position_y = 0.5f;  // Light position Y (screen space)
 
     int tone_mapping_op = TONE_MAPPING_OPERATOR;          // Tone mapping operator
     float exposure = 1.0f;                                // Exposure compensation
@@ -2574,6 +2638,22 @@ int main(int argc, char* argv[]) {
                         std::cout << "Adaptive Aggressiveness: " << adaptive_aggressiveness << std::endl;
                         need_render = true;
                     }
+                } else if (event.key.keysym.sym == SDLK_l) {  // L key for Lens Flares (Phase 5)
+                    enable_lens_flares = !enable_lens_flares;
+                    std::cout << "Lens Flares: " << (enable_lens_flares ? "ON" : "OFF") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_MINUS) {  // - key for flare intensity down
+                    if (lens_flare_intensity > 0.0f) {
+                        lens_flare_intensity = std::max(0.0f, lens_flare_intensity - 0.1f);
+                        std::cout << "Lens Flare Intensity: " << lens_flare_intensity << std::endl;
+                        need_render = true;
+                    }
+                } else if (event.key.keysym.sym == SDLK_EQUALS) {  // = key for flare intensity up
+                    if (lens_flare_intensity < 2.0f) {
+                        lens_flare_intensity = std::min(2.0f, lens_flare_intensity + 0.1f);
+                        std::cout << "Lens Flare Intensity: " << lens_flare_intensity << std::endl;
+                        need_render = true;
+                    }
                 } else if (event.key.keysym.sym == SDLK_t) {  // T key to cycle tone mapping
                     tone_mapping_op = (tone_mapping_op + 1) % 5;  // Cycle 0-4
                     const char* op_names[] = {"None", "ACES", "Reinhard", "Filmic", "Uncharted 2"};
@@ -2751,6 +2831,14 @@ int main(int argc, char* argv[]) {
             // Phase 5: Adaptive Quality
             glUniform1i(enable_adaptive_quality_loc, enable_adaptive_quality ? 1 : 0);
             glUniform1f(quality_scale_loc, quality_scale);
+
+            // Phase 5: Lens Flares
+            glUniform1i(enable_lens_flares_loc, enable_lens_flares ? 1 : 0);
+            glUniform1f(lens_flare_intensity_loc, lens_flare_intensity);
+
+            // Calculate light position in screen space (simplified)
+            // In a real implementation, would project 3D light position to screen space
+            glUniform2f(light_position_loc, light_position_x, light_position_y);
 
             glUniform1i(tone_mapping_op_loc, tone_mapping_op);
             glUniform1f(exposure_loc, exposure);
