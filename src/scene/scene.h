@@ -213,20 +213,20 @@ public:
         }
 
         // Compute position and normal for hits (extract ray data from packet to ensure consistency)
+        // OPTIMIZATION: Extract ray data ONCE outside the loop instead of 8 times
+        float ox_arr[8], oy_arr[8], oz_arr[8];
+        float dx_arr[8], dy_arr[8], dz_arr[8];
+        _mm256_storeu_ps(ox_arr, packet.origins.x);
+        _mm256_storeu_ps(oy_arr, packet.origins.y);
+        _mm256_storeu_ps(oz_arr, packet.origins.z);
+        _mm256_storeu_ps(dx_arr, packet.directions.x);
+        _mm256_storeu_ps(dy_arr, packet.directions.y);
+        _mm256_storeu_ps(dz_arr, packet.directions.z);
+
         for (int i = 0; i < 8; i++) {
             if (hit_sphere_indices[i] >= 0) {
                 int sphere_idx = hit_sphere_indices[i];
                 const Sphere* sphere = original_spheres[sphere_idx].get();
-
-                // Extract origin and direction from packet (not scalar_rays, for consistency)
-                float ox_arr[8], oy_arr[8], oz_arr[8];
-                float dx_arr[8], dy_arr[8], dz_arr[8];
-                _mm256_storeu_ps(ox_arr, packet.origins.x);
-                _mm256_storeu_ps(oy_arr, packet.origins.y);
-                _mm256_storeu_ps(oz_arr, packet.origins.z);
-                _mm256_storeu_ps(dx_arr, packet.directions.x);
-                _mm256_storeu_ps(dy_arr, packet.directions.y);
-                _mm256_storeu_ps(dz_arr, packet.directions.z);
 
                 Vec3 ray_origin(ox_arr[i], oy_arr[i], oz_arr[i]);
                 Vec3 ray_dir(dx_arr[i], dy_arr[i], dz_arr[i]);

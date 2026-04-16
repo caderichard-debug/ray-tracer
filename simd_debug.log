@@ -1,0 +1,47 @@
+SIMD compute_phong_shading:
+  ambient = (0.065, 0.005, 0.005)
+  albedo = (0.65, 0.05, 0.05)
+  normal = (0.962068, 0.162041, 0.219474)
+  lights = 1
+SIMD Lighting:
+  light_pos = (0, 18, 0)
+  dot_product = 0.374118
+  in_shadow = checking...
+  ambient = (0.073, 0.073, 0.073)
+  diffuse = (0.729801, 0.729801, 0.729801)
+  specular = (0, 0, 0)
+  final = (0.802801, 0.802801, 0.802801)
+SIMD: Packet created successfully
+SIMD: Material assignments (detailed):
+  Ray 0: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)  Ray 1: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)  Ray 2: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)  Ray 3: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)  Ray 4: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)  Ray 5: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)  Ray 6: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)  Ray 7: sphere_idx=6 original_sphere_mat_albedo=(0.7,0.6,0.5)
+SIMD: After material assignment:
+  Ray 0: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+  Ray 1: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+  Ray 2: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+  Ray 3: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+  Ray 4: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+  Ray 5: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+  Ray 6: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+  Ray 7: sphere_idx=6 hit_record_mat_albedo=(0.7,0.6,0.5)
+SIMD: Computed position/normal for hits
+  Ray 0: t=0.794346 p=(-2.44217,1.37078,5.61696) n=(0.151649,0.100799,0.983281) mat=yes front_face=1
+  Ray 1: t=0.794634 p=(-2.43922,1.37466,5.6161) n=(0.15245,0.101852,0.983049) mat=yes front_face=1
+  Ray 2: t=0.7952 p=(-2.4352,1.37695,5.6144) n=(0.153576,0.102497,0.982807) mat=yes front_face=1
+  Ray 3: t=0.795752 p=(-2.43253,1.37551,5.61275) n=(0.154361,0.102145,0.98272) mat=yes front_face=1
+  Ray 4: t=0.794117 p=(-2.44085,1.37868,5.61765) n=(0.151937,0.102898,0.983019) mat=yes front_face=1
+  Ray 5: t=0.794792 p=(-2.43741,1.37736,5.61562) n=(0.152938,0.102584,0.982897) mat=yes front_face=1
+  Ray 6: t=0.795137 p=(-2.4349,1.37898,5.61459) n=(0.153641,0.103038,0.98274) mat=yes front_face=1
+  Ray 7: t=0.795748 p=(-2.4306,1.38134,5.61276) n=(0.154846,0.103705,0.982481) mat=yes front_face=1
+SIMD: After hit_packet, materials:
+  Ray 0: t=0.794346 mat_albedo=(0.7,0.6,0.5)
+  Ray 1: t=0.794634 mat_albedo=(0.7,0.6,0.5)
+  Ray 2: t=0.7952 mat_albedo=(0.7,0.6,0.5)
+  Ray 3: t=0.795752 mat_albedo=(0.7,0.6,0.5)
+  Ray 4: t=0.794117 mat_albedo=(0.7,0.6,0.5)
+  Ray 5: t=0.794792 mat_albedo=(0.7,0.6,0.5)
+  Ray 6: t=0.795137 mat_albedo=(0.7,0.6,0.5)
+  Ray 7: t=0.795748 mat_albedo=(0.7,0.6,0.5)
+SIMD: Ray 0 shaded color = (0.07, 0.06, 0.05)
+SIMD: Material albedo = (0.7, 0.6, 0.5)
+SIMD: Shaded 8/8 rays, 0 missing materials
+SIMD: Scene has 1 lights

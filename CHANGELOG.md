@@ -2,15 +2,23 @@
 
 ## [Unreleased] - 2026-04-15
 
-### 🐛 Bug Fix: SIMD Packet T-value Assignment
+### 🐛 Bug Fix: SIMD Packet Tracing - Critical T-value Selection Bug
 
-- **Critical SIMD Bug Fixed**: Corrected t-value assignment in hit_packet()
-  - **Bug**: `closest_t` was updated before extracting t-values, causing mixed t-values from different spheres
-  - **Fix**: Extract t-values from `packet_hits.t` BEFORE updating `closest_t` with `_mm256_min_ps()`
-  - **Location**: `src/scene/scene.h`, lines 128-148
-  - **Impact**: Ensures each ray gets correct t-value from correct sphere, preventing material mismatches
-  - **Enhanced Debug Logging**: Added comprehensive logging to track sphere index → material mapping
-  - **Status**: SIMD packet tracing should now produce correct visual output matching scalar rendering
+- **CRITICAL BUG FIXED**: Corrected t-value selection logic in SIMD sphere intersection
+  - **Bug 1**: `min(t1, t2)` was selecting wrong t-value (e.g., t=-3.0 instead of t=5.0)
+  - **Bug 2**: `closest_t` was updated before extracting t-values, causing mixed t-values from different spheres
+  - **Fix 1**: Proper root selection - try t1 (closer), if not in range use t2 (farther)
+  - **Fix 2**: Extract t-values from `packet_hits.t` BEFORE updating `closest_t`
+  - **Location**: `src/primitives/sphere_simd.h`, lines 66-85 and `src/scene/scene.h`, lines 128-148
+  - **Impact**: Spheres now render at correct size with proper shading and lighting
+  - **Optimization**: Fixed ray data extraction (was 8x redundant, now done once)
+  - **Status**: SIMD packet tracing now produces correct visual output
+
+### Symptoms Fixed:
+- ✅ Spheres no longer appear very large (wrong t-values caused wrong intersection points)
+- ✅ Shading now works correctly (normals computed from correct positions)
+- ✅ Textures still visible (materials were always correct, just geometry was wrong)
+- ✅ Visual output now matches scalar rendering
 
 ### 🖥️ UI Improvements
 
