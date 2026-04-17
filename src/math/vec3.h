@@ -4,6 +4,8 @@
 #include <cmath>
 #include <iostream>
 
+#include "pcg_random.h"
+
 class Vec3 {
 public:
     float x, y, z;
@@ -101,18 +103,14 @@ public:
 
     // Static utility functions
     static Vec3 random() {
-        return Vec3(
-            static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
-            static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
-            static_cast<float>(rand()) / static_cast<float>(RAND_MAX)
-        );
+        return Vec3(random_float_pcg(), random_float_pcg(), random_float_pcg());
     }
 
     static Vec3 random(float min, float max) {
         return Vec3(
-            min + (max - min) * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-            min + (max - min) * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-            min + (max - min) * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX))
+            min + (max - min) * random_float_pcg(),
+            min + (max - min) * random_float_pcg(),
+            min + (max - min) * random_float_pcg()
         );
     }
 };

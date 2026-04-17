@@ -8,6 +8,12 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <condition_variable>
+#include <cstring>
+#include <mutex>
+#include <thread>
 #include <omp.h>
 #include <fstream>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -17,6 +23,7 @@
 #include "math/morton.h"
 #include "math/stratified.h"
 #include "math/frustum.h"
+#include "math/pcg_random.h"
 
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
@@ -212,11 +219,6 @@ public:
 
     Point3 get_position() const { return position; }
 };
-
-// Helper function for random float in [0, 1)
-inline float random_float() {
-    return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
-}
 
 // Help overlay system
 class HelpOverlay {
@@ -426,7 +428,8 @@ public:
     void render(SDL_Renderer* renderer, int window_width, int window_height,
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
                 const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
-                bool enable_progressive = false, bool enable_adaptive = false, bool enable_wavefront = false,
+                bool enable_progressive = false, bool enable_adaptive = false, bool enable_denoiser = false,
+                bool enable_wavefront = false,
                 bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false,
                 bool enable_simd_packets = false, bool enable_bvh = false
 #ifdef GPU_RENDERING
@@ -934,39 +937,32 @@ public:
 
         y_offset += 35;
 
-        // Wavefront rendering toggle button (new row)
-        const char* wavefront_label = enable_wavefront ? "Wavefront: ON" : "Wavefront: OFF";
-        int wavefront_button_width = 120;
-        SDL_Rect wavefront_button_rect = {15, y_offset, wavefront_button_width, 24};
+        // Post denoise (edge-preserving filter on CPU worker after each traced frame)
+        const char* denoise_label = enable_denoiser ? "Denoise: ON" : "Denoise: OFF";
+        int denoise_button_width = 120;
+        SDL_Rect denoise_button_rect = {15, y_offset, denoise_button_width, 24};
+        buttons.push_back({{denoise_button_rect.x + panel_x, denoise_button_rect.y + panel_y, denoise_button_rect.w, denoise_button_rect.h},
+                          "denoise", enable_denoiser ? 1 : 0, 16});
 
-        // Store button for click detection (category 10 = wavefront)
-        buttons.push_back({{wavefront_button_rect.x + panel_x, wavefront_button_rect.y + panel_y, wavefront_button_rect.w, wavefront_button_rect.h},
-                          "wavefront", enable_wavefront ? 1 : 0, 10});
-
-        // Draw wavefront button background
-        Uint32 wavefront_button_bg = SDL_MapRGBA(content_surface->format,
-            enable_wavefront ? button_active_color.r : button_color.r,
-            enable_wavefront ? button_active_color.g : button_color.g,
-            enable_wavefront ? button_active_color.b : button_color.b,
+        Uint32 denoise_button_bg = SDL_MapRGBA(content_surface->format,
+            enable_denoiser ? button_active_color.r : button_color.r,
+            enable_denoiser ? button_active_color.g : button_color.g,
+            enable_denoiser ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(content_surface, &wavefront_button_rect, wavefront_button_bg);
-
-        // Draw wavefront button border
-        SDL_Rect wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y, wavefront_button_rect.w, 2};
-        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
-        wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y + wavefront_button_rect.h - 2, wavefront_button_rect.w, 2};
-        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
-
-        // Draw wavefront button text
-        SDL_Surface* wavefront_text_surface = TTF_RenderText_Blended(font, wavefront_label, text_color);
-        if (wavefront_text_surface) {
-            SDL_Rect wavefront_text_rect = {
-                wavefront_button_rect.x + (wavefront_button_width - wavefront_text_surface->w) / 2,
-                y_offset + (24 - wavefront_text_surface->h) / 2,
-                wavefront_text_surface->w, wavefront_text_surface->h
+        SDL_FillRect(content_surface, &denoise_button_rect, denoise_button_bg);
+        SDL_Rect denoise_border = {denoise_button_rect.x, denoise_button_rect.y, denoise_button_rect.w, 2};
+        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        denoise_border = {denoise_button_rect.x, denoise_button_rect.y + denoise_button_rect.h - 2, denoise_button_rect.w, 2};
+        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_Surface* denoise_text_surface = TTF_RenderText_Blended(font, denoise_label, text_color);
+        if (denoise_text_surface) {
+            SDL_Rect denoise_text_rect = {
+                denoise_button_rect.x + (denoise_button_width - denoise_text_surface->w) / 2,
+                y_offset + (24 - denoise_text_surface->h) / 2,
+                denoise_text_surface->w, denoise_text_surface->h
             };
-            SDL_BlitSurface(wavefront_text_surface, nullptr, content_surface, &wavefront_text_rect);
-            SDL_FreeSurface(wavefront_text_surface);
+            SDL_BlitSurface(denoise_text_surface, nullptr, content_surface, &denoise_text_rect);
+            SDL_FreeSurface(denoise_text_surface);
         }
 
         y_offset += 35;
@@ -1089,8 +1085,8 @@ public:
 
         y_offset += 35;
 
-        // Phase 3 Optimizations section
-        label_surface = TTF_RenderText_Blended(font, "Phase 3 Optimizations:", title_color);
+        // Phase 3: SIMD packet tracing vs wavefront (mutually exclusive render paths)
+        label_surface = TTF_RenderText_Blended(font, "Phase 3 (SIMD or Wavefront):", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
             SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
@@ -1098,16 +1094,14 @@ public:
         }
         y_offset += 22;
 
-        // SIMD packets toggle button
+        // SIMD and Wavefront on one row — only one should be ON at a time
         const char* simd_label = enable_simd_packets ? "SIMD: ON" : "SIMD: OFF";
         int simd_button_width = 120;
         SDL_Rect simd_button_rect = {15, y_offset, simd_button_width, 24};
 
-        // Store button for click detection (category 14 = simd)
         buttons.push_back({{simd_button_rect.x + panel_x, simd_button_rect.y + panel_y, simd_button_rect.w, simd_button_rect.h},
                           "simd_packets", enable_simd_packets ? 1 : 0, 14});
 
-        // Draw SIMD button background
         Uint32 simd_button_bg = SDL_MapRGBA(content_surface->format,
             enable_simd_packets ? button_active_color.r : button_color.r,
             enable_simd_packets ? button_active_color.g : button_color.g,
@@ -1115,13 +1109,11 @@ public:
             255);
         SDL_FillRect(content_surface, &simd_button_rect, simd_button_bg);
 
-        // Draw SIMD button border
         SDL_Rect simd_border = {simd_button_rect.x, simd_button_rect.y, simd_button_rect.w, 2};
         SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         simd_border = {simd_button_rect.x, simd_button_rect.y + simd_button_rect.h - 2, simd_button_rect.w, 2};
         SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
-        // Draw SIMD button text
         SDL_Surface* simd_text_surface = TTF_RenderText_Blended(font, simd_label, text_color);
         if (simd_text_surface) {
             SDL_Rect simd_text_rect = {
@@ -1131,6 +1123,36 @@ public:
             };
             SDL_BlitSurface(simd_text_surface, nullptr, content_surface, &simd_text_rect);
             SDL_FreeSurface(simd_text_surface);
+        }
+
+        const char* wavefront_label = enable_wavefront ? "Wavefront: ON" : "Wavefront: OFF";
+        int wavefront_button_width = 120;
+        SDL_Rect wavefront_button_rect = {150, y_offset, wavefront_button_width, 24};
+
+        buttons.push_back({{wavefront_button_rect.x + panel_x, wavefront_button_rect.y + panel_y, wavefront_button_rect.w, wavefront_button_rect.h},
+                          "wavefront", enable_wavefront ? 1 : 0, 10});
+
+        Uint32 wavefront_button_bg = SDL_MapRGBA(content_surface->format,
+            enable_wavefront ? button_active_color.r : button_color.r,
+            enable_wavefront ? button_active_color.g : button_color.g,
+            enable_wavefront ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(content_surface, &wavefront_button_rect, wavefront_button_bg);
+
+        SDL_Rect wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y, wavefront_button_rect.w, 2};
+        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y + wavefront_button_rect.h - 2, wavefront_button_rect.w, 2};
+        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+
+        SDL_Surface* wavefront_text_surface = TTF_RenderText_Blended(font, wavefront_label, text_color);
+        if (wavefront_text_surface) {
+            SDL_Rect wavefront_text_rect = {
+                wavefront_button_rect.x + (wavefront_button_width - wavefront_text_surface->w) / 2,
+                y_offset + (24 - wavefront_text_surface->h) / 2,
+                wavefront_text_surface->w, wavefront_text_surface->h
+            };
+            SDL_BlitSurface(wavefront_text_surface, nullptr, content_surface, &wavefront_text_rect);
+            SDL_FreeSurface(wavefront_text_surface);
         }
 
         y_offset += 35;
@@ -1250,6 +1272,7 @@ public:
         bool screenshot_requested;
         bool progressive_changed;
         bool adaptive_changed;
+        bool denoiser_changed;
         bool wavefront_changed;
         bool morton_changed;
         bool stratified_changed;
@@ -1267,7 +1290,7 @@ public:
                        shadows_changed(false), reflections_changed(false),
                        analysis_mode_changed(false), new_analysis_mode(0),
                        screenshot_requested(false), progressive_changed(false),
-                       adaptive_changed(false), wavefront_changed(false),
+                       adaptive_changed(false), denoiser_changed(false), wavefront_changed(false),
                        morton_changed(false), stratified_changed(false), frustum_changed(false),
                        simd_packets_changed(false), new_simd_packets(false),
                        bvh_changed(false), new_bvh(false),
@@ -1321,6 +1344,9 @@ public:
                     case 9: // Adaptive toggle
                         result.adaptive_changed = true;
                         break;
+                    case 16: // Post denoise toggle
+                        result.denoiser_changed = true;
+                        break;
                     case 10: // Wavefront toggle
                         result.wavefront_changed = true;
                         break;
@@ -1360,6 +1386,491 @@ public:
         if (font) TTF_CloseFont(font);
         if (title_font) TTF_CloseFont(title_font);
         if (initialized) TTF_Quit();
+    }
+};
+
+// Copy packed RGB24 (tight w*3 stride) into a streaming SDL texture, honoring row pitch.
+static void blit_packed_rgb24_to_texture(SDL_Texture* texture, const unsigned char* src, int width, int height) {
+    void* pixels = nullptr;
+    int pitch = 0;
+    if (SDL_LockTexture(texture, nullptr, &pixels, &pitch) != 0) {
+        return;
+    }
+    const int src_stride = width * 3;
+    if (pitch == src_stride) {
+        std::memcpy(pixels, src, static_cast<size_t>(src_stride) * static_cast<size_t>(height));
+    } else {
+        auto* dst = static_cast<unsigned char*>(pixels);
+        for (int y = 0; y < height; ++y) {
+            std::memcpy(dst + static_cast<size_t>(y) * static_cast<size_t>(pitch),
+                        src + static_cast<size_t>(y) * static_cast<size_t>(src_stride),
+                        static_cast<size_t>(src_stride));
+        }
+    }
+    SDL_UnlockTexture(texture);
+}
+
+// Lightweight edge-preserving smooth (bilateral on luminance) for packed RGB24. Runs on producer thread.
+static void apply_rgb24_edge_preserving_denoise(std::vector<unsigned char>& rgb, int w, int h) {
+    if (w < 5 || h < 5 || rgb.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 3u) {
+        return;
+    }
+    const size_t nbytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 3u;
+    std::vector<unsigned char> out(nbytes);
+    const float sigma_s = 1.35f;
+    const float sigma_r = 0.065f;
+    const float inv_two_ss = 1.0f / (2.0f * sigma_s * sigma_s);
+    const float inv_two_sr = 1.0f / (2.0f * sigma_r * sigma_r);
+
+    #pragma omp parallel for schedule(dynamic, 8)
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const size_t cidx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3u;
+            const float c0r = rgb[cidx] * (1.0f / 255.0f);
+            const float c0g = rgb[cidx + 1] * (1.0f / 255.0f);
+            const float c0b = rgb[cidx + 2] * (1.0f / 255.0f);
+            const float l0 = 0.299f * c0r + 0.587f * c0g + 0.114f * c0b;
+            float sumw = 0.0f;
+            float sumr = 0.0f;
+            float sumg = 0.0f;
+            float sumb = 0.0f;
+            for (int dy = -2; dy <= 2; ++dy) {
+                const int yy = y + dy;
+                if (yy < 0 || yy >= h) {
+                    continue;
+                }
+                for (int dx = -2; dx <= 2; ++dx) {
+                    const int xx = x + dx;
+                    if (xx < 0 || xx >= w) {
+                        continue;
+                    }
+                    const size_t nidx = (static_cast<size_t>(yy) * static_cast<size_t>(w) + static_cast<size_t>(xx)) * 3u;
+                    const float nr = rgb[nidx] * (1.0f / 255.0f);
+                    const float ng = rgb[nidx + 1] * (1.0f / 255.0f);
+                    const float nb = rgb[nidx + 2] * (1.0f / 255.0f);
+                    const float l1 = 0.299f * nr + 0.587f * ng + 0.114f * nb;
+                    const float ds = static_cast<float>(dx * dx + dy * dy);
+                    const float ws = std::exp(-ds * inv_two_ss);
+                    const float dl = l1 - l0;
+                    const float wr = std::exp(-(dl * dl) * inv_two_sr);
+                    const float wgt = ws * wr;
+                    sumw += wgt;
+                    sumr += wgt * nr;
+                    sumg += wgt * ng;
+                    sumb += wgt * nb;
+                }
+            }
+            if (sumw < 1e-6f) {
+                sumw = 1.0f;
+            }
+            const float inv = 1.0f / sumw;
+            out[cidx] = static_cast<unsigned char>(std::clamp(sumr * inv * 255.0f, 0.0f, 255.0f));
+            out[cidx + 1] = static_cast<unsigned char>(std::clamp(sumg * inv * 255.0f, 0.0f, 255.0f));
+            out[cidx + 2] = static_cast<unsigned char>(std::clamp(sumb * inv * 255.0f, 0.0f, 255.0f));
+        }
+    }
+    rgb.swap(out);
+}
+
+// Progressive Monte Carlo averages samples for a *fixed* view. If the camera moves between passes,
+// old samples must be discarded or every frame becomes a blend of all past viewpoints.
+static bool progressive_view_differs(const Camera& a, const Camera& b) {
+    constexpr float pe = 1e-4f;
+    auto dist2 = [](const Point3& p, const Point3& q) {
+        const float dx = p.x - q.x;
+        const float dy = p.y - q.y;
+        const float dz = p.z - q.z;
+        return dx * dx + dy * dy + dz * dz;
+    };
+    if (dist2(a.lookfrom, b.lookfrom) > pe * pe) {
+        return true;
+    }
+    if (dist2(a.lookat, b.lookat) > pe * pe) {
+        return true;
+    }
+    if (std::fabs(a.vfov - b.vfov) > 1e-3f) {
+        return true;
+    }
+    if (std::fabs(a.aspect_ratio - b.aspect_ratio) > 1e-6f) {
+        return true;
+    }
+    if (std::fabs(a.aperture - b.aperture) > 1e-5f) {
+        return true;
+    }
+    if (std::fabs(a.focus_dist - b.focus_dist) > 1e-4f) {
+        return true;
+    }
+    const Vec3 au = unit_vector(a.vup);
+    const Vec3 bu = unit_vector(b.vup);
+    if (dot(au, bu) < 0.99995f) {
+        return true;
+    }
+    return false;
+}
+
+// Full CPU ray-tracing pass (runs on background thread). Progressive accumulation resets when the view changes.
+static bool execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const QualityPreset& preset, int image_width,
+                                          int image_height, Renderer& ray_renderer, RenderAnalysis& analysis,
+                                          bool enable_shadows, std::vector<unsigned char>& framebuffer) {
+    bool schedule_next_render = false;
+
+    static Camera progressive_cam_anchor;
+    static bool progressive_cam_anchor_valid = false;
+    static int progressive_last_max_depth = -1;
+    if (!ray_renderer.enable_progressive) {
+        progressive_cam_anchor_valid = false;
+        progressive_last_max_depth = -1;
+    }
+    const bool progressive_view_changed =
+        ray_renderer.enable_progressive &&
+        (!progressive_cam_anchor_valid || progressive_view_differs(progressive_cam_anchor, cam) ||
+         progressive_last_max_depth != ray_renderer.max_depth);
+
+    if (ray_renderer.enable_progressive && ray_renderer.enable_wavefront) {
+        static std::vector<std::vector<Color>> wf_progressive_accum;
+        static int wf_progressive_passes = 0;
+        static bool wf_progressive_initialized = false;
+
+        const bool wf_dims_mismatch =
+            static_cast<int>(wf_progressive_accum.size()) != image_height ||
+            (image_height > 0 && (wf_progressive_accum.empty() ||
+                                  static_cast<int>(wf_progressive_accum[0].size()) != image_width));
+        if (!wf_progressive_initialized || wf_dims_mismatch || progressive_view_changed) {
+            wf_progressive_accum.assign(image_height, std::vector<Color>(image_width, Color(0, 0, 0)));
+            wf_progressive_passes = 0;
+            wf_progressive_initialized = true;
+        }
+
+        ray_renderer.render_wavefront(cam, scene, wf_progressive_accum, image_width, image_height, 1, true);
+        wf_progressive_passes++;
+
+        const float inv_passes = 1.0f / static_cast<float>(wf_progressive_passes);
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                Color linear = wf_progressive_accum[j][i] * inv_passes;
+                Color pixel_color(std::sqrt(linear.x), std::sqrt(linear.y), std::sqrt(linear.z));
+                int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+            }
+        }
+
+        if (wf_progressive_passes < preset.samples) {
+            schedule_next_render = true;
+        }
+        progressive_cam_anchor = cam;
+        progressive_cam_anchor_valid = true;
+        progressive_last_max_depth = ray_renderer.max_depth;
+    } else if (ray_renderer.enable_progressive && ray_renderer.enable_simd_packets) {
+        static std::vector<std::vector<Color>> simd_prog_linear_accum;
+        static int simd_prog_passes = 0;
+        static bool simd_prog_initialized = false;
+
+        const bool simd_prog_dims_mismatch =
+            static_cast<int>(simd_prog_linear_accum.size()) != image_height ||
+            (image_height > 0 && (simd_prog_linear_accum.empty() ||
+                                  static_cast<int>(simd_prog_linear_accum[0].size()) != image_width));
+
+        if (!simd_prog_initialized || simd_prog_dims_mismatch || progressive_view_changed) {
+            simd_prog_linear_accum.assign(image_height, std::vector<Color>(image_width, Color(0, 0, 0)));
+            simd_prog_passes = 0;
+            simd_prog_initialized = true;
+        }
+
+        ray_renderer.render_simd_packets(cam, scene, simd_prog_linear_accum, image_width, image_height, 1, true);
+        simd_prog_passes++;
+
+        const float inv_passes = 1.0f / static_cast<float>(simd_prog_passes);
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                Color linear = simd_prog_linear_accum[j][i] * inv_passes;
+                Color pixel_color(std::sqrt(linear.x), std::sqrt(linear.y), std::sqrt(linear.z));
+                int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+            }
+        }
+
+        if (simd_prog_passes < preset.samples) {
+            schedule_next_render = true;
+        }
+        progressive_cam_anchor = cam;
+        progressive_cam_anchor_valid = true;
+        progressive_last_max_depth = ray_renderer.max_depth;
+    } else if (ray_renderer.enable_progressive) {
+        static std::vector<std::vector<Color>> scalar_prog_linear_accum;
+        static int scalar_prog_passes = 0;
+        static bool scalar_prog_initialized = false;
+
+        const bool sp_dims_mismatch =
+            static_cast<int>(scalar_prog_linear_accum.size()) != image_height ||
+            (image_height > 0 && (scalar_prog_linear_accum.empty() ||
+                                  static_cast<int>(scalar_prog_linear_accum[0].size()) != image_width));
+
+        if (!scalar_prog_initialized || sp_dims_mismatch || progressive_view_changed) {
+            scalar_prog_linear_accum.assign(image_height, std::vector<Color>(image_width, Color(0, 0, 0)));
+            scalar_prog_passes = 0;
+            scalar_prog_initialized = true;
+        }
+
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                float u = (i + random_float_pcg()) / (image_width - 1);
+                float v = (j + random_float_pcg()) / (image_height - 1);
+                Ray r = cam.get_ray(u, v);
+                Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+                scalar_prog_linear_accum[j][i] = scalar_prog_linear_accum[j][i] + sample_color;
+            }
+        }
+
+        scalar_prog_passes++;
+
+        const float inv_passes = 1.0f / static_cast<float>(scalar_prog_passes);
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                Color linear = scalar_prog_linear_accum[j][i] * inv_passes;
+                Color pixel_color(std::sqrt(linear.x), std::sqrt(linear.y), std::sqrt(linear.z));
+                int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+            }
+        }
+
+        if (scalar_prog_passes < preset.samples) {
+            schedule_next_render = true;
+        }
+        progressive_cam_anchor = cam;
+        progressive_cam_anchor_valid = true;
+        progressive_last_max_depth = ray_renderer.max_depth;
+    } else if (ray_renderer.enable_wavefront) {
+        std::vector<std::vector<Color>> wavefront_framebuffer(image_height, std::vector<Color>(image_width));
+        ray_renderer.render_wavefront(cam, scene, wavefront_framebuffer, image_width, image_height, preset.samples);
+
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                Color pixel_color = wavefront_framebuffer[j][i];
+                int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+            }
+        }
+    } else if (ray_renderer.enable_simd_packets) {
+        std::vector<std::vector<Color>> simd_framebuffer(image_height, std::vector<Color>(image_width));
+        ray_renderer.render_simd_packets(cam, scene, simd_framebuffer, image_width, image_height, preset.samples);
+
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                Color pixel_color = simd_framebuffer[j][i];
+                int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+            }
+        }
+    } else {
+        #pragma omp parallel for schedule(dynamic, 4)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                Color pixel_color(0, 0, 0);
+                float total_depth = 0.0f;
+                Color pixel_normal(0, 0, 0);
+                Color pixel_albedo(0, 0, 0);
+                int shadow_rays = 0;
+                int total_rays = 0;
+
+                int actual_samples =
+                    ray_renderer.enable_adaptive ? std::max(1, preset.samples / 2) : preset.samples;
+
+                for (int s = 0; s < actual_samples; ++s) {
+                    float u = (i + random_float_pcg()) / (image_width - 1);
+                    float v = (j + random_float_pcg()) / (image_height - 1);
+
+                    Ray r = cam.get_ray(u, v);
+                    Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
+                    pixel_color = pixel_color + sample_color;
+                    total_rays += ray_renderer.max_depth;
+
+                    if (!ray_renderer.enable_adaptive) {
+                        HitRecord rec;
+                        if (scene.hit(r, 0.001f, 1000.0f, rec)) {
+                            total_depth += rec.t;
+                            pixel_normal = pixel_normal + Color(rec.normal.x, rec.normal.y, rec.normal.z);
+                            if (rec.mat) {
+                                pixel_albedo = pixel_albedo + rec.mat->albedo;
+                            }
+
+                            if (enable_shadows) {
+                                for (const auto& light : scene.lights) {
+                                    Vec3 light_dir = light.position - rec.p;
+                                    Ray shadow_ray(rec.p, light_dir.normalized());
+                                    if (!scene.is_shadowed(shadow_ray, light_dir.length())) {
+                                        shadow_rays++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                float scale = 1.0f / actual_samples;
+                pixel_color = pixel_color * scale;
+
+                if (!ray_renderer.enable_adaptive) {
+                    pixel_normal = pixel_normal * scale;
+                    pixel_albedo = pixel_albedo * scale;
+                    total_depth *= scale;
+                    analysis.record_pixel(i, image_height - 1 - j, shadow_rays, total_rays, total_depth, pixel_normal, pixel_albedo);
+                }
+
+                Color final_color = analysis.get_analysis_color(i, image_height - 1 - j, pixel_color);
+                final_color.x = std::sqrt(final_color.x);
+                final_color.y = std::sqrt(final_color.y);
+                final_color.z = std::sqrt(final_color.z);
+
+                int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(final_color.x, 0.0f, 0.999f));
+                framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(final_color.y, 0.0f, 0.999f));
+                framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(final_color.z, 0.0f, 0.999f));
+            }
+        }
+    }
+
+    return schedule_next_render;
+}
+
+struct CpuRenderThreadHub {
+    std::mutex job_mutex;
+    std::condition_variable job_cv;
+    std::atomic<bool> quit{false};
+
+    bool job_pending = false;
+    Camera job_cam;
+    QualityPreset job_preset{};
+    int job_width = 0;
+    int job_height = 0;
+    bool job_enable_shadows = true;
+    bool job_denoise = false;
+
+    Scene* scene_ptr = nullptr;
+    Renderer* renderer_ptr = nullptr;
+    RenderAnalysis* analysis_ptr = nullptr;
+
+    std::mutex result_mutex;
+    bool result_ready = false;
+    std::vector<unsigned char> result_rgb;
+    double result_seconds = 0.0;
+    bool result_schedule_next = false;
+
+    std::thread worker;
+
+    void worker_loop() {
+        while (!quit.load(std::memory_order_acquire)) {
+            Camera cam;
+            QualityPreset preset;
+            int iw = 0;
+            int ih = 0;
+            bool es = true;
+            bool denoise = false;
+            Scene* sc = nullptr;
+            Renderer* rr = nullptr;
+            RenderAnalysis* an = nullptr;
+
+            {
+                std::unique_lock<std::mutex> lk(job_mutex);
+                job_cv.wait(lk, [&] { return job_pending || quit.load(std::memory_order_acquire); });
+                if (quit.load(std::memory_order_acquire)) {
+                    break;
+                }
+                cam = job_cam;
+                preset = job_preset;
+                iw = job_width;
+                ih = job_height;
+                es = job_enable_shadows;
+                denoise = job_denoise;
+                sc = scene_ptr;
+                rr = renderer_ptr;
+                an = analysis_ptr;
+                job_pending = false;
+            }
+
+            std::vector<unsigned char> fb(static_cast<size_t>(iw) * static_cast<size_t>(ih) * 3u);
+            auto t0 = std::chrono::high_resolution_clock::now();
+
+            bool sched = execute_cpu_ray_tracing_pass(*sc, cam, preset, iw, ih, *rr, *an, es, fb);
+            if (denoise) {
+                apply_rgb24_edge_preserving_denoise(fb, iw, ih);
+            }
+            auto t1 = std::chrono::high_resolution_clock::now();
+
+            {
+                std::lock_guard<std::mutex> lk(result_mutex);
+                result_rgb = std::move(fb);
+                result_seconds = std::chrono::duration<double>(t1 - t0).count();
+                result_schedule_next = sched;
+                result_ready = true;
+            }
+        }
+    }
+
+    void submit_job(const Camera& cam, const QualityPreset& preset_in, int iw, int ih, bool enable_shadows,
+                      bool denoise_after_trace) {
+        std::lock_guard<std::mutex> lk(job_mutex);
+        job_cam = cam;
+        job_preset = preset_in;
+        job_width = iw;
+        job_height = ih;
+        job_enable_shadows = enable_shadows;
+        job_denoise = denoise_after_trace;
+        job_pending = true;
+        job_cv.notify_one();
+    }
+
+    // Returns true if a newly completed CPU frame was published (main thread should upload to SDL).
+    bool try_consume(std::vector<unsigned char>& framebuffer, SDL_Texture* texture, int tex_width, int tex_height,
+                     double* out_seconds, bool* schedule_next_out) {
+        std::lock_guard<std::mutex> lk(result_mutex);
+        if (!result_ready) {
+            return false;
+        }
+        framebuffer.swap(result_rgb);
+        result_ready = false;
+        *out_seconds = result_seconds;
+        *schedule_next_out = result_schedule_next;
+        blit_packed_rgb24_to_texture(texture, framebuffer.data(), tex_width, tex_height);
+        return true;
+    }
+
+    void start(Scene* s, Renderer* r, RenderAnalysis* a) {
+        scene_ptr = s;
+        renderer_ptr = r;
+        analysis_ptr = a;
+        worker = std::thread([this] { worker_loop(); });
+    }
+
+    void stop() {
+        quit.store(true, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lk(job_mutex);
+            job_pending = true;
+        }
+        job_cv.notify_one();
+        {
+            std::lock_guard<std::mutex> lk(result_mutex);
+            result_ready = false;
+        }
+        if (worker.joinable()) {
+            worker.join();
+        }
     }
 };
 
@@ -1431,6 +1942,7 @@ int main(int argc, char* argv[]) {
     bool enable_morton = false;
     bool enable_stratified = false;
     bool enable_frustum = false;
+    bool enable_denoiser = false;
 
     // Create window
     std::string window_title = "Real-time Ray Tracer - CPU (OpenMP)";
@@ -1497,6 +2009,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+
     // Setup scene - use shared Cornell Box scene
     Scene scene;
     setup_cornell_box_scene(scene);
@@ -1556,6 +2070,11 @@ int main(int argc, char* argv[]) {
     int analysis_height = preset.width * 9 / 16;
     analysis.resize(preset.width, analysis_height);
     std::cout << "Analysis system initialized (press M to cycle modes)\n";
+
+    CpuRenderThreadHub cpu_render_hub;
+    cpu_render_hub.start(&scene, &ray_renderer, &analysis);
+    std::fill(framebuffer.begin(), framebuffer.end(), 0);
+    blit_packed_rgb24_to_texture(texture, framebuffer.data(), image_width, image_height);
 
     // Mouse capture
     SDL_SetRelativeMouseMode(SDL_FALSE);
@@ -1694,9 +2213,11 @@ int main(int argc, char* argv[]) {
                             preset = quality_levels[current_quality];
 
                             // Update CPU renderer (keep window size, only change quality)
+                            cpu_render_hub.stop();
                             ray_renderer = Renderer(preset.max_depth);
                             ray_renderer.enable_shadows = enable_shadows;
                             ray_renderer.enable_reflections = enable_reflections;
+                            cpu_render_hub.start(&scene, &ray_renderer, &analysis);
                             std::cout << "Quality: " << preset.name << " (" << preset.samples
                                      << " samples, depth " << preset.max_depth << ")" << std::endl;
                             need_render = true;
@@ -1718,9 +2239,11 @@ int main(int argc, char* argv[]) {
                         if (click_result.quality_changed) {
                             current_quality = click_result.new_quality;
                             preset = quality_levels[current_quality];
+                            cpu_render_hub.stop();
                             ray_renderer = Renderer(preset.max_depth);
                             ray_renderer.enable_shadows = enable_shadows;
                             ray_renderer.enable_reflections = enable_reflections;
+                            cpu_render_hub.start(&scene, &ray_renderer, &analysis);
                             std::cout << "Quality: " << preset.name << " (" << preset.samples
                                      << " samples, depth " << preset.max_depth << ")" << std::endl;
                             need_render = true;
@@ -1745,9 +2268,11 @@ int main(int argc, char* argv[]) {
                             }
                         } else if (click_result.depth_changed) {
                             preset.max_depth = click_result.new_depth;
+                            cpu_render_hub.stop();
                             ray_renderer = Renderer(preset.max_depth);
                             ray_renderer.enable_shadows = enable_shadows;
                             ray_renderer.enable_reflections = enable_reflections;
+                            cpu_render_hub.start(&scene, &ray_renderer, &analysis);
                             std::cout << "Depth: " << preset.max_depth << std::endl;
                             need_render = true;
                         } else if (click_result.shadows_changed) {
@@ -1792,9 +2317,16 @@ int main(int argc, char* argv[]) {
                             ray_renderer.enable_adaptive = !ray_renderer.enable_adaptive;
                             std::cout << "Adaptive sampling: " << (ray_renderer.enable_adaptive ? "ON" : "OFF") << std::endl;
                             need_render = true;
+                        } else if (click_result.denoiser_changed) {
+                            enable_denoiser = !enable_denoiser;
+                            std::cout << "Post denoise (CPU worker): " << (enable_denoiser ? "ON" : "OFF") << std::endl;
+                            need_render = true;
                         } else if (click_result.wavefront_changed) {
-                            // Toggle wavefront rendering
                             ray_renderer.enable_wavefront = !ray_renderer.enable_wavefront;
+                            if (ray_renderer.enable_wavefront && ray_renderer.enable_simd_packets) {
+                                ray_renderer.enable_simd_packets = false;
+                                std::cout << "SIMD disabled (SIMD and Wavefront use different render paths; pick one)\n";
+                            }
                             std::cout << "Wavefront rendering: " << (ray_renderer.enable_wavefront ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.morton_changed) {
@@ -1820,14 +2352,16 @@ int main(int argc, char* argv[]) {
                             std::cout << "Button value: " << click_result.new_simd_packets << std::endl;
 
                             if (!ray_renderer.enable_simd_packets) {
-                                // Enabling SIMD - disable BVH
                                 ray_renderer.enable_simd_packets = true;
                                 if (ray_renderer.enable_bvh) {
                                     ray_renderer.enable_bvh = false;
                                     std::cout << "BVH disabled (mutually exclusive with SIMD)" << std::endl;
                                 }
+                                if (ray_renderer.enable_wavefront) {
+                                    ray_renderer.enable_wavefront = false;
+                                    std::cout << "Wavefront disabled (SIMD and Wavefront use different render paths; pick one)\n";
+                                }
                             } else {
-                                // Disabling SIMD
                                 ray_renderer.enable_simd_packets = false;
                             }
                             std::cout << "SIMD packets: " << (ray_renderer.enable_simd_packets ? "ON (AVX2 intersection)" : "OFF") << std::endl;
@@ -1880,6 +2414,9 @@ int main(int argc, char* argv[]) {
 
                                 // Set texture scaling to linear for smooth upscaling
                                 SDL_SetTextureScaleMode(texture, SDL_ScaleModeLinear);
+                                if (texture) {
+                                    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+                                }
 
                                 if (!texture) {
                                     std::cerr << "SDL_CreateTexture failed: " << SDL_GetError() << std::endl;
@@ -1889,11 +2426,18 @@ int main(int argc, char* argv[]) {
                                     return 1;
                                 }
 
+                                cpu_render_hub.stop();
+
                                 // Resize framebuffer for new resolution
                                 framebuffer.resize(image_width * image_height * 3, 0);
 
                                 // Resize analysis buffers
                                 analysis.resize(image_width, image_height);
+
+                                cpu_render_hub.start(&scene, &ray_renderer, &analysis);
+                                std::fill(framebuffer.begin(), framebuffer.end(), 0);
+                                blit_packed_rgb24_to_texture(texture, framebuffer.data(), image_width, image_height);
+
                                 std::cout << "Resolution: " << image_width << "x" << image_height << "\n" << std::endl;
                                 need_render = true;
                             }
@@ -1948,274 +2492,74 @@ int main(int argc, char* argv[]) {
             need_render = true;
         }
 
-        // Render frame if needed and not paused
-        double render_time = 0.0;  // Declare outside the if block for controls panel
+        // Render frame if needed and not paused (GPU: synchronous). CPU ray trace runs on worker thread.
+        double render_time = 0.0;
+        bool work_done = false;
+
         if (need_render && !paused) {
-            // Safety check before rendering
             if (!validate_current_settings(preset)) {
                 std::cout << "Render aborted due to unsafe settings. Please adjust quality.\n";
                 need_render = false;
                 continue;
             }
 
-            auto render_start = std::chrono::high_resolution_clock::now();
-
-            // Get camera from controller
             Camera cam = camera_controller.get_camera();
 
 #ifdef GPU_RENDERING
-            // Choose rendering path based on current renderer
             if (current_renderer == RendererType::GPU && gpu_renderer) {
-                // GPU rendering path
+                auto render_start = std::chrono::high_resolution_clock::now();
                 std::cout << "GPU rendering..." << std::endl;
 
-                // Resize GPU renderer if needed
                 gpu_renderer->resize(image_width, image_height);
 
-                // Render with GPU
                 std::vector<std::vector<Color>> gpu_framebuffer;
                 gpu_renderer->render(cam, gpu_framebuffer);
 
-                // Convert GPU framebuffer to SDL texture format
                 #pragma omp parallel for schedule(dynamic, 4)
                 for (int j = image_height - 1; j >= 0; --j) {
                     for (int i = 0; i < image_width; ++i) {
                         Color color = gpu_framebuffer[image_height - 1 - j][i];
-
-                        // Gamma correction and tone mapping
                         color.x = sqrt(color.x);
                         color.y = sqrt(color.y);
                         color.z = sqrt(color.z);
-
-                        // Convert to 0-255 range
                         float r = color.x > 1.0f ? 1.0f : (color.x < 0.0f ? 0.0f : color.x);
                         float g = color.y > 1.0f ? 1.0f : (color.y < 0.0f ? 0.0f : color.y);
                         float b = color.z > 1.0f ? 1.0f : (color.z < 0.0f ? 0.0f : color.z);
-
                         int ir = static_cast<int>(255.999 * r);
                         int ig = static_cast<int>(255.999 * g);
                         int ib = static_cast<int>(255.999 * b);
-
-                        // Store in framebuffer (SDL texture format: RGB)
                         size_t pixel_idx = ((image_height - 1 - j) * image_width + i) * 3;
-                        framebuffer[pixel_idx + 0] = ir;
-                        framebuffer[pixel_idx + 1] = ig;
-                        framebuffer[pixel_idx + 2] = ib;
+                        framebuffer[pixel_idx + 0] = static_cast<unsigned char>(ir);
+                        framebuffer[pixel_idx + 1] = static_cast<unsigned char>(ig);
+                        framebuffer[pixel_idx + 2] = static_cast<unsigned char>(ib);
                     }
                 }
 
                 std::cout << "GPU render complete" << std::endl;
+                blit_packed_rgb24_to_texture(texture, framebuffer.data(), image_width, image_height);
+                auto render_end = std::chrono::high_resolution_clock::now();
+                render_time = std::chrono::duration<double>(render_end - render_start).count();
+                work_done = true;
+                need_render = false;
             } else
 #endif
             {
-                // CPU rendering path with advanced features
-                if (ray_renderer.enable_progressive) {
-                    // TRUE PROGRESSIVE RENDERING: Start noisy, get progressively better
-                    static int progressive_frame_count = 0;
-                    static bool progressive_initialized = false;
+                cpu_render_hub.submit_job(cam, preset, image_width, image_height, enable_shadows, enable_denoiser);
+                need_render = false;
+            }
+        }
 
-                    // Reset when camera moves significantly
-                    static Point3 last_camera_pos(999, 999, 999);
-                    Point3 current_camera_pos = camera_controller.get_position();
+        {
+            bool cpu_followup = false;
+            double cpu_rt = 0.0;
+            if (cpu_render_hub.try_consume(framebuffer, texture, image_width, image_height, &cpu_rt, &cpu_followup)) {
+                render_time = cpu_rt;
+                need_render |= cpu_followup;
+                work_done = true;
+            }
+        }
 
-                    if (!progressive_initialized ||
-                        fabs(last_camera_pos.x - current_camera_pos.x) > 0.1f ||
-                        fabs(last_camera_pos.y - current_camera_pos.y) > 0.1f ||
-                        fabs(last_camera_pos.z - current_camera_pos.z) > 0.1f) {
-                        progressive_frame_count = 0;
-                        progressive_initialized = true;
-                        last_camera_pos = current_camera_pos;
-                    }
-
-                    // Calculate samples for this frame: 1, 2, 4, 8, 16... doubling each time
-                    int current_samples = 1 << std::min(10, progressive_frame_count);
-                    if (current_samples > preset.samples) current_samples = preset.samples;
-
-                    std::cout << "Progressive frame " << (progressive_frame_count + 1)
-                             << " using " << current_samples << " samples (target: " << preset.samples << ")" << std::endl;
-
-                    #pragma omp parallel for schedule(dynamic, 4)
-                    for (int j = image_height - 1; j >= 0; --j) {
-                        for (int i = 0; i < image_width; ++i) {
-                            Color pixel_color(0, 0, 0);
-
-                            // Render samples for this progressive level
-                            for (int s = 0; s < current_samples; ++s) {
-                                float u = (i + random_float()) / (image_width - 1);
-                                float v = (j + random_float()) / (image_height - 1);
-
-                                Ray r = cam.get_ray(u, v);
-                                Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
-                                pixel_color = pixel_color + sample_color;
-                            }
-
-                            // Average samples
-                            pixel_color = pixel_color / current_samples;
-
-                            // Gamma correction
-                            pixel_color.x = std::sqrt(pixel_color.x);
-                            pixel_color.y = std::sqrt(pixel_color.y);
-                            pixel_color.z = std::sqrt(pixel_color.z);
-
-                            // Write to framebuffer
-                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
-                        }
-                    }
-
-                    progressive_frame_count++;
-
-                    // Keep rendering if we haven't reached target quality yet
-                    if (current_samples < preset.samples && progressive_frame_count < 10) {
-                        need_render = true; // Trigger next progressive frame
-                    } else {
-                        std::cout << "Progressive rendering complete!" << std::endl;
-                    }
-
-                } else if (ray_renderer.enable_wavefront) {
-                    // WAVEFRONT RENDERING: Tiled cache-coherent rendering
-                    std::cout << "Wavefront rendering..." << std::endl;
-
-                    // Use wavefront rendering function
-                    std::vector<std::vector<Color>> wavefront_framebuffer(image_height, std::vector<Color>(image_width));
-                    ray_renderer.render_wavefront(cam, scene, wavefront_framebuffer, image_width, image_height, preset.samples);
-
-                    // Convert to SDL framebuffer format
-                    #pragma omp parallel for schedule(dynamic, 4)
-                    for (int j = image_height - 1; j >= 0; --j) {
-                        for (int i = 0; i < image_width; ++i) {
-                            Color pixel_color = wavefront_framebuffer[j][i];
-
-                            // Write to framebuffer
-                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
-                        }
-                    }
-
-                    std::cout << "Wavefront render complete" << std::endl;
-
-                } else if (ray_renderer.enable_simd_packets) {
-                    // SIMD PACKET RENDERING: AVX2 ray packet tracing
-                    std::cout << "SIMD packet rendering (8 rays × spheres)..." << std::endl;
-
-                    std::vector<std::vector<Color>> simd_framebuffer(image_height, std::vector<Color>(image_width));
-                    ray_renderer.render_simd_packets(cam, scene, simd_framebuffer, image_width, image_height, preset.samples);
-
-                    // Convert to SDL framebuffer format
-                    #pragma omp parallel for schedule(dynamic, 4)
-                    for (int j = image_height - 1; j >= 0; --j) {
-                        for (int i = 0; i < image_width; ++i) {
-                            Color pixel_color = simd_framebuffer[j][i];
-
-                            // Write to framebuffer
-                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
-                        }
-                    }
-
-                    std::cout << "SIMD packet render complete" << std::endl;
-
-                } else {
-                    // STANDARD RENDERING: Original path with optional adaptive sampling
-                    std::cout << "CPU rendering..." << std::endl;
-
-                    #pragma omp parallel for schedule(dynamic, 4)
-                for (int j = image_height - 1; j >= 0; --j) {
-                for (int i = 0; i < image_width; ++i) {
-                            Color pixel_color(0, 0, 0);
-                            float total_depth = 0.0f;
-                            Color pixel_normal(0, 0, 0);
-                            Color pixel_albedo(0, 0, 0);
-                            int shadow_rays = 0;
-                            int total_rays = 0;
-
-                            // Adaptive sampling: use fewer samples for preview-like quality
-                            int actual_samples = ray_renderer.enable_adaptive ?
-                                std::max(1, preset.samples / 2) : preset.samples; // Use half samples when adaptive is on
-
-                            for (int s = 0; s < actual_samples; ++s) {
-                                float u = (i + random_float()) / (image_width - 1);
-                                float v = (j + random_float()) / (image_height - 1);
-
-                                Ray r = cam.get_ray(u, v);
-                                Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
-                                pixel_color = pixel_color + sample_color;
-                                total_rays += ray_renderer.max_depth;
-
-                                // Get hit info for analysis (simple approximation)
-                                if (!ray_renderer.enable_adaptive) {
-                                    HitRecord rec;
-                                    if (scene.hit(r, 0.001f, 1000.0f, rec)) {
-                                        total_depth += rec.t;
-                                        pixel_normal = pixel_normal + Color(rec.normal.x, rec.normal.y, rec.normal.z);
-                                        if (rec.mat) {
-                                            pixel_albedo = pixel_albedo + rec.mat->albedo;
-                                        }
-
-                                        // Count shadow rays for this hit point
-                                        if (enable_shadows) {
-                                            for (const auto& light : scene.lights) {
-                                                Vec3 light_dir = light.position - rec.p;
-                                                Ray shadow_ray(rec.p, light_dir.normalized());
-                                                if (!scene.is_shadowed(shadow_ray, light_dir.length())) {
-                                                    shadow_rays++;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            float scale = 1.0f / actual_samples;
-                            pixel_color = pixel_color * scale;
-
-                            if (!ray_renderer.enable_adaptive) {
-                                pixel_normal = pixel_normal * scale;
-                                pixel_albedo = pixel_albedo * scale;
-                                total_depth *= scale;
-
-                                // Record analysis data (only for standard rendering)
-                                analysis.record_pixel(i, image_height - 1 - j, shadow_rays, total_rays, total_depth, pixel_normal, pixel_albedo);
-                            }
-
-                            // Apply analysis mode if active
-                            Color final_color = analysis.get_analysis_color(i, image_height - 1 - j, pixel_color);
-
-                            // Gamma correction
-                            final_color.x = std::sqrt(final_color.x);
-                            final_color.y = std::sqrt(final_color.y);
-                            final_color.z = std::sqrt(final_color.z);
-
-                            // Write to framebuffer
-                            int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-                            framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(final_color.x, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(final_color.y, 0.0f, 0.999f));
-                            framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(final_color.z, 0.0f, 0.999f));
-                        }
-                        }
-
-                        std::cout << "CPU render complete" << std::endl;
-                    }
-                }  // End of CPU/GPU rendering paths
-
-            // Update texture
-            void* pixels;
-            int pitch;
-            SDL_LockTexture(texture, NULL, &pixels, &pitch);
-            memcpy(pixels, framebuffer.data(), framebuffer.size());
-            SDL_UnlockTexture(texture);
-
-            // Calculate render time
-            auto render_end = std::chrono::high_resolution_clock::now();
-            double render_time = std::chrono::duration<double>(render_end - render_start).count();
-
-            // Calculate FPS
+        if (work_done) {
             frame_count++;
             auto now = std::chrono::high_resolution_clock::now();
             double elapsed = std::chrono::duration<double>(now - last_frame_time).count();
@@ -2223,16 +2567,12 @@ int main(int argc, char* argv[]) {
                 fps = frame_count / elapsed;
                 frame_count = 0;
                 last_frame_time = now;
-
-                // Print status
                 std::cout << "\rFPS: " << std::fixed << std::setprecision(1) << fps
                          << " | Render: " << std::setprecision(3) << render_time << "s"
                          << " | Quality: " << preset.name
                          << " | Cam: " << camera_controller.get_position()
                          << "     " << std::flush;
             }
-
-            need_render = false;
         }
 
         // Copy texture to renderer
@@ -2248,13 +2588,15 @@ int main(int argc, char* argv[]) {
 #ifdef GPU_RENDERING
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
-                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
+                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
+                                 ray_renderer.enable_wavefront,
                                  ray_renderer.enable_simd_packets, ray_renderer.enable_bvh,
                                  current_renderer);
 #else
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
-                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, ray_renderer.enable_wavefront,
+                                 ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
+                                 ray_renderer.enable_wavefront,
                                  enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
                                  ray_renderer.enable_bvh);
 #endif
@@ -2272,6 +2614,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
+    cpu_render_hub.stop();
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
