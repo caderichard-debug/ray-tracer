@@ -172,8 +172,10 @@
 #endif
 
 // Window dimensions
-const int WIDTH = 1280;
-const int HEIGHT = 720;
+// 640x360 keeps frames under ~1s on Intel integrated GPU (decent interactivity).
+// Bump to 1280x720 if you have a discrete GPU.
+const int WIDTH = 640;
+const int HEIGHT = 360;
 
 // Camera controller
 class CameraController {
@@ -549,14 +551,14 @@ uniform vec3 camera_vup;
 uniform float camera_vfov;
 
 // Scene uniforms
-uniform vec3 sphere_centers[16];
-uniform float sphere_radii[16];
-uniform vec3 sphere_colors[16];
-uniform int sphere_materials[16];
-uniform float sphere_gradient_scale[16];
-uniform float sphere_gradient_offset[16];
-uniform float sphere_roughness[16];     // PBR roughness (0=mirror, 1=matte)
-uniform float sphere_metallic[16];      // PBR metallic (0=dielectric, 1=metal)
+uniform vec3 sphere_centers[32];
+uniform float sphere_radii[32];
+uniform vec3 sphere_colors[32];
+uniform int sphere_materials[32];
+uniform float sphere_gradient_scale[32];
+uniform float sphere_gradient_offset[32];
+uniform float sphere_roughness[32];     // PBR roughness (0=mirror, 1=matte)
+uniform float sphere_metallic[32];      // PBR metallic (0=dielectric, 1=metal)
 uniform int num_spheres;
 
 uniform vec3 tri_v0[20];
@@ -2107,11 +2109,11 @@ int main(int argc, char* argv[]) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
     SDL_Window* window = SDL_CreateWindow(
-        "Working GPU Ray Tracer - GLSL 1.20",
+        "GPU Ray Tracer - 640x360 (resize with keyboard 1-4)",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         WIDTH, HEIGHT,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN
     );
 
     if (!window) {
@@ -2323,9 +2325,47 @@ int main(int argc, char* argv[]) {
     GLint contrast_loc = glGetUniformLocation(program, "contrast");
     GLint saturation_loc = glGetUniformLocation(program, "saturation");
 
-    // Rendering settings (matching CPU version)
+    // Cache per-element uniform locations once at startup.
+    // Calling glGetUniformLocation inside the render loop (per sphere/triangle) is
+    // extremely slow on Intel iGPU drivers — it was the main cause of 10s frame times.
+    const int MAX_SPHERES = 32;
+    const int MAX_TRIS    = 20;
+    GLint sp_center_loc[MAX_SPHERES], sp_radius_loc[MAX_SPHERES];
+    GLint sp_color_loc[MAX_SPHERES],  sp_mat_loc[MAX_SPHERES];
+    GLint sp_gscale_loc[MAX_SPHERES], sp_goffset_loc[MAX_SPHERES];
+    GLint sp_rough_loc[MAX_SPHERES],  sp_metal_loc[MAX_SPHERES];
+    for (int i = 0; i < MAX_SPHERES; i++) {
+        std::string idx = "[" + std::to_string(i) + "]";
+        sp_center_loc[i]  = glGetUniformLocation(program, ("sphere_centers"       + idx).c_str());
+        sp_radius_loc[i]  = glGetUniformLocation(program, ("sphere_radii"         + idx).c_str());
+        sp_color_loc[i]   = glGetUniformLocation(program, ("sphere_colors"        + idx).c_str());
+        sp_mat_loc[i]     = glGetUniformLocation(program, ("sphere_materials"     + idx).c_str());
+        sp_gscale_loc[i]  = glGetUniformLocation(program, ("sphere_gradient_scale"+ idx).c_str());
+        sp_goffset_loc[i] = glGetUniformLocation(program, ("sphere_gradient_offset"+idx).c_str());
+        sp_rough_loc[i]   = glGetUniformLocation(program, ("sphere_roughness"     + idx).c_str());
+        sp_metal_loc[i]   = glGetUniformLocation(program, ("sphere_metallic"      + idx).c_str());
+    }
+    GLint tr_v0_loc[MAX_TRIS], tr_v1_loc[MAX_TRIS], tr_v2_loc[MAX_TRIS];
+    GLint tr_norm_loc[MAX_TRIS], tr_color_loc[MAX_TRIS], tr_mat_loc[MAX_TRIS];
+    GLint tr_gscale_loc[MAX_TRIS], tr_goffset_loc[MAX_TRIS];
+    GLint tr_rough_loc[MAX_TRIS], tr_metal_loc[MAX_TRIS];
+    for (int i = 0; i < MAX_TRIS; i++) {
+        std::string idx = "[" + std::to_string(i) + "]";
+        tr_v0_loc[i]      = glGetUniformLocation(program, ("tri_v0"              + idx).c_str());
+        tr_v1_loc[i]      = glGetUniformLocation(program, ("tri_v1"              + idx).c_str());
+        tr_v2_loc[i]      = glGetUniformLocation(program, ("tri_v2"              + idx).c_str());
+        tr_norm_loc[i]    = glGetUniformLocation(program, ("tri_normals"         + idx).c_str());
+        tr_color_loc[i]   = glGetUniformLocation(program, ("tri_colors"          + idx).c_str());
+        tr_mat_loc[i]     = glGetUniformLocation(program, ("tri_materials"       + idx).c_str());
+        tr_gscale_loc[i]  = glGetUniformLocation(program, ("tri_gradient_scale"  + idx).c_str());
+        tr_goffset_loc[i] = glGetUniformLocation(program, ("tri_gradient_offset" + idx).c_str());
+        tr_rough_loc[i]   = glGetUniformLocation(program, ("tri_roughness"       + idx).c_str());
+        tr_metal_loc[i]   = glGetUniformLocation(program, ("tri_metallic"        + idx).c_str());
+    }
+
+    // Rendering settings
     bool enable_reflections = true;
-    int max_depth = 5;
+    int max_depth = 3;  // Keep low for interactive speed on integrated GPU (each bounce is expensive)
 
     // PBR lighting settings
     int lighting_mode = 0;  // Start with Phong for compatibility
@@ -2496,6 +2536,108 @@ int main(int argc, char* argv[]) {
 
     ControlsPanel controls_panel;
     controls_panel.init();
+
+    // Intel iGPU (and many others) does lazy shader compilation: the first
+    // glDrawArrays triggers the actual GPU compilation which can take 5-10 seconds.
+    // We run one warmup frame here so the main loop is smooth from frame 1.
+    // The window title warns the user while the compile runs.
+    SDL_SetWindowTitle(window, "GPU Ray Tracer - Compiling shader (one-time, ~5-10s)...");
+    std::cout << "\nWarming up GPU shader (one-time compilation, ~5-10 seconds)..." << std::endl;
+    {
+        glUseProgram(program);
+        glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
+        glUniform3f(camera_pos_loc, 0.0f, 2.0f, 15.0f);
+        glUniform3f(camera_lookat_loc, 0.0f, 0.0f, 0.0f);
+        glUniform3f(camera_vup_loc, 0.0f, 1.0f, 0.0f);
+        glUniform1f(camera_vfov_loc, 60.0f);
+        glUniform1i(num_spheres_loc, (int)spheres.size());
+        glUniform1i(num_triangles_loc, (int)triangles.size());
+        glUniform1i(enable_reflections_loc, 0);
+        glUniform1i(max_depth_loc, 0);
+        glUniform1i(lighting_mode_loc, 0);
+        glUniform1i(num_lights_loc, 1);
+        glUniform3f(light_positions_loc[0], 0.0f, 18.0f, 0.0f);
+        glUniform3f(light_colors_loc[0], 1.0f, 1.0f, 1.0f);
+        glUniform1f(light_intensities_loc[0], 1.0f);
+        glUniform1i(enable_soft_shadows_loc, 0);
+        glUniform1i(soft_shadow_samples_loc, 1);
+        glUniform1f(light_radius_loc, 1.0f);
+        glUniform1i(enable_ao_loc, 0);
+        glUniform1i(ao_samples_loc, 0);
+        glUniform1i(enable_gi_loc, 0);
+        glUniform1i(gi_samples_loc, 0);
+        glUniform1f(gi_intensity_loc, 0.0f);
+        glUniform1i(enable_ssr_loc, 0);
+        glUniform1i(ssr_samples_loc, 0);
+        glUniform1f(ssr_step_size_loc, 0.1f);
+        glUniform1f(ssr_roughness_cutoff_loc, 0.5f);
+        glUniform1i(enable_env_mapping_loc, 0);
+        glUniform1i(env_mip_levels_loc, 0);
+        glUniform1i(enable_ssao_loc, 0);
+        glUniform1i(ssao_samples_loc, 0);
+        glUniform1f(ssao_radius_loc, 0.5f);
+        glUniform1f(ssao_intensity_loc, 0.0f);
+        glUniform1i(enable_bloom_loc, 0);
+        glUniform1f(bloom_threshold_loc, 1.0f);
+        glUniform1f(bloom_intensity_loc, 0.0f);
+        glUniform1i(enable_vignette_loc, 0);
+        glUniform1f(vignette_intensity_loc, 0.0f);
+        glUniform1f(vignette_falloff_loc, 0.5f);
+        glUniform1i(enable_film_grain_loc, 0);
+        glUniform1f(grain_intensity_loc, 0.0f);
+        glUniform1f(grain_size_loc, 1.0f);
+        glUniform1i(enable_chromatic_aberration_loc, 0);
+        glUniform1f(chromatic_aberration_strength_loc, 0.0f);
+        glUniform1i(enable_dof_loc, 0);
+        glUniform1f(dof_focus_distance_loc, 5.0f);
+        glUniform1f(dof_aperture_loc, 0.0f);
+        glUniform1i(enable_motion_blur_loc, 0);
+        glUniform1f(motion_blur_strength_loc, 0.0f);
+        glUniform2f(motion_vector_loc, 0.0f, 0.0f);
+        glUniform1i(enable_adaptive_quality_loc, 0);
+        glUniform1f(quality_scale_loc, 1.0f);
+        glUniform1i(enable_lens_flares_loc, 0);
+        glUniform1f(lens_flare_intensity_loc, 0.0f);
+        glUniform2f(light_position_loc, 0.8f, 0.9f);
+        glUniform1i(enable_taa_loc, 0);
+        glUniform1f(taa_mix_factor_loc, 0.0f);
+        glUniform2f(camera_velocity_loc, 0.0f, 0.0f);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, history_texture);
+        glUniform1i(history_buffer_loc, 0);
+        glUniform1i(tone_mapping_op_loc, 0);
+        glUniform1f(exposure_loc, 1.0f);
+        glUniform1f(contrast_loc, 1.0f);
+        glUniform1f(saturation_loc, 1.0f);
+        for (size_t i = 0; i < spheres.size() && i < (size_t)MAX_SPHERES; i++) {
+            glUniform3f(sp_center_loc[i], spheres[i].center[0], spheres[i].center[1], spheres[i].center[2]);
+            glUniform1f(sp_radius_loc[i], spheres[i].radius);
+            glUniform3f(sp_color_loc[i],  spheres[i].color[0],  spheres[i].color[1],  spheres[i].color[2]);
+            glUniform1i(sp_mat_loc[i],    spheres[i].material);
+            glUniform1f(sp_gscale_loc[i], spheres[i].gradient_scale);
+            glUniform1f(sp_goffset_loc[i],spheres[i].gradient_offset);
+            glUniform1f(sp_rough_loc[i],  spheres[i].roughness);
+            glUniform1f(sp_metal_loc[i],  spheres[i].metallic);
+        }
+        for (size_t i = 0; i < triangles.size() && i < (size_t)MAX_TRIS; i++) {
+            glUniform3f(tr_v0_loc[i],   triangles[i].v0[0],    triangles[i].v0[1],    triangles[i].v0[2]);
+            glUniform3f(tr_v1_loc[i],   triangles[i].v1[0],    triangles[i].v1[1],    triangles[i].v1[2]);
+            glUniform3f(tr_v2_loc[i],   triangles[i].v2[0],    triangles[i].v2[1],    triangles[i].v2[2]);
+            glUniform3f(tr_norm_loc[i], triangles[i].normal[0], triangles[i].normal[1], triangles[i].normal[2]);
+            glUniform3f(tr_color_loc[i],triangles[i].color[0],  triangles[i].color[1],  triangles[i].color[2]);
+            glUniform1i(tr_mat_loc[i],  triangles[i].material);
+            glUniform1f(tr_gscale_loc[i], triangles[i].gradient_scale);
+            glUniform1f(tr_goffset_loc[i],triangles[i].gradient_offset);
+            glUniform1f(tr_rough_loc[i],  triangles[i].roughness);
+            glUniform1f(tr_metal_loc[i],  triangles[i].metallic);
+        }
+        glBindVertexArray(vao);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glFinish();  // block until compilation + draw complete
+        SDL_GL_SwapWindow(window);
+    }
+    SDL_SetWindowTitle(window, "GPU Ray Tracer - Ready");
+    std::cout << "Shader ready. Starting main loop." << std::endl;
 
     // Main loop
     bool running = true;
@@ -2942,82 +3084,30 @@ int main(int argc, char* argv[]) {
             glUniform1f(contrast_loc, contrast);
             glUniform1f(saturation_loc, saturation);
 
-            // Set sphere uniforms
-            for (size_t i = 0; i < spheres.size(); i++) {
-                std::string name = "sphere_centers[" + std::to_string(i) + "]";
-                GLint loc = glGetUniformLocation(program, name.c_str());
-                glUniform3f(loc, spheres[i].center[0], spheres[i].center[1], spheres[i].center[2]);
-
-                name = "sphere_radii[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, spheres[i].radius);
-
-                name = "sphere_colors[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform3f(loc, spheres[i].color[0], spheres[i].color[1], spheres[i].color[2]);
-
-                name = "sphere_materials[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1i(loc, spheres[i].material);
-
-                name = "sphere_gradient_scale[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, spheres[i].gradient_scale);
-
-                name = "sphere_gradient_offset[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, spheres[i].gradient_offset);
-
-                name = "sphere_roughness[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, spheres[i].roughness);
-
-                name = "sphere_metallic[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, spheres[i].metallic);
+            // Upload sphere uniforms using pre-cached locations
+            for (size_t i = 0; i < spheres.size() && i < (size_t)MAX_SPHERES; i++) {
+                glUniform3f(sp_center_loc[i],  spheres[i].center[0], spheres[i].center[1], spheres[i].center[2]);
+                glUniform1f(sp_radius_loc[i],  spheres[i].radius);
+                glUniform3f(sp_color_loc[i],   spheres[i].color[0],  spheres[i].color[1],  spheres[i].color[2]);
+                glUniform1i(sp_mat_loc[i],     spheres[i].material);
+                glUniform1f(sp_gscale_loc[i],  spheres[i].gradient_scale);
+                glUniform1f(sp_goffset_loc[i], spheres[i].gradient_offset);
+                glUniform1f(sp_rough_loc[i],   spheres[i].roughness);
+                glUniform1f(sp_metal_loc[i],   spheres[i].metallic);
             }
 
-            // Set triangle uniforms
-            for (size_t i = 0; i < triangles.size(); i++) {
-                std::string name = "tri_v0[" + std::to_string(i) + "]";
-                GLint loc = glGetUniformLocation(program, name.c_str());
-                glUniform3f(loc, triangles[i].v0[0], triangles[i].v0[1], triangles[i].v0[2]);
-
-                name = "tri_v1[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform3f(loc, triangles[i].v1[0], triangles[i].v1[1], triangles[i].v1[2]);
-
-                name = "tri_v2[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform3f(loc, triangles[i].v2[0], triangles[i].v2[1], triangles[i].v2[2]);
-
-                name = "tri_normals[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform3f(loc, triangles[i].normal[0], triangles[i].normal[1], triangles[i].normal[2]);
-
-                name = "tri_colors[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform3f(loc, triangles[i].color[0], triangles[i].color[1], triangles[i].color[2]);
-
-                name = "tri_materials[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1i(loc, triangles[i].material);
-
-                name = "tri_gradient_scale[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, triangles[i].gradient_scale);
-
-                name = "tri_gradient_offset[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, triangles[i].gradient_offset);
-
-                name = "tri_roughness[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, triangles[i].roughness);
-
-                name = "tri_metallic[" + std::to_string(i) + "]";
-                loc = glGetUniformLocation(program, name.c_str());
-                glUniform1f(loc, triangles[i].metallic);
+            // Upload triangle uniforms using pre-cached locations
+            for (size_t i = 0; i < triangles.size() && i < (size_t)MAX_TRIS; i++) {
+                glUniform3f(tr_v0_loc[i],      triangles[i].v0[0],     triangles[i].v0[1],     triangles[i].v0[2]);
+                glUniform3f(tr_v1_loc[i],      triangles[i].v1[0],     triangles[i].v1[1],     triangles[i].v1[2]);
+                glUniform3f(tr_v2_loc[i],      triangles[i].v2[0],     triangles[i].v2[1],     triangles[i].v2[2]);
+                glUniform3f(tr_norm_loc[i],    triangles[i].normal[0],  triangles[i].normal[1],  triangles[i].normal[2]);
+                glUniform3f(tr_color_loc[i],   triangles[i].color[0],   triangles[i].color[1],   triangles[i].color[2]);
+                glUniform1i(tr_mat_loc[i],     triangles[i].material);
+                glUniform1f(tr_gscale_loc[i],  triangles[i].gradient_scale);
+                glUniform1f(tr_goffset_loc[i], triangles[i].gradient_offset);
+                glUniform1f(tr_rough_loc[i],   triangles[i].roughness);
+                glUniform1f(tr_metal_loc[i],   triangles[i].metallic);
             }
 
             // Render fullscreen quad
@@ -3101,7 +3191,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            need_render = false;
+            need_render = true;  // Render continuously — the GPU shader is fast once compiled
         }
     }
 
