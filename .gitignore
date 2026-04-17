@@ -20,3 +20,6 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Benchmark raw logs (keep benchmark_results/README.md and summaries/)
+benchmark_results/runs/*.log

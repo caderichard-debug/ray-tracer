@@ -330,7 +330,7 @@ make compare
 ray-tracer/
 ├── README.md              # This file
 ├── Makefile               # Build system
-├── CLAUDE.md              # Project context for AI assistants
+├── LLM_CONTEXT.md         # Project context for AI assistants (claude.md → symlink)
 ├── INTERACTIVE_GUIDE.md   # Interactive mode guide
 ├── CHANGELOG.md           # Development history
 ├── docs/                  # Comprehensive documentation
@@ -379,9 +379,13 @@ make runa              # Build and run ASCII terminal
 
 ### Performance Comparison
 ```bash
-make benchmark         # Benchmark CPU feature combinations
-make benchmark-cpu-gpu  # Compare CPU vs GPU performance
+make bench-cpu-modes   # Headless Cornell-box: scalar vs SIMD vs wavefront (see docs/benchmarking.md)
+./benchmark_simd_wavefront.sh  # Build bench + run + log under benchmark_results/runs/
+make benchmark         # Benchmark CPU feature combinations (writes benchmark_results/runs/)
+make benchmark-cpu-gpu  # Compare CPU vs GPU performance (writes benchmark_results/runs/)
 ```
+
+See **[docs/benchmarking.md](docs/benchmarking.md)** for where to store logs and how to write **`benchmark_results/summaries/`** tables.
 
 ### Utilities
 ```bash
@@ -436,6 +440,7 @@ Comprehensive documentation is available in the [docs/](docs/) folder:
 - **[GPU Improvement Roadmap](docs/GPU_IMPROVEMENT_ROADMAP.md)** - Future GPU improvements and features 🚀
 
 ### CPU Rendering
+- **[Benchmarking guide](docs/benchmarking.md)** - How to run benchmarks and use **`benchmark_results/`**
 - **[CPU Performance Results](docs/cpu-performance-results.md)** - Detailed benchmarks
 - **[Performance Optimization Plan](docs/cpu-performance-optimization-plan.md)** - Optimization strategies
 

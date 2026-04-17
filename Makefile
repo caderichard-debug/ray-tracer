@@ -535,96 +535,96 @@ benchmark:
 	@echo "  CPU RAY TRACER PERFORMANCE BENCHMARK"
 	@echo "=========================================="
 	@echo ""
-	@mkdir -p benchmark_results
-	@echo "# CPU Performance Benchmark - Full Optimization Stack" > benchmark_results/cpu_performance.log
-	@echo "" >> benchmark_results/cpu_performance.log
+	@mkdir -p benchmark_results/runs
+	@echo "# CPU Performance Benchmark - Full Optimization Stack" > benchmark_results/runs/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# Baseline (scalar, single-threaded, no optimizations)
 	@echo "Testing: Baseline (scalar, 1 thread, no opts)..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=0 ENABLE_AVX=0 ENABLE_SHADOW_CULLING=0 ENABLE_FAST_RNG=0 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## Baseline (scalar, 1 thread, no optimizations)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## Baseline (scalar, 1 thread, no optimizations)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ Baseline complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# AVX only
 	@echo "Testing: AVX SIMD only..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=0 ENABLE_AVX=1 ENABLE_SHADOW_CULLING=0 ENABLE_FAST_RNG=0 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## AVX SIMD (4-6x speedup)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## AVX SIMD (4-6x speedup)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ AVX complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# OpenMP only
 	@echo "Testing: OpenMP (4 cores)..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=1 ENABLE_PTHREADS=0 ENABLE_AVX=0 ENABLE_SHADOW_CULLING=0 ENABLE_FAST_RNG=0 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## OpenMP (14-20x speedup)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## OpenMP (14-20x speedup)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ OpenMP complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# Pthreads only
 	@echo "Testing: Pthreads (4 cores)..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=0 ENABLE_PTHREADS=1 ENABLE_AVX=0 ENABLE_SHADOW_CULLING=0 ENABLE_FAST_RNG=0 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## Pthreads (12-18x speedup)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## Pthreads (12-18x speedup)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ Pthreads complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# AVX + OpenMP
 	@echo "Testing: AVX + OpenMP..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=1 ENABLE_AVX=1 ENABLE_SHADOW_CULLING=0 ENABLE_FAST_RNG=0 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## AVX + OpenMP (14-20x speedup)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## AVX + OpenMP (14-20x speedup)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ AVX + OpenMP complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# Phase 1 optimizations (culling + fast RNG)
 	@echo "Testing: Phase 1 optimizations (culling + fast RNG)..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=1 ENABLE_AVX=1 ENABLE_SHADOW_CULLING=1 ENABLE_FAST_RNG=1 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## Phase 1 Optimizations (+11.1%)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## Phase 1 Optimizations (+11.1%)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ Phase 1 complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# Loop unrolling
 	@echo "Testing: Loop unrolling..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=1 ENABLE_AVX=1 ENABLE_SHADOW_CULLING=1 ENABLE_FAST_RNG=1 ENABLE_LOOP_UNROLL=1 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## Loop Unrolling (+3-5%)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## Loop Unrolling (+3-5%)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ Loop Unrolling complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# Progressive
 	@echo "Testing: Progressive rendering..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=1 ENABLE_AVX=1 ENABLE_SHADOW_CULLING=1 ENABLE_FAST_RNG=1 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=1 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## Progressive (3.164x speedup)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## Progressive (3.164x speedup)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ Progressive complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# Adaptive
 	@echo "Testing: Adaptive sampling..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=1 ENABLE_AVX=1 ENABLE_SHADOW_CULLING=1 ENABLE_FAST_RNG=1 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=1 ENABLE_WAVEFRONT=0 batch-cpu > /dev/null 2>&1
-	@echo "## Adaptive (1.702x speedup)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## Adaptive (1.702x speedup)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ Adaptive complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@# Wavefront
 	@echo "Testing: Wavefront rendering..."
 	@$(MAKE) --no-print-directory ENABLE_OPENMP=1 ENABLE_AVX=1 ENABLE_SHADOW_CULLING=1 ENABLE_FAST_RNG=1 ENABLE_LOOP_UNROLL=0 ENABLE_PROGRESSIVE=0 ENABLE_ADAPTIVE=0 ENABLE_WAVEFRONT=1 batch-cpu > /dev/null 2>&1
-	@echo "## Wavefront (1.358x speedup)" >> benchmark_results/cpu_performance.log
-	@./raytracer > /dev/null 2>> benchmark_results/cpu_performance.log
+	@echo "## Wavefront (1.358x speedup)" >> benchmark_results/runs/cpu_performance.log
+	@./raytracer > /dev/null 2>> benchmark_results/runs/cpu_performance.log
 	@echo "✓ Wavefront complete"
-	@echo "" >> benchmark_results/cpu_performance.log
+	@echo "" >> benchmark_results/runs/cpu_performance.log
 	@#
 	@echo "=========================================="
 	@echo "  BENCHMARK COMPLETE"
 	@echo "=========================================="
 	@echo ""
-	@echo "Results: benchmark_results/cpu_performance.log"
-	@cat benchmark_results/cpu_performance.log
+	@echo "Results: benchmark_results/runs/cpu_performance.log (see benchmark_results/README.md)"
+	@cat benchmark_results/runs/cpu_performance.log
 
 # CPU vs GPU comparison
 .PHONY: benchmark-cpu-gpu
@@ -633,32 +633,32 @@ benchmark-cpu-gpu:
 	@echo "  CPU vs GPU PERFORMANCE COMPARISON"
 	@echo "=========================================="
 	@echo ""
-	@mkdir -p benchmark_results
-	@echo "# CPU vs GPU Benchmark" > benchmark_results/cpu_vs_gpu.log
-	@echo "" >> benchmark_results/cpu_vs_gpu.log
+	@mkdir -p benchmark_results/runs
+	@echo "# CPU vs GPU Benchmark" > benchmark_results/runs/cpu_vs_gpu.log
+	@echo "" >> benchmark_results/runs/cpu_vs_gpu.log
 	@#
 	@# CPU benchmark
 	@echo "Testing: CPU batch rendering..."
 	@$(MAKE) --no-print-directory batch-cpu > /dev/null 2>&1
-	@echo "## CPU Rendering" >> benchmark_results/cpu_vs_gpu.log
-	@{ time ./raytracer > /dev/null; } 2>> benchmark_results/cpu_vs_gpu.log
+	@echo "## CPU Rendering" >> benchmark_results/runs/cpu_vs_gpu.log
+	@{ time ./raytracer > /dev/null; } 2>> benchmark_results/runs/cpu_vs_gpu.log
 	@echo "✓ CPU complete"
-	@echo "" >> benchmark_results/cpu_vs_gpu.log
+	@echo "" >> benchmark_results/runs/cpu_vs_gpu.log
 	@#
 	@# GPU benchmark
 	@echo "Testing: GPU batch rendering..."
 	@$(MAKE) --no-print-directory batch-gpu > /dev/null 2>&1
-	@echo "## GPU Rendering" >> benchmark_results/cpu_vs_gpu.log
-	@{ time ./raytracer_gpu > /dev/null; } 2>> benchmark_results/cpu_vs_gpu.log
+	@echo "## GPU Rendering" >> benchmark_results/runs/cpu_vs_gpu.log
+	@{ time ./raytracer_gpu > /dev/null; } 2>> benchmark_results/runs/cpu_vs_gpu.log
 	@echo "✓ GPU complete"
-	@echo "" >> benchmark_results/cpu_vs_gpu.log
+	@echo "" >> benchmark_results/runs/cpu_vs_gpu.log
 	@#
 	@echo "=========================================="
 	@echo "  COMPARISON COMPLETE"
 	@echo "=========================================="
 	@echo ""
-	@echo "Results: benchmark_results/cpu_vs_gpu.log"
-	@cat benchmark_results/cpu_vs_gpu.log
+	@echo "Results: benchmark_results/runs/cpu_vs_gpu.log (see benchmark_results/README.md)"
+	@cat benchmark_results/runs/cpu_vs_gpu.log
 
 # ============================================================================
 # UTILITY TARGETS
@@ -672,7 +672,7 @@ clean:
 	rm -f raytracer raytracer_gpu raytracer_ascii
 	rm -f raytracer_interactive_cpu raytracer_interactive_gpu
 	rm -f *.ppm *.png *.jpg
-	rm -rf benchmark_results
+	rm -rf benchmark_results/runs
 	@echo "✓ Clean complete"
 
 # Clean and rebuild
@@ -740,6 +740,8 @@ docs:
 	@echo ""
 	@echo "Technical Documentation:"
 	@echo "  docs/index.md                          - Main documentation index"
+	@echo "  docs/benchmarking.md                   - How to benchmark; benchmark_results/ layout"
+	@echo "  benchmark_results/README.md            - Centralized performance outputs"
 	@echo "  docs/cpu-performance-results.md        - CPU performance benchmarks"
 	@echo "  docs/cpu-performance-optimization-plan.md - Optimization strategies"
 	@echo "  docs/ASCII_RENDERER.md                 - ASCII mode documentation"

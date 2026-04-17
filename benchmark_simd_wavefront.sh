@@ -5,8 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-mkdir -p benchmark_results
-LOG="benchmark_results/simd_wavefront_scalar_$(date +%Y%m%d_%H%M%S).log"
+mkdir -p benchmark_results/runs
+LOG="benchmark_results/runs/simd_wavefront_scalar_$(date +%Y%m%d_%H%M%S).log"
 
 echo "Building bench_cpu_render_modes..." | tee "$LOG"
 make bench-cpu-modes 2>&1 | tee -a "$LOG"
