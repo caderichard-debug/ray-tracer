@@ -16,6 +16,8 @@
 #include "scene/cornell_box.h"
 #include "scene/gpu_demo.h"
 #include "scene/pbr_showcase.h"
+#include "scene/dof_showcase.h"
+#include "scene/fx_showcase.h"
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "material/material.h"
@@ -1453,62 +1455,10 @@ vec3 apply_color_grading(vec3 color) {
     return clamp(color, vec3(0.0), vec3(1.0));
 }
 
-// Phase 5: Depth of Field (simple radial blur simulation)
-// In a real ray tracer, this would use depth information
-// This version simulates DOF by blurring edges of the screen
-vec3 apply_depth_of_field(vec3 color, vec2 uv) {
-    if (!enable_dof || dof_aperture <= 0.0) {
-        return color;  // No DOF
-    }
-
-    // Calculate distance from center (focus point)
-    vec2 offset = uv - vec2(0.5);
-    float dist = length(offset);
-
-    // Calculate blur amount based on distance from focus point
-    float blur_amount = (dist - dof_focus_distance * 0.1) * dof_aperture;
-
-    if (blur_amount <= 0.0) {
-        return color;  // In focus
-    }
-
-    // Apply simple blur based on distance from center
-    float blur_strength = min(blur_amount * 0.5, 0.3);
-
-    // Mix with slightly blurred version (simulated by reducing contrast)
-    vec3 blurred = color * (1.0 - blur_strength * 0.5);
-    blurred += vec3(blur_strength * 0.1);  // Add brightness to simulate blur
-
-    return mix(color, blurred, min(blur_strength * 2.0, 1.0));
-}
-
-// Phase 5: Motion Blur (directional blur based on motion vector)
-vec3 apply_motion_blur(vec3 color, vec2 uv) {
-    if (!enable_motion_blur || motion_blur_strength <= 0.0) {
-        return color;  // No motion blur
-    }
-
-    float motion_length = length(motion_vector);
-    if (motion_length < 0.001) {
-        return color;  // No motion, no blur
-    }
-
-    // Apply directional blur along motion vector
-    vec2 motion_dir = normalize(motion_vector);
-    float blur_samples = 5.0;  // Number of blur samples
-    vec3 blurred_color = vec3(0.0);
-
-    for (float i = -blur_samples; i <= blur_samples; i += 1.0) {
-        float offset = (i / blur_samples) * motion_blur_strength * motion_length * 0.02;
-        vec2 sample_uv = uv + motion_dir * offset;
-
-        // Simple sample - in real implementation would sample framebuffer
-        vec3 sample_color = color;  // Placeholder
-        blurred_color += sample_color;
-    }
-
-    return blurred_color / (blur_samples * 2.0 + 1.0);
-}
+// DOF and motion blur are now handled in main() via multi-ray sampling.
+// These stubs are kept for API compatibility.
+vec3 apply_depth_of_field(vec3 color, vec2 uv) { return color; }
+vec3 apply_motion_blur(vec3 color, vec2 uv) { return color; }
 
 // Phase 5: Lens Flares (dramatic light effects)
 vec3 apply_lens_flares(vec3 color, vec2 uv) {
@@ -1546,91 +1496,33 @@ vec3 apply_lens_flares(vec3 color, vec2 uv) {
     return color + flare_color * lens_flare_intensity * 0.5;
 }
 
-// Phase 6: Temporal Anti-Aliasing (eliminates jagged edges)
-// Simplified version: Spatial anti-aliasing with neighborhood sampling
-vec3 apply_taa(vec3 color, vec2 uv) {
-    if (!enable_taa || taa_mix_factor <= 0.0) {
-        return color;  // No TAA
-    }
+// TAA is now handled in main() using the history_buffer texture sampler.
+// This stub is kept for API compatibility.
+vec3 apply_taa(vec3 color, vec2 uv) { return color; }
 
-    // Spatial anti-aliasing: Sample neighborhood and blend
-    // This is a simplified version - full TAA would use temporal history
-    vec3 accumulated_color = vec3(0.0);
-    int samples = 0;
-
-    // Sample in a small spiral pattern
-    float sample_radius = 0.002;  // Very small radius for sub-pixel AA
-    for (int i = 0; i < 4; i++) {
-        float angle = float(i) * 1.5708;  // 90 degree increments
-        vec2 offset = vec2(cos(angle), sin(angle)) * sample_radius;
-
-        // Sample current frame (neighborhood)
-        vec2 sample_uv = uv + offset;
-
-        // Boundary check
-        if (sample_uv.x >= 0.0 && sample_uv.x <= 1.0 && sample_uv.y >= 0.0 && sample_uv.y <= 1.0) {
-            // For now, just use the current color (would sample framebuffer in full implementation)
-            vec3 sample_color = color;  // Placeholder - would be texture2D(framebuffer, sample_uv)
-            accumulated_color += sample_color;
-            samples++;
-        }
-    }
-
-    if (samples > 0) {
-        vec3 aa_color = accumulated_color / float(samples);
-        // Blend between original and anti-aliased based on mix factor
-        color = mix(color, aa_color, taa_mix_factor * 0.5);
-    }
-
-    return color;
-}
-
-// Full Phase 4 post-processing pipeline
+// Full post-processing pipeline.
+// DOF, motion blur, chromatic aberration, and TAA are applied in main() before
+// this function, since they require re-tracing rays or reading the history texture.
 vec3 apply_post_processing(vec3 color, vec2 uv) {
-    // Phase 6: Apply TAA first (before other effects for best quality)
-    color = apply_taa(color, uv);
-
-    // Phase 5: Apply chromatic aberration (after TAA)
-    if (enable_chromatic_aberration) {
-        // Simple RGB separation based on screen position
-        vec2 offset = uv - vec2(0.5);
-        float dist = length(offset);
-        float strength = chromatic_aberration_strength * 0.01;
-
-        // Shift red channel outward, blue channel inward
-        float r_shift = dist * strength;
-        float b_shift = -dist * strength * 0.5;
-
-        // Apply subtle RGB shift
-        color.r = mix(color.r, color.r + r_shift * 0.1, min(1.0, dist * 2.0));
-        color.b = mix(color.b, color.b + b_shift * 0.1, min(1.0, dist * 2.0));
-    }
-
-    // Apply bloom (before tone mapping)
+    // Bloom (brightens highlights)
     color = apply_bloom(color);
 
-    // Apply tone mapping
+    // Tone mapping + exposure
     color = apply_tone_mapping(color);
 
-    // Apply color grading
+    // Color grading (contrast, saturation)
     color = apply_color_grading(color);
 
-    // Apply gamma correction
+    // Gamma correction
     color = gamma_correct(color);
 
-    // Phase 5: Apply depth of field (after gamma, before vignette)
-    color = apply_depth_of_field(color, uv);
-
-    // Phase 5: Apply motion blur (after DOF, before vignette)
-    color = apply_motion_blur(color, uv);
-
-    // Phase 5: Apply lens flares (after motion blur, before vignette)
+    // Lens flares (additive, after tone mapping so they don't blow out)
     color = apply_lens_flares(color, uv);
 
-    // Apply vignette
+    // Vignette
     color = apply_vignette(color, uv);
 
-    // Apply film grain
+    // Film grain
     color = apply_film_grain(color, uv);
 
     return clamp(color, vec3(0.0), vec3(1.0));
@@ -1838,34 +1730,99 @@ vec3 ray_color(vec3 origin, vec3 direction) {
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution;
 
-    // Camera from uniforms
+    // Build camera basis from uniforms
     vec3 origin = camera_pos;
-    vec3 lookat = camera_lookat;
-    vec3 vup = camera_vup;
-
-    vec3 w = normalize(origin - lookat);
-    vec3 u = normalize(cross(vup, w));
+    vec3 w = normalize(origin - camera_lookat);
+    vec3 u = normalize(cross(camera_vup, w));
     vec3 v = cross(w, u);
 
     float aspect_ratio = resolution.x / resolution.y;
-    float theta = camera_vfov * 0.0174533;
-    float h = tan(theta * 0.5);
+    float h = tan(camera_vfov * 0.0174533 * 0.5);
     float viewport_height = 2.0 * h;
-    float viewport_width = aspect_ratio * viewport_height;
-
+    float viewport_width  = aspect_ratio * viewport_height;
     vec3 horizontal = viewport_width * u;
-    vec3 vertical = viewport_height * v;
+    vec3 vertical   = viewport_height * v;
     vec3 lower_left_corner = origin - horizontal * 0.5 - vertical * 0.5 - w;
 
+    // Base ray direction for this pixel
     vec3 direction = lower_left_corner + uv.x * horizontal + uv.y * vertical - origin;
 
-    // Trace ray and get color
-    vec3 color = ray_color(origin, direction);
+    vec3 color;
 
-    // Apply Phase 4 tone mapping and post-processing
+    // --- Depth of Field ---
+    // Traces 5 rays from different lens positions; all converge at the focus plane.
+    if (enable_dof && dof_aperture > 0.001) {
+        vec3 focus_point = origin + normalize(direction) * dof_focus_distance;
+        float r = dof_aperture;
+        vec3 o1 = origin + u * r;
+        vec3 o2 = origin - u * r;
+        vec3 o3 = origin + v * r;
+        vec3 o4 = origin - v * r;
+        color  = ray_color(origin, direction);
+        color += ray_color(o1, normalize(focus_point - o1));
+        color += ray_color(o2, normalize(focus_point - o2));
+        color += ray_color(o3, normalize(focus_point - o3));
+        color += ray_color(o4, normalize(focus_point - o4));
+        color /= 5.0;
+    }
+    // --- Motion Blur ---
+    // Traces 5 rays with camera origin stepped along the motion vector,
+    // simulating exposure during camera movement.
+    else if (enable_motion_blur && motion_blur_strength > 0.001 && length(motion_vector) > 0.001) {
+        float str = motion_blur_strength * 0.25;
+        vec3 mv = vec3(motion_vector.x, 0.0, motion_vector.y) * str;
+        vec3 c = vec3(0.0);
+        vec3 o0 = origin - mv * 0.5;
+        vec3 o1 = origin - mv * 0.25;
+        vec3 o2 = origin;
+        vec3 o3 = origin + mv * 0.25;
+        vec3 o4 = origin + mv * 0.5;
+        c += ray_color(o0, lower_left_corner + uv.x*horizontal + uv.y*vertical - o0);
+        c += ray_color(o1, lower_left_corner + uv.x*horizontal + uv.y*vertical - o1);
+        c += ray_color(o2, direction);
+        c += ray_color(o3, lower_left_corner + uv.x*horizontal + uv.y*vertical - o3);
+        c += ray_color(o4, lower_left_corner + uv.x*horizontal + uv.y*vertical - o4);
+        color = c / 5.0;
+    }
+    else {
+        color = ray_color(origin, direction);
+    }
+
+    // --- Chromatic Aberration ---
+    // Re-traces the red and blue channels with slightly offset ray directions,
+    // simulating lens dispersion (different wavelengths bend differently).
+    if (enable_chromatic_aberration && chromatic_aberration_strength > 0.001) {
+        vec2 uv_offset = uv - vec2(0.5);
+        float dist = length(uv_offset);
+        if (dist > 0.01) {
+            float str = chromatic_aberration_strength * 0.006 * dist;
+            vec2 shift = normalize(uv_offset) * str;
+
+            vec2 uv_r = clamp(uv + shift, vec2(0.001), vec2(0.999));
+            vec3 dir_r = lower_left_corner + uv_r.x*horizontal + uv_r.y*vertical - origin;
+            color.r = ray_color(origin, dir_r).r;
+
+            vec2 uv_b = clamp(uv - shift, vec2(0.001), vec2(0.999));
+            vec3 dir_b = lower_left_corner + uv_b.x*horizontal + uv_b.y*vertical - origin;
+            color.b = ray_color(origin, dir_b).b;
+        }
+    }
+
+    // --- Temporal Anti-Aliasing ---
+    // Blends the current frame with the history buffer to smooth aliasing over time.
+    // The history texture is updated by the CPU after each frame.
+    if (enable_taa && taa_mix_factor > 0.0) {
+        vec3 history = texture2D(history_buffer, uv).rgb;
+        // Clamp history to neighborhood of current to avoid ghosting
+        vec3 color_min = color * 0.85;
+        vec3 color_max = color * 1.15 + vec3(0.05);
+        history = clamp(history, color_min, color_max);
+        color = mix(color, history, taa_mix_factor);
+    }
+
+    // Post-processing: bloom, tone mapping, color grading, gamma, vignette, grain
     color = color_pipeline(color, uv);
 
-    // Output color
     gl_FragColor = vec4(color, 1.0);
 }
 )";
@@ -1959,6 +1916,12 @@ void setup_scene_data(
     } else if (scene_name == "pbr_showcase") {
         setup_pbr_showcase_scene(scene);
         std::cout << "✓ PBR Showcase scene loaded" << std::endl;
+    } else if (scene_name == "dof_showcase") {
+        setup_dof_showcase_scene(scene);
+        std::cout << "✓ DOF Showcase scene loaded" << std::endl;
+    } else if (scene_name == "fx_showcase") {
+        setup_fx_showcase_scene(scene);
+        std::cout << "✓ FX Showcase scene loaded" << std::endl;
     } else if (scene_name == "cornell_box") {
         setup_cornell_box_scene(scene);
         std::cout << "✓ Cornell Box scene loaded" << std::endl;
@@ -2341,6 +2304,19 @@ int main(int argc, char* argv[]) {
     GLint enable_taa_loc = glGetUniformLocation(program, "enable_taa");
     GLint taa_mix_factor_loc = glGetUniformLocation(program, "taa_mix_factor");
     GLint camera_velocity_loc = glGetUniformLocation(program, "camera_velocity");
+    GLint history_buffer_loc = glGetUniformLocation(program, "history_buffer");
+
+    // Create history texture for TAA (ping-pong via glCopyTexImage2D)
+    GLuint history_texture = 0;
+    glGenTextures(1, &history_texture);
+    glBindTexture(GL_TEXTURE_2D, history_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, WIDTH, HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    bool taa_history_ready = false;
 
     GLint tone_mapping_op_loc = glGetUniformLocation(program, "tone_mapping_op");
     GLint exposure_loc = glGetUniformLocation(program, "exposure");
@@ -2954,8 +2930,12 @@ int main(int argc, char* argv[]) {
 
             // Phase 6: Temporal Anti-Aliasing
             glUniform1i(enable_taa_loc, enable_taa ? 1 : 0);
-            glUniform1f(taa_mix_factor_loc, taa_mix_factor);
+            glUniform1f(taa_mix_factor_loc, (enable_taa && taa_history_ready) ? taa_mix_factor : 0.0f);
             glUniform2f(camera_velocity_loc, camera_velocity_x, camera_velocity_y);
+            // Bind history texture to texture unit 0
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, history_texture);
+            glUniform1i(history_buffer_loc, 0);
 
             glUniform1i(tone_mapping_op_loc, tone_mapping_op);
             glUniform1f(exposure_loc, exposure);
@@ -3053,6 +3033,15 @@ int main(int argc, char* argv[]) {
 
             SDL_GL_SwapWindow(window);
 
+            // Capture this frame into the TAA history texture.
+            // glCopyTexImage2D reads from the front buffer after swap.
+            if (enable_taa) {
+                glBindTexture(GL_TEXTURE_2D, history_texture);
+                glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, WIDTH, HEIGHT, 0);
+                glBindTexture(GL_TEXTURE_2D, 0);
+                taa_history_ready = true;
+            }
+
             // Calculate FPS
             frame_count++;
             auto now = std::chrono::high_resolution_clock::now();
@@ -3119,6 +3108,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\n=== Exiting ===" << std::endl;
 
     // Cleanup
+    glDeleteTextures(1, &history_texture);
     glDeleteProgram(program);
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
