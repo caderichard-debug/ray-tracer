@@ -365,7 +365,7 @@ private:
         SDL_Rect rect;
         std::string label;
         int value;
-        int category; // 0: quality, 1: samples, 2: depth, 3: shadows, 4: reflections, 5: resolution, 6: debug
+        int category; // 0: quality, 1: samples, 2: depth, 3: shadows, 4: reflections, 5: resolution, 6: debug, 17: min prog display passes
     };
     std::vector<Button> buttons;
     int panel_x, panel_y;
@@ -425,10 +425,20 @@ public:
         return true;
     }
 
+    bool point_is_over_panel(int mouse_x, int mouse_y, int window_width, int window_height) const {
+        int panel_width = std::min(360, std::max(1, window_width - 20));
+        int panel_height = std::max(1, window_height - 20);
+        int px = window_width - panel_width - 10;
+        int py = 10;
+        return mouse_x >= px && mouse_x < px + panel_width &&
+               mouse_y >= py && mouse_y < py + panel_height;
+    }
+
     void render(SDL_Renderer* renderer, int window_width, int window_height,
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
                 const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
                 bool enable_progressive = false, bool enable_adaptive = false, bool enable_denoiser = false,
+                int min_progressive_display_passes = 1,
                 bool enable_wavefront = false,
                 bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false,
                 bool enable_simd_packets = false, bool enable_bvh = false
@@ -436,18 +446,17 @@ public:
                 , RendererType current_renderer = RendererType::CPU
 #endif
     ) {
-        (void)window_height;  // Only used to calculate aspect ratio
         if (!initialized || !font || !title_font) return;
 
-        // Panel positioned in top-right corner, scales with window size
-        int panel_width = std::min(360, window_width - 20);
-        int panel_height = std::min(600, window_height - 20);  // Fixed visible height
+        // Sidebar: fixed top/right margins; full window height minus vertical margin
+        int panel_width = std::min(360, std::max(1, window_width - 20));
+        int panel_height = std::max(1, window_height - 20);
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
 
-        // Create a larger surface for scrollable content
-        int content_surface_height = 1200;  // Maximum content height
+        // Scrollable document surface (tall enough for all controls when the panel is very tall)
+        int content_surface_height = std::max(2400, panel_height + 2000);
         SDL_Surface* content_surface = SDL_CreateRGBSurface(0, panel_width, content_surface_height, 32, 0, 0, 0, 0);
         if (!content_surface) return;
 
@@ -967,6 +976,24 @@ public:
 
         y_offset += 35;
 
+        // Progressive: minimum accumulated passes before publishing a frame (CPU worker).
+        label_surface = TTF_RenderText_Blended(font, "Prog display min:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        int min_disp_values[] = {1, 2, 4, 8, 16, 32};
+        for (int v : min_disp_values) {
+            char label[12];
+            snprintf(label, sizeof(label), "%d", v);
+            bool is_active = (min_progressive_display_passes == v);
+            render_button(label, v, 17, is_active);
+        }
+        y_offset += 35;
+
         // Phase 2 Optimizations section
         label_surface = TTF_RenderText_Blended(font, "Phase 2 Optimizations:", title_color);
         if (label_surface) {
@@ -1273,6 +1300,8 @@ public:
         bool progressive_changed;
         bool adaptive_changed;
         bool denoiser_changed;
+        bool min_prog_display_changed;
+        int new_min_prog_display_passes;
         bool wavefront_changed;
         bool morton_changed;
         bool stratified_changed;
@@ -1290,7 +1319,8 @@ public:
                        shadows_changed(false), reflections_changed(false),
                        analysis_mode_changed(false), new_analysis_mode(0),
                        screenshot_requested(false), progressive_changed(false),
-                       adaptive_changed(false), denoiser_changed(false), wavefront_changed(false),
+                       adaptive_changed(false), denoiser_changed(false), min_prog_display_changed(false),
+                       new_min_prog_display_passes(1), wavefront_changed(false),
                        morton_changed(false), stratified_changed(false), frustum_changed(false),
                        simd_packets_changed(false), new_simd_packets(false),
                        bvh_changed(false), new_bvh(false),
@@ -1346,6 +1376,10 @@ public:
                         break;
                     case 16: // Post denoise toggle
                         result.denoiser_changed = true;
+                        break;
+                    case 17: // Min progressive passes before display
+                        result.min_prog_display_changed = true;
+                        result.new_min_prog_display_passes = button.value;
                         break;
                     case 10: // Wavefront toggle
                         result.wavefront_changed = true;
@@ -1508,11 +1542,17 @@ static bool progressive_view_differs(const Camera& a, const Camera& b) {
     return false;
 }
 
+struct CpuTracePassResult {
+    bool schedule_next;
+    int progressive_pass_count;
+};
+
 // Full CPU ray-tracing pass (runs on background thread). Progressive accumulation resets when the view changes.
-static bool execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const QualityPreset& preset, int image_width,
-                                          int image_height, Renderer& ray_renderer, RenderAnalysis& analysis,
-                                          bool enable_shadows, std::vector<unsigned char>& framebuffer) {
+static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const QualityPreset& preset, int image_width,
+                                                       int image_height, Renderer& ray_renderer, RenderAnalysis& analysis,
+                                                       bool enable_shadows, std::vector<unsigned char>& framebuffer) {
     bool schedule_next_render = false;
+    int progressive_pass_count = 0;
 
     static Camera progressive_cam_anchor;
     static bool progressive_cam_anchor_valid = false;
@@ -1560,6 +1600,7 @@ static bool execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const Quality
         if (wf_progressive_passes < preset.samples) {
             schedule_next_render = true;
         }
+        progressive_pass_count = wf_progressive_passes;
         progressive_cam_anchor = cam;
         progressive_cam_anchor_valid = true;
         progressive_last_max_depth = ray_renderer.max_depth;
@@ -1598,6 +1639,7 @@ static bool execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const Quality
         if (simd_prog_passes < preset.samples) {
             schedule_next_render = true;
         }
+        progressive_pass_count = simd_prog_passes;
         progressive_cam_anchor = cam;
         progressive_cam_anchor_valid = true;
         progressive_last_max_depth = ray_renderer.max_depth;
@@ -1646,6 +1688,7 @@ static bool execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const Quality
         if (scalar_prog_passes < preset.samples) {
             schedule_next_render = true;
         }
+        progressive_pass_count = scalar_prog_passes;
         progressive_cam_anchor = cam;
         progressive_cam_anchor_valid = true;
         progressive_last_max_depth = ray_renderer.max_depth;
@@ -1745,7 +1788,7 @@ static bool execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const Quality
         }
     }
 
-    return schedule_next_render;
+    return {schedule_next_render, progressive_pass_count};
 }
 
 struct CpuRenderThreadHub {
@@ -1760,6 +1803,7 @@ struct CpuRenderThreadHub {
     int job_height = 0;
     bool job_enable_shadows = true;
     bool job_denoise = false;
+    int job_min_passes_to_display = 1;
 
     Scene* scene_ptr = nullptr;
     Renderer* renderer_ptr = nullptr;
@@ -1770,6 +1814,7 @@ struct CpuRenderThreadHub {
     std::vector<unsigned char> result_rgb;
     double result_seconds = 0.0;
     bool result_schedule_next = false;
+    std::atomic<bool> frameless_followup_requested{false};
 
     std::thread worker;
 
@@ -1806,24 +1851,38 @@ struct CpuRenderThreadHub {
             std::vector<unsigned char> fb(static_cast<size_t>(iw) * static_cast<size_t>(ih) * 3u);
             auto t0 = std::chrono::high_resolution_clock::now();
 
-            bool sched = execute_cpu_ray_tracing_pass(*sc, cam, preset, iw, ih, *rr, *an, es, fb);
-            if (denoise) {
-                apply_rgb24_edge_preserving_denoise(fb, iw, ih);
-            }
-            auto t1 = std::chrono::high_resolution_clock::now();
+            const CpuTracePassResult pass = execute_cpu_ray_tracing_pass(*sc, cam, preset, iw, ih, *rr, *an, es, fb);
+            const bool sched = pass.schedule_next;
+            const int prog_passes = pass.progressive_pass_count;
+            const int min_disp = std::max(1, job_min_passes_to_display);
+            const int sample_cap = std::max(1, preset.samples);
+            const int disp_threshold = std::min(min_disp, sample_cap);
+            const bool progressive_active = rr->enable_progressive && prog_passes > 0;
+            const bool suppress_display = progressive_active && prog_passes < disp_threshold;
 
-            {
-                std::lock_guard<std::mutex> lk(result_mutex);
-                result_rgb = std::move(fb);
-                result_seconds = std::chrono::duration<double>(t1 - t0).count();
-                result_schedule_next = sched;
-                result_ready = true;
+            if (suppress_display) {
+                if (sched) {
+                    frameless_followup_requested.store(true, std::memory_order_release);
+                }
+            } else {
+                if (denoise) {
+                    apply_rgb24_edge_preserving_denoise(fb, iw, ih);
+                }
+                auto t1 = std::chrono::high_resolution_clock::now();
+
+                {
+                    std::lock_guard<std::mutex> lk(result_mutex);
+                    result_rgb = std::move(fb);
+                    result_seconds = std::chrono::duration<double>(t1 - t0).count();
+                    result_schedule_next = sched;
+                    result_ready = true;
+                }
             }
         }
     }
 
     void submit_job(const Camera& cam, const QualityPreset& preset_in, int iw, int ih, bool enable_shadows,
-                      bool denoise_after_trace) {
+                      bool denoise_after_trace, int min_passes_to_display) {
         std::lock_guard<std::mutex> lk(job_mutex);
         job_cam = cam;
         job_preset = preset_in;
@@ -1831,6 +1890,7 @@ struct CpuRenderThreadHub {
         job_height = ih;
         job_enable_shadows = enable_shadows;
         job_denoise = denoise_after_trace;
+        job_min_passes_to_display = std::max(1, min_passes_to_display);
         job_pending = true;
         job_cv.notify_one();
     }
@@ -1839,13 +1899,25 @@ struct CpuRenderThreadHub {
     bool try_consume(std::vector<unsigned char>& framebuffer, SDL_Texture* texture, int tex_width, int tex_height,
                      double* out_seconds, bool* schedule_next_out) {
         std::lock_guard<std::mutex> lk(result_mutex);
+        const bool orphan_followup =
+            frameless_followup_requested.exchange(false, std::memory_order_acq_rel);
         if (!result_ready) {
+            *schedule_next_out = orphan_followup;
+            return false;
+        }
+        const size_t expected = static_cast<size_t>(tex_width) * static_cast<size_t>(tex_height) * 3u;
+        if (result_rgb.size() != expected) {
+            // Stale frame from before a resolution change (or hub bug) — do not swap/blit.
+            const bool pending_followup = result_schedule_next;
+            result_rgb.clear();
+            result_ready = false;
+            *schedule_next_out = orphan_followup || pending_followup;
             return false;
         }
         framebuffer.swap(result_rgb);
         result_ready = false;
         *out_seconds = result_seconds;
-        *schedule_next_out = result_schedule_next;
+        *schedule_next_out = result_schedule_next || orphan_followup;
         blit_packed_rgb24_to_texture(texture, framebuffer.data(), tex_width, tex_height);
         return true;
     }
@@ -1854,6 +1926,14 @@ struct CpuRenderThreadHub {
         scene_ptr = s;
         renderer_ptr = r;
         analysis_ptr = a;
+        // stop() leaves quit=true so the old worker exits; clear it before spawning again.
+        quit.store(false, std::memory_order_release);
+        frameless_followup_requested.store(false, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lk(result_mutex);
+            result_ready = false;
+            result_rgb.clear();
+        }
         worker = std::thread([this] { worker_loop(); });
     }
 
@@ -1932,6 +2012,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+#if SDL_VERSION_ATLEAST(2, 0, 22)
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+#endif
+
     // Initial quality level
     int current_quality = 0; // Start at "Large Window (Default)" quality
     QualityPreset preset = quality_levels[current_quality];
@@ -1943,6 +2027,7 @@ int main(int argc, char* argv[]) {
     bool enable_stratified = false;
     bool enable_frustum = false;
     bool enable_denoiser = false;
+    int min_progressive_display_passes = 1;
 
     // Create window
     std::string window_title = "Real-time Ray Tracer - CPU (OpenMP)";
@@ -2010,6 +2095,10 @@ int main(int argc, char* argv[]) {
     }
 
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+
+    // While the render resolution changes, we keep the last good frame here and stretch it to the
+    // window until the worker produces the first frame at the new size (seamless transition).
+    SDL_Texture* present_hold_texture = nullptr;
 
     // Setup scene - use shared Cornell Box scene
     Scene scene;
@@ -2227,14 +2316,15 @@ int main(int argc, char* argv[]) {
                 }
             } else if (event.type == SDL_MOUSEWHEEL) {
                 // Handle mouse wheel scrolling for controls panel
-                if (show_controls) {
+                if (show_controls && SDL_GetRelativeMouseMode() != SDL_TRUE) {
                     int scroll_delta = event.wheel.y * 30;  // Scroll 30 pixels per wheel click
                     controls_panel.scroll(scroll_delta);
                 }
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
-                    // Check if clicking on controls panel
-                    if (show_controls) {
+                    const bool mouse_look = (SDL_GetRelativeMouseMode() == SDL_TRUE);
+                    // Check if clicking on controls panel (ignore panel toggles while mouselook is active)
+                    if (show_controls && !mouse_look) {
                         auto click_result = controls_panel.handle_click(event.button.x, event.button.y);
                         if (click_result.quality_changed) {
                             current_quality = click_result.new_quality;
@@ -2267,12 +2357,11 @@ int main(int argc, char* argv[]) {
                                 need_render = true;
                             }
                         } else if (click_result.depth_changed) {
+                            // Only update max_depth in place — do not stop/join the worker thread here.
+                            // Reconstructing Renderer + hub restart blocked the UI until the current trace finished,
+                            // which feels like a freeze when traces are long (e.g. higher bounce limits).
                             preset.max_depth = click_result.new_depth;
-                            cpu_render_hub.stop();
-                            ray_renderer = Renderer(preset.max_depth);
-                            ray_renderer.enable_shadows = enable_shadows;
-                            ray_renderer.enable_reflections = enable_reflections;
-                            cpu_render_hub.start(&scene, &ray_renderer, &analysis);
+                            ray_renderer.max_depth = preset.max_depth;
                             std::cout << "Depth: " << preset.max_depth << std::endl;
                             need_render = true;
                         } else if (click_result.shadows_changed) {
@@ -2320,6 +2409,11 @@ int main(int argc, char* argv[]) {
                         } else if (click_result.denoiser_changed) {
                             enable_denoiser = !enable_denoiser;
                             std::cout << "Post denoise (CPU worker): " << (enable_denoiser ? "ON" : "OFF") << std::endl;
+                            need_render = true;
+                        } else if (click_result.min_prog_display_changed) {
+                            min_progressive_display_passes = click_result.new_min_prog_display_passes;
+                            std::cout << "Progressive min passes before display: " << min_progressive_display_passes
+                                      << std::endl;
                             need_render = true;
                         } else if (click_result.wavefront_changed) {
                             ray_renderer.enable_wavefront = !ray_renderer.enable_wavefront;
@@ -2400,10 +2494,21 @@ int main(int argc, char* argv[]) {
                                 std::cout << "Total pixels: " << (image_width * image_height) << "\n";
                                 std::cout << "========================\n";
 
-                                // Recreate texture with new dimensions (window size doesn't change)
-                                if (texture) {
-                                    SDL_DestroyTexture(texture);
+                                // Stop worker first so no in-flight frame can publish with the old
+                                // buffer size while we change texture dimensions (avoids one-frame garbage).
+                                cpu_render_hub.stop();
+
+                                // Park the current render in a hold texture (stretched to the window) until
+                                // the first new-resolution frame is ready — avoids a black / empty flash.
+                                if (present_hold_texture) {
+                                    SDL_DestroyTexture(present_hold_texture);
+                                    present_hold_texture = nullptr;
                                 }
+                                if (texture) {
+                                    present_hold_texture = texture;
+                                    texture = nullptr;
+                                }
+
                                 texture = SDL_CreateTexture(
                                     renderer,
                                     SDL_PIXELFORMAT_RGB24,
@@ -2426,8 +2531,6 @@ int main(int argc, char* argv[]) {
                                     return 1;
                                 }
 
-                                cpu_render_hub.stop();
-
                                 // Resize framebuffer for new resolution
                                 framebuffer.resize(image_width * image_height * 3, 0);
 
@@ -2435,17 +2538,26 @@ int main(int argc, char* argv[]) {
                                 analysis.resize(image_width, image_height);
 
                                 cpu_render_hub.start(&scene, &ray_renderer, &analysis);
+                                if (ray_renderer.enable_progressive) {
+                                    ray_renderer.initialize_progressive(image_width, image_height);
+                                }
                                 std::fill(framebuffer.begin(), framebuffer.end(), 0);
-                                blit_packed_rgb24_to_texture(texture, framebuffer.data(), image_width, image_height);
+                                // Defer blitting to the new texture until the worker has a frame (hold covers the gap).
 
                                 std::cout << "Resolution: " << image_width << "x" << image_height << "\n" << std::endl;
                                 need_render = true;
                             }
                         } else {
-                            // No button clicked, toggle mouse capture
-                            SDL_bool captured = SDL_GetRelativeMouseMode();
-                            SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
+                            int ww = 0, wh = 0;
+                            SDL_GetWindowSize(window, &ww, &wh);
+                            if (!controls_panel.point_is_over_panel(event.button.x, event.button.y, ww, wh)) {
+                                SDL_bool captured = SDL_GetRelativeMouseMode();
+                                SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
+                            }
                         }
+                    } else if (show_controls && mouse_look) {
+                        // Any click exits look mode (button x/y is unreliable for panel hit tests in relative mode).
+                        SDL_SetRelativeMouseMode(SDL_FALSE);
                     } else {
                         // Controls panel not visible, toggle mouse capture
                         SDL_bool captured = SDL_GetRelativeMouseMode();
@@ -2541,10 +2653,15 @@ int main(int argc, char* argv[]) {
                 render_time = std::chrono::duration<double>(render_end - render_start).count();
                 work_done = true;
                 need_render = false;
+                if (present_hold_texture) {
+                    SDL_DestroyTexture(present_hold_texture);
+                    present_hold_texture = nullptr;
+                }
             } else
 #endif
             {
-                cpu_render_hub.submit_job(cam, preset, image_width, image_height, enable_shadows, enable_denoiser);
+                cpu_render_hub.submit_job(cam, preset, image_width, image_height, enable_shadows, enable_denoiser,
+                                            min_progressive_display_passes);
                 need_render = false;
             }
         }
@@ -2554,8 +2671,14 @@ int main(int argc, char* argv[]) {
             double cpu_rt = 0.0;
             if (cpu_render_hub.try_consume(framebuffer, texture, image_width, image_height, &cpu_rt, &cpu_followup)) {
                 render_time = cpu_rt;
-                need_render |= cpu_followup;
                 work_done = true;
+                if (present_hold_texture) {
+                    SDL_DestroyTexture(present_hold_texture);
+                    present_hold_texture = nullptr;
+                }
+            }
+            if (cpu_followup) {
+                need_render = true;
             }
         }
 
@@ -2575,12 +2698,17 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Copy texture to renderer
+        // Copy texture to renderer (stretch last frame across the window while recomputing at a new resolution)
         SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, texture, NULL, NULL);
-
         int window_width, window_height;
         SDL_GetWindowSize(window, &window_width, &window_height);
+        if (present_hold_texture) {
+            SDL_Rect dst = {0, 0, window_width, window_height};
+            SDL_RenderCopy(renderer, present_hold_texture, nullptr, &dst);
+        } else if (texture) {
+            SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+        }
+
 
         // Render controls panel if active
         if (show_controls) {
@@ -2589,6 +2717,7 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
+                                 min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
                                  ray_renderer.enable_simd_packets, ray_renderer.enable_bvh,
                                  current_renderer);
@@ -2596,6 +2725,7 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
+                                 min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
                                  enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
                                  ray_renderer.enable_bvh);
@@ -2615,6 +2745,10 @@ int main(int argc, char* argv[]) {
 
     // Cleanup
     cpu_render_hub.stop();
+    if (present_hold_texture) {
+        SDL_DestroyTexture(present_hold_texture);
+        present_hold_texture = nullptr;
+    }
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
