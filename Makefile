@@ -22,6 +22,7 @@ OPENGL_INCLUDES = -I/usr/local/opt/glew/include
 # Source files
 BATCH_CPU_SRC = src/main.cpp src/renderer/renderer.cpp
 INTERACTIVE_CPU_SRC = src/main_cpu_interactive.cpp src/renderer/renderer.cpp src/acceleration/bvh.cpp
+BENCH_CPU_MODES_SRC = src/bench_cpu_render_modes.cpp src/renderer/renderer.cpp src/acceleration/bvh.cpp
 INTERACTIVE_GPU_SRC = src/main_gpu_interactive.cpp
 ASCII_SRC = src/main_ascii.cpp src/renderer/renderer.cpp
 
@@ -51,9 +52,12 @@ ENABLE_GPU_GAMMA_CORRECTION ?= 1 # Enable gamma correction
 ENABLE_SOFT_SHADOWS ?= 0         # Enable soft shadows (Phase 2)
 ENABLE_AMBIENT_OCCLUSION ?= 0    # Enable ambient occlusion (Phase 2)
 
-# GPU scene selection
+# GPU scene selection (compile-time default when no argv scene is passed)
 GPU_SCENE ?= cornell_box
-# Options: cornell_box, gpu_demo
+# Options: cornell_box, gpu_demo, pbr_showcase, dof_showcase, fx_showcase, feature_showcase
+
+# Runtime scene for `make runi-gpu` (argv override; no rebuild needed)
+RUN_GPU_SCENE ?= feature_showcase
 
 # Threading mode (openmp, pthreads, or none)
 THREADING_MODE ?= openmp
@@ -160,6 +164,17 @@ interactive-cpu: $(BUILD_DIR)
 	@echo "✓ Interactive CPU built: $(BUILD_DIR)/raytracer_interactive_cpu"
 	@ln -sf $(BUILD_DIR)/raytracer_interactive_cpu raytracer_interactive_cpu
 
+# Headless SIMD / wavefront / scalar comparison (Cornell box)
+.PHONY: bench-cpu-modes
+bench-cpu-modes: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building bench_cpu_render_modes"
+	@echo "=========================================="
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) \
+		$(BENCH_CPU_MODES_SRC) \
+		-o $(BUILD_DIR)/bench_cpu_render_modes $(LDFLAGS)
+	@echo "✓ bench_cpu_render_modes built: $(BUILD_DIR)/bench_cpu_render_modes"
+
 # Convenience target for backward compatibility
 interactive: interactive-cpu
 
@@ -234,9 +249,15 @@ runi: runi-cpu
 # Run interactive GPU
 .PHONY: runi-gpu
 runi-gpu: interactive-gpu
-	@echo "Starting Interactive GPU Ray Tracer..."
+	@echo "Starting Interactive GPU Ray Tracer (scene: $(RUN_GPU_SCENE))..."
 	@echo "Controls: Click window to capture mouse, WASD to move, mouse to look, ESC to quit"
-	./raytracer_interactive_gpu
+	./raytracer_interactive_gpu $(RUN_GPU_SCENE)
+
+# GPU: gallery scene for path trace, PBR, DOF, glass, emissive, procedurals, TAA ring, etc.
+.PHONY: runi-gpu-features
+runi-gpu-features: interactive-gpu
+	@echo "Starting GPU Feature Showcase (see src/scene/feature_showcase.h for layout & toggles)..."
+	./raytracer_interactive_gpu feature_showcase
 
 # Run ASCII ray tracer
 .PHONY: runa
@@ -713,7 +734,7 @@ docs:
 	@echo ""
 	@echo "Main Documentation:"
 	@echo "  README.md              - Project overview and quick start"
-	@echo "  CLAUDE.md              - Project context for AI assistants"
+	@echo "  LLM_CONTEXT.md         - Project context for AI assistants (claude.md → symlink)"
 	@echo "  INTERACTIVE_GUIDE.md   - Interactive mode guide"
 	@echo "  CHANGELOG.md           - Development history"
 	@echo ""
@@ -738,6 +759,7 @@ help:
 	@echo "  make interactive-cpu    - Build interactive CPU (SDL2)"
 	@echo "  make interactive-gpu    - Build interactive GPU (GLSL 1.20)"
 	@echo "  make ascii              - Build ASCII terminal ray tracer"
+	@echo "  make bench-cpu-modes    - Build headless SIMD/wavefront/scalar benchmark"
 	@echo "  make all                - Build default (batch-cpu)"
 	@echo ""
 	@echo "Running:"
@@ -745,6 +767,7 @@ help:
 	@echo "  make run-gpu            - Build and run GPU batch"
 	@echo "  make runi-cpu           - Build and run interactive CPU"
 	@echo "  make runi-gpu           - Build and run interactive GPU"
+	@echo "  make runi-gpu-features  - GPU + feature_showcase gallery scene"
 	@echo "  make runa               - Build and run ASCII terminal"
 	@echo ""
 	@echo "Feature Flags (set on command line):"

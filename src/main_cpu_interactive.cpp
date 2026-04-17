@@ -12,6 +12,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
+#include <cstdlib>
 #include <mutex>
 #include <thread>
 #include <omp.h>
@@ -376,9 +377,60 @@ private:
     int content_height;
     bool is_scrollable;
 
+    SDL_Texture* panel_snap_tex;
+    uint64_t panel_snap_key;
+    int panel_snap_w;
+    int panel_snap_h;
+
+    uint64_t panel_state_hash(int window_width, int window_height, int quality_idx, const QualityPreset& preset,
+                              double fps, double render_time, const char* analysis_mode_name,
+                              bool enable_shadows, bool enable_reflections, bool enable_progressive, bool enable_adaptive,
+                              bool enable_denoiser, int min_progressive_display_passes, bool enable_wavefront,
+                              bool enable_morton, bool enable_stratified, bool enable_frustum, bool enable_simd_packets,
+                              bool enable_bvh
+#ifdef GPU_RENDERING
+                              , RendererType current_renderer
+#endif
+                              ) const {
+        auto mix = [](uint64_t& h, uint64_t v) {
+            h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        };
+        uint64_t h = 1469598103934665603ULL;
+        mix(h, static_cast<uint64_t>(window_width));
+        mix(h, static_cast<uint64_t>(window_height));
+        mix(h, static_cast<uint64_t>(quality_idx));
+        mix(h, static_cast<uint64_t>(preset.width));
+        mix(h, static_cast<uint64_t>(preset.samples));
+        mix(h, static_cast<uint64_t>(preset.max_depth));
+        mix(h, static_cast<uint64_t>(std::lround(fps)));
+        mix(h, static_cast<uint64_t>(std::lround(render_time * 50.0)));
+        if (analysis_mode_name) {
+            mix(h, static_cast<uint64_t>(static_cast<unsigned char>(analysis_mode_name[0])));
+        }
+        mix(h, enable_shadows ? 3u : 1u);
+        mix(h, enable_reflections ? 3u : 1u);
+        mix(h, enable_progressive ? 3u : 1u);
+        mix(h, enable_adaptive ? 3u : 1u);
+        mix(h, enable_denoiser ? 3u : 1u);
+        mix(h, static_cast<uint64_t>(min_progressive_display_passes));
+        mix(h, enable_wavefront ? 3u : 1u);
+        mix(h, enable_morton ? 3u : 1u);
+        mix(h, enable_stratified ? 3u : 1u);
+        mix(h, enable_frustum ? 3u : 1u);
+        mix(h, enable_simd_packets ? 3u : 1u);
+        mix(h, enable_bvh ? 3u : 1u);
+        mix(h, static_cast<uint64_t>(scroll_offset));
+#ifdef GPU_RENDERING
+        mix(h, static_cast<uint64_t>(current_renderer == RendererType::GPU ? 2 : 1));
+#endif
+        return h;
+    }
+
 public:
-    ControlsPanel() : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0),
-                      scroll_offset(0), max_scroll_offset(0), content_height(0), is_scrollable(false) {
+    ControlsPanel()
+        : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0), scroll_offset(0),
+          max_scroll_offset(0), content_height(0), is_scrollable(false), panel_snap_tex(nullptr), panel_snap_key(0),
+          panel_snap_w(0), panel_snap_h(0) {
         text_color = {20, 20, 20, 255};
         background_color = {50, 50, 60, 230};  // Dark blue-gray
         title_color = {100, 200, 255, 255};     // Light blue
@@ -455,8 +507,25 @@ public:
         panel_y = 10;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
 
-        // Scrollable document surface (tall enough for all controls when the panel is very tall)
-        int content_surface_height = std::max(2400, panel_height + 2000);
+        const uint64_t hkey = panel_state_hash(window_width, window_height, quality_idx, preset, fps, render_time,
+            analysis_mode_name, enable_shadows, enable_reflections, enable_progressive, enable_adaptive, enable_denoiser,
+            min_progressive_display_passes, enable_wavefront, enable_morton, enable_stratified, enable_frustum,
+            enable_simd_packets, enable_bvh
+#ifdef GPU_RENDERING
+            , current_renderer
+#endif
+        );
+        if (panel_snap_tex && hkey == panel_snap_key) {
+            int tw = 0, th = 0;
+            if (SDL_QueryTexture(panel_snap_tex, nullptr, nullptr, &tw, &th) == 0 && tw == overlay_rect.w &&
+                th == overlay_rect.h) {
+                SDL_RenderCopy(renderer, panel_snap_tex, nullptr, &overlay_rect);
+                return;
+            }
+        }
+
+        // Scrollable document surface (cap size to reduce allocation on very tall windows)
+        int content_surface_height = std::min(3200, std::max(1800, panel_height + 1200));
         SDL_Surface* content_surface = SDL_CreateRGBSurface(0, panel_width, content_surface_height, 32, 0, 0, 0, 0);
         if (!content_surface) return;
 
@@ -1276,7 +1345,22 @@ public:
                 }
             }
 
-            SDL_DestroyTexture(texture);
+            if (!is_scrollable) {
+                if (panel_snap_tex) {
+                    SDL_DestroyTexture(panel_snap_tex);
+                }
+                panel_snap_tex = texture;
+                panel_snap_key = hkey;
+                panel_snap_w = overlay_rect.w;
+                panel_snap_h = overlay_rect.h;
+            } else {
+                SDL_DestroyTexture(texture);
+                if (panel_snap_tex) {
+                    SDL_DestroyTexture(panel_snap_tex);
+                    panel_snap_tex = nullptr;
+                    panel_snap_key = 0;
+                }
+            }
         }
 
         SDL_FreeSurface(content_surface);
@@ -1414,9 +1498,18 @@ public:
         scroll_offset -= delta;
         // Clamp scroll offset
         scroll_offset = std::max(0, std::min(scroll_offset, max_scroll_offset));
+        if (panel_snap_tex) {
+            SDL_DestroyTexture(panel_snap_tex);
+            panel_snap_tex = nullptr;
+            panel_snap_key = 0;
+        }
     }
 
     ~ControlsPanel() {
+        if (panel_snap_tex) {
+            SDL_DestroyTexture(panel_snap_tex);
+            panel_snap_tex = nullptr;
+        }
         if (font) TTF_CloseFont(font);
         if (title_font) TTF_CloseFont(title_font);
         if (initialized) TTF_Quit();
@@ -1506,6 +1599,68 @@ static void apply_rgb24_edge_preserving_denoise(std::vector<unsigned char>& rgb,
     rgb.swap(out);
 }
 
+// Half-resolution bilateral pass then nearest upscale (large frames only).
+static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>& rgb, int w, int h) {
+    if (w < 10 || h < 10 || static_cast<long long>(w) * h < 400000) {
+        apply_rgb24_edge_preserving_denoise(rgb, w, h);
+        return;
+    }
+    const int w2 = w / 2;
+    const int h2 = h / 2;
+    if (w2 < 5 || h2 < 5) {
+        apply_rgb24_edge_preserving_denoise(rgb, w, h);
+        return;
+    }
+    std::vector<unsigned char> half(static_cast<size_t>(w2) * static_cast<size_t>(h2) * 3u);
+    for (int y2 = 0; y2 < h2; ++y2) {
+        for (int x2 = 0; x2 < w2; ++x2) {
+            const int x0 = x2 * 2;
+            const int y0 = y2 * 2;
+            size_t acc_r = 0, acc_g = 0, acc_b = 0;
+            int cnt = 0;
+            for (int dy = 0; dy < 2 && y0 + dy < h; ++dy) {
+                for (int dx = 0; dx < 2 && x0 + dx < w; ++dx) {
+                    const size_t si = (static_cast<size_t>(y0 + dy) * static_cast<size_t>(w) + static_cast<size_t>(x0 + dx)) * 3u;
+                    acc_r += rgb[si];
+                    acc_g += rgb[si + 1];
+                    acc_b += rgb[si + 2];
+                    ++cnt;
+                }
+            }
+            const size_t di = (static_cast<size_t>(y2) * static_cast<size_t>(w2) + static_cast<size_t>(x2)) * 3u;
+            half[di] = static_cast<unsigned char>(acc_r / cnt);
+            half[di + 1] = static_cast<unsigned char>(acc_g / cnt);
+            half[di + 2] = static_cast<unsigned char>(acc_b / cnt);
+        }
+    }
+    apply_rgb24_edge_preserving_denoise(half, w2, h2);
+    #pragma omp parallel for schedule(static)
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const int xs = std::min(x / 2, w2 - 1);
+            const int ys = std::min(y / 2, h2 - 1);
+            const size_t si = (static_cast<size_t>(ys) * static_cast<size_t>(w2) + static_cast<size_t>(xs)) * 3u;
+            const size_t di = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3u;
+            rgb[di] = half[si];
+            rgb[di + 1] = half[si + 1];
+            rgb[di + 2] = half[si + 2];
+        }
+    }
+}
+
+static bool rt_profile_enabled() {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* e = std::getenv("RT_PROFILE");
+        cached = (e && e[0] != '0') ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static bool same_quality_preset(const QualityPreset& a, const QualityPreset& b) {
+    return a.width == b.width && a.samples == b.samples && a.max_depth == b.max_depth;
+}
+
 // Progressive Monte Carlo averages samples for a *fixed* view. If the camera moves between passes,
 // old samples must be discarded or every frame becomes a blend of all past viewpoints.
 static bool progressive_view_differs(const Camera& a, const Camera& b) {
@@ -1553,6 +1708,9 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
                                                        bool enable_shadows, std::vector<unsigned char>& framebuffer) {
     bool schedule_next_render = false;
     int progressive_pass_count = 0;
+    const bool prof = rt_profile_enabled();
+    const auto t0_prof = std::chrono::high_resolution_clock::now();
+    int path_id = 6;
 
     static Camera progressive_cam_anchor;
     static bool progressive_cam_anchor_valid = false;
@@ -1567,6 +1725,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
          progressive_last_max_depth != ray_renderer.max_depth);
 
     if (ray_renderer.enable_progressive && ray_renderer.enable_wavefront) {
+        path_id = 1;
         static std::vector<std::vector<Color>> wf_progressive_accum;
         static int wf_progressive_passes = 0;
         static bool wf_progressive_initialized = false;
@@ -1585,7 +1744,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         wf_progressive_passes++;
 
         const float inv_passes = 1.0f / static_cast<float>(wf_progressive_passes);
-        #pragma omp parallel for schedule(dynamic, 4)
+        #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 Color linear = wf_progressive_accum[j][i] * inv_passes;
@@ -1605,6 +1764,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         progressive_cam_anchor_valid = true;
         progressive_last_max_depth = ray_renderer.max_depth;
     } else if (ray_renderer.enable_progressive && ray_renderer.enable_simd_packets) {
+        path_id = 2;
         static std::vector<std::vector<Color>> simd_prog_linear_accum;
         static int simd_prog_passes = 0;
         static bool simd_prog_initialized = false;
@@ -1624,7 +1784,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         simd_prog_passes++;
 
         const float inv_passes = 1.0f / static_cast<float>(simd_prog_passes);
-        #pragma omp parallel for schedule(dynamic, 4)
+        #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 Color linear = simd_prog_linear_accum[j][i] * inv_passes;
@@ -1644,6 +1804,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         progressive_cam_anchor_valid = true;
         progressive_last_max_depth = ray_renderer.max_depth;
     } else if (ray_renderer.enable_progressive) {
+        path_id = 3;
         static std::vector<std::vector<Color>> scalar_prog_linear_accum;
         static int scalar_prog_passes = 0;
         static bool scalar_prog_initialized = false;
@@ -1659,7 +1820,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
             scalar_prog_initialized = true;
         }
 
-        #pragma omp parallel for schedule(dynamic, 4)
+        #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 float u = (i + random_float_pcg()) / (image_width - 1);
@@ -1673,7 +1834,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         scalar_prog_passes++;
 
         const float inv_passes = 1.0f / static_cast<float>(scalar_prog_passes);
-        #pragma omp parallel for schedule(dynamic, 4)
+        #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 Color linear = scalar_prog_linear_accum[j][i] * inv_passes;
@@ -1693,10 +1854,11 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         progressive_cam_anchor_valid = true;
         progressive_last_max_depth = ray_renderer.max_depth;
     } else if (ray_renderer.enable_wavefront) {
+        path_id = 4;
         std::vector<std::vector<Color>> wavefront_framebuffer(image_height, std::vector<Color>(image_width));
         ray_renderer.render_wavefront(cam, scene, wavefront_framebuffer, image_width, image_height, preset.samples);
 
-        #pragma omp parallel for schedule(dynamic, 4)
+        #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 Color pixel_color = wavefront_framebuffer[j][i];
@@ -1707,10 +1869,11 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
             }
         }
     } else if (ray_renderer.enable_simd_packets) {
+        path_id = 5;
         std::vector<std::vector<Color>> simd_framebuffer(image_height, std::vector<Color>(image_width));
         ray_renderer.render_simd_packets(cam, scene, simd_framebuffer, image_width, image_height, preset.samples);
 
-        #pragma omp parallel for schedule(dynamic, 4)
+        #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 Color pixel_color = simd_framebuffer[j][i];
@@ -1721,7 +1884,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
             }
         }
     } else {
-        #pragma omp parallel for schedule(dynamic, 4)
+        #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 Color pixel_color(0, 0, 0);
@@ -1785,6 +1948,22 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
                 framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(final_color.y, 0.0f, 0.999f));
                 framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(final_color.z, 0.0f, 0.999f));
             }
+        }
+    }
+
+    if (prof) {
+        const double ms =
+            std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t0_prof).count();
+        static std::mutex prof_mutex;
+        static double sum_ms[8]{};
+        static uint64_t prof_cnt[8]{};
+        const int pid = std::min(std::max(path_id, 0), 7);
+        std::lock_guard<std::mutex> lk(prof_mutex);
+        sum_ms[pid] += ms;
+        prof_cnt[pid]++;
+        if (prof_cnt[pid] % 64u == 0u) {
+            std::cerr << "[RT_PROFILE] path " << pid
+                      << " avg_ms=" << (sum_ms[pid] / static_cast<double>(prof_cnt[pid])) << std::endl;
         }
     }
 
@@ -1865,8 +2044,9 @@ struct CpuRenderThreadHub {
                     frameless_followup_requested.store(true, std::memory_order_release);
                 }
             } else {
-                if (denoise) {
-                    apply_rgb24_edge_preserving_denoise(fb, iw, ih);
+                const bool skip_denoise_intermediate_progressive = rr->enable_progressive && sched;
+                if (denoise && !skip_denoise_intermediate_progressive) {
+                    apply_rgb24_edge_preserving_denoise_large(fb, iw, ih);
                 }
                 auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -1879,6 +2059,17 @@ struct CpuRenderThreadHub {
                 }
             }
         }
+    }
+
+    bool has_identical_pending_job(const Camera& cam, const QualityPreset& preset_in) {
+        std::lock_guard<std::mutex> lk(job_mutex);
+        if (!job_pending) {
+            return false;
+        }
+        if (progressive_view_differs(job_cam, cam)) {
+            return false;
+        }
+        return same_quality_preset(job_preset, preset_in);
     }
 
     void submit_job(const Camera& cam, const QualityPreset& preset_in, int iw, int ih, bool enable_shadows,
@@ -1995,6 +2186,8 @@ void crash_handler(int sig) {
 
     exit(1);
 }
+
+static std::atomic<bool> g_cpu_viewport_motion{false};
 
 int main(int argc, char* argv[]) {
     (void)argc;
@@ -2195,6 +2388,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\n";
 
     while (running) {
+        bool cpu_followup = false;
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
@@ -2571,6 +2765,7 @@ int main(int argc, char* argv[]) {
                         -event.motion.yrel * 0.1f
                     );
                     need_render = true;
+                    g_cpu_viewport_motion.store(true, std::memory_order_relaxed);
                 }
             }
         }
@@ -2660,14 +2855,24 @@ int main(int argc, char* argv[]) {
             } else
 #endif
             {
-                cpu_render_hub.submit_job(cam, preset, image_width, image_height, enable_shadows, enable_denoiser,
-                                            min_progressive_display_passes);
+                const Uint8* ks_motion = SDL_GetKeyboardState(nullptr);
+                bool viewport_user_motion = g_cpu_viewport_motion.exchange(false);
+                viewport_user_motion = viewport_user_motion || ks_motion[SDL_SCANCODE_W] || ks_motion[SDL_SCANCODE_S] ||
+                                        ks_motion[SDL_SCANCODE_A] || ks_motion[SDL_SCANCODE_D] ||
+                                        ks_motion[SDL_SCANCODE_UP] || ks_motion[SDL_SCANCODE_DOWN];
+                int min_disp_submit = min_progressive_display_passes;
+                if (ray_renderer.enable_progressive && viewport_user_motion) {
+                    min_disp_submit = 1;
+                }
+                if (!cpu_render_hub.has_identical_pending_job(cam, preset)) {
+                    cpu_render_hub.submit_job(cam, preset, image_width, image_height, enable_shadows, enable_denoiser,
+                                              min_disp_submit);
+                }
                 need_render = false;
             }
         }
 
         {
-            bool cpu_followup = false;
             double cpu_rt = 0.0;
             if (cpu_render_hub.try_consume(framebuffer, texture, image_width, image_height, &cpu_rt, &cpu_followup)) {
                 render_time = cpu_rt;
@@ -2739,8 +2944,8 @@ int main(int argc, char* argv[]) {
 
         SDL_RenderPresent(renderer);
 
-        // Small delay to prevent 100% CPU usage
-        SDL_Delay(1);
+        const bool idle_cpu = !work_done && !need_render && !cpu_followup && !paused;
+        SDL_Delay(idle_cpu ? 14 : 2);
     }
 
     // Cleanup
