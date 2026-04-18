@@ -4,6 +4,19 @@
 #include "../math/vec3.h"
 #include "../math/ray.h"
 #include "../math/frustum.h"
+#include "../math/pcg_random.h"
+
+namespace camera_detail {
+inline Vec3 random_in_unit_disk_xy() {
+    for (;;) {
+        const float x = random_float_pcg() * 2.0f - 1.0f;
+        const float y = random_float_pcg() * 2.0f - 1.0f;
+        if (x * x + y * y < 1.0f) {
+            return Vec3(x, y, 0.0f);
+        }
+    }
+}
+} // namespace camera_detail
 
 class Camera {
 public:
@@ -58,10 +71,13 @@ public:
         lower_left_corner = origin - horizontal / 2 - vertical / 2 - focus_dist * w;
     }
 
-    // Get ray for a given pixel (u, v in [0, 1])
+    // Get ray for a given pixel (u, v in [0, 1]). When aperture > 0, samples a thin lens
+    // (defocus radius == aperture, matching GPU interactive convention).
     Ray get_ray(float s, float t) const {
-        // For now, no depth of field (aperture = 0)
-        return Ray(origin, lower_left_corner + s * horizontal + t * vertical - origin);
+        const Vec3 rd = (aperture > 0.0f) ? (aperture * camera_detail::random_in_unit_disk_xy()) : Vec3(0, 0, 0);
+        const Vec3 offset = u * rd.x + v * rd.y;
+        return Ray(origin + offset,
+                   lower_left_corner + s * horizontal + t * vertical - origin - offset);
     }
 
     // Axis-aligned view frustum for primary-ray culling (vfov is degrees; near/far in world units).
