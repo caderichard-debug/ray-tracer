@@ -7,6 +7,7 @@
 #include "../camera/camera.h"
 #include "../material/material.h"
 #include "../primitives/sphere.h"
+#include "../primitives/sphere_simd.h"
 #include "../acceleration/bvh.h"
 #include "../math/frustum.h"
 #include <vector>
@@ -22,8 +23,11 @@ public:
     bool enable_progressive; // Enable progressive rendering
     int current_pass; // Current progressive pass
     int max_passes; // Maximum number of progressive passes
-    std::vector<std::vector<Color>> accumulation_buffer; // Accumulates samples across passes
-    std::vector<std::vector<int>> sample_count; // Tracks samples per pixel
+    // Row-major: index = y * progressive_width + x (single allocation for cache-friendly scans)
+    std::vector<Color> accumulation_buffer_flat;
+    std::vector<int> sample_count_flat;
+    int progressive_width{0};
+    int progressive_height{0};
 
     // Adaptive sampling state
     bool enable_adaptive; // Enable adaptive sampling
@@ -46,6 +50,7 @@ public:
     // Phase 3: BVH acceleration (spheres in tree + linear non-spheres; requires scene.build_simd_cache())
     bool enable_bvh;
     std::vector<std::shared_ptr<Sphere>> bvh_spheres;
+    std::vector<SphereSimdGeom> bvh_packet_geom; // same indexing as bvh_spheres; used by SIMD packet + flat BVH
     bool bvh_built;
     std::unique_ptr<BVH> bvh_accel;
 
@@ -88,16 +93,16 @@ public:
     // Wavefront rendering functions
     // When accumulate_linear_radiance is true, adds linear (pre-gamma) radiance per pixel into framebuffer
     // (typically samples=1 per frame); framebuffer must be zeroed or managed by the caller.
-    void render_wavefront(const Camera& cam, const Scene& scene, std::vector<std::vector<Color>>& framebuffer,
+    void render_wavefront(const Camera& cam, const Scene& scene, std::vector<Color>& framebuffer,
                          int width, int height, int samples, bool accumulate_linear_radiance = false);
 
     // Cache-friendly rendering functions
-    void render_morton(const Camera& cam, const Scene& scene, std::vector<std::vector<Color>>& framebuffer,
+    void render_morton(const Camera& cam, const Scene& scene, std::vector<Color>& framebuffer,
                        int width, int height, int samples);
 
     // Phase 3: SIMD packet tracing
     // When accumulate_linear_radiance is true, adds linear (pre-gamma) radiance per pixel (samples is usually 1).
-    void render_simd_packets(const Camera& cam, const Scene& scene, std::vector<std::vector<Color>>& framebuffer,
+    void render_simd_packets(const Camera& cam, const Scene& scene, std::vector<Color>& framebuffer,
                             int width, int height, int samples, bool accumulate_linear_radiance = false);
 
     // Phase 3: BVH + view frustum
@@ -111,6 +116,10 @@ public:
         const Frustum::Frustum* vf = (enable_frustum && frustum_valid) ? &view_frustum : nullptr;
         return trace_closest(r, t_min, t_max, rec, scene, vf);
     }
+
+    // SIMD sphere packet: uses flat BVH + slim sphere geoms when BVH is built; otherwise Scene::hit_packet.
+    bool trace_hit_packet(const Scene& scene, const RayPacket& packet, float t_min, float t_max,
+                          std::vector<HitRecord>& hit_records) const;
 };
 
 #endif // RENDERER_H
