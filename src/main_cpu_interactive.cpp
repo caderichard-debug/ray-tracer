@@ -368,7 +368,8 @@ private:
         int value;
         int category; // 0: quality, 1: samples, 2: depth, 3: shadows, 4: reflections, 5: resolution, 6: debug,
                       // 16 denoise toggle, 17 min prog, 18 denoise strength (value 0–2),
-                      // 19 DOF aperture (milli-radius), 20 DOF focus distance (hundredths)
+                      // 19 DOF aperture (milli-radius), 20 DOF focus distance (hundredths),
+                      // 21 denoise amount slider (0-100)
     };
     std::vector<Button> buttons;
     int panel_x, panel_y;
@@ -389,7 +390,8 @@ private:
     uint64_t panel_state_hash(int window_width, int window_height, int quality_idx, const QualityPreset& preset,
                               double fps, double render_time, const char* analysis_mode_name,
                               bool enable_shadows, bool enable_reflections, bool enable_progressive, bool enable_adaptive,
-                              bool enable_denoiser, int denoise_strength, int min_progressive_display_passes,
+                              bool enable_denoiser, int denoise_strength, int denoise_amount_percent,
+                              int min_progressive_display_passes,
                               bool enable_wavefront,
                               bool enable_morton, bool enable_stratified, bool enable_frustum, bool enable_simd_packets,
                               bool enable_bvh, float dof_lens_radius, float dof_focus_dist
@@ -418,6 +420,7 @@ private:
         mix(h, enable_adaptive ? 3u : 1u);
         mix(h, enable_denoiser ? 3u : 1u);
         mix(h, static_cast<uint64_t>(denoise_strength + 16));
+        mix(h, static_cast<uint64_t>(denoise_amount_percent + 100));
         mix(h, static_cast<uint64_t>(min_progressive_display_passes));
         mix(h, enable_wavefront ? 3u : 1u);
         mix(h, enable_morton ? 3u : 1u);
@@ -499,6 +502,7 @@ public:
                 const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
                 bool enable_progressive = false, bool enable_adaptive = false, bool enable_denoiser = false,
                 int denoise_strength = 0,
+                int denoise_amount_percent = 70,
                 int min_progressive_display_passes = 1,
                 bool enable_wavefront = false,
                 bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false,
@@ -521,7 +525,7 @@ public:
 
         const uint64_t hkey = panel_state_hash(window_width, window_height, quality_idx, preset, fps, render_time,
             analysis_mode_name, enable_shadows, enable_reflections, enable_progressive, enable_adaptive, enable_denoiser,
-            denoise_strength, min_progressive_display_passes, enable_wavefront, enable_morton, enable_stratified,
+            denoise_strength, denoise_amount_percent, min_progressive_display_passes, enable_wavefront, enable_morton, enable_stratified,
             enable_frustum, enable_simd_packets, enable_bvh, dof_lens_radius, dof_focus_dist
 #ifdef GPU_RENDERING
             , current_renderer
@@ -1321,6 +1325,38 @@ public:
 
         y_offset += 35;
 
+        label_surface = TTF_RenderText_Blended(font, "Denoise amount:", title_color);
+        if (label_surface) {
+            SDL_Rect lr = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &lr);
+            SDL_FreeSurface(label_surface);
+        }
+        char denoise_pct_label[16];
+        snprintf(denoise_pct_label, sizeof(denoise_pct_label), "%d%%", std::clamp(denoise_amount_percent, 0, 100));
+        SDL_Surface* pct_surface = TTF_RenderText_Blended(font, denoise_pct_label, value_color);
+        if (pct_surface) {
+            SDL_Rect pr = {panel_width - pct_surface->w - 15, y_offset, pct_surface->w, pct_surface->h};
+            SDL_BlitSurface(pct_surface, nullptr, content_surface, &pr);
+            SDL_FreeSurface(pct_surface);
+        }
+        y_offset += 22;
+        {
+            SDL_Rect slider_track = {15, y_offset + 8, 255, 8};
+            SDL_FillRect(content_surface, &slider_track, SDL_MapRGBA(content_surface->format, 55, 60, 75, 255));
+            const int amount = std::clamp(denoise_amount_percent, 0, 100);
+            const int fill_w = std::max(1, (slider_track.w * amount) / 100);
+            SDL_Rect slider_fill = {slider_track.x, slider_track.y, fill_w, slider_track.h};
+            SDL_FillRect(content_surface, &slider_fill, SDL_MapRGBA(content_surface->format, 100, 150, 200, 255));
+            const int knob_x = slider_track.x + ((slider_track.w - 1) * amount) / 100;
+            SDL_Rect knob = {knob_x - 4, slider_track.y - 4, 8, 16};
+            SDL_FillRect(content_surface, &knob, SDL_MapRGBA(content_surface->format, 170, 210, 245, 255));
+
+            SDL_Rect slider_hit = {15, y_offset, 255, 24};
+            buttons.push_back({{slider_hit.x + panel_x, slider_hit.y + panel_y, slider_hit.w, slider_hit.h},
+                              "denoise_amount", amount, 21});
+        }
+        y_offset += 35;
+
         // Minimum accumulated progressive passes before publishing a frame (CPU worker).
         label_surface = TTF_RenderText_Blended(font, "Progressive display min passes:", title_color);
         if (label_surface) {
@@ -1433,6 +1469,8 @@ public:
         bool denoiser_changed;
         bool denoise_strength_changed;
         int new_denoise_strength;
+        bool denoise_amount_changed;
+        int new_denoise_amount_percent;
         bool min_prog_display_changed;
         int new_min_prog_display_passes;
         bool wavefront_changed;
@@ -1457,7 +1495,8 @@ public:
                        analysis_mode_changed(false), new_analysis_mode(0),
                        screenshot_requested(false), progressive_changed(false),
                        adaptive_changed(false), denoiser_changed(false), denoise_strength_changed(false),
-                       new_denoise_strength(0), min_prog_display_changed(false),
+                       new_denoise_strength(0), denoise_amount_changed(false), new_denoise_amount_percent(70),
+                       min_prog_display_changed(false),
                        new_min_prog_display_passes(1), wavefront_changed(false),
                        morton_changed(false), stratified_changed(false), frustum_changed(false),
                        simd_packets_changed(false), new_simd_packets(false),
@@ -1546,6 +1585,14 @@ public:
                         result.denoise_strength_changed = true;
                         result.new_denoise_strength = button.value;
                         break;
+                    case 21: { // Denoise amount slider
+                        result.denoise_amount_changed = true;
+                        const int rel = std::clamp(local_x - bx, 0, std::max(1, button.rect.w - 1));
+                        const int pct = static_cast<int>(std::lround((100.0 * static_cast<double>(rel)) /
+                                                                     static_cast<double>(std::max(1, button.rect.w - 1))));
+                        result.new_denoise_amount_percent = std::clamp(pct, 0, 100);
+                        break;
+                    }
                     case 17: // Min progressive passes before display
                         result.min_prog_display_changed = true;
                         result.new_min_prog_display_passes = button.value;
@@ -1763,13 +1810,30 @@ static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            const int xs = std::min(x / 2, w2 - 1);
-            const int ys = std::min(y / 2, h2 - 1);
-            const size_t si = (static_cast<size_t>(ys) * static_cast<size_t>(w2) + static_cast<size_t>(xs)) * 3u;
+            const float fx = (static_cast<float>(x) + 0.5f) * 0.5f - 0.5f;
+            const float fy = (static_cast<float>(y) + 0.5f) * 0.5f - 0.5f;
+            const int x0 = std::clamp(static_cast<int>(std::floor(fx)), 0, w2 - 1);
+            const int y0 = std::clamp(static_cast<int>(std::floor(fy)), 0, h2 - 1);
+            const int x1 = std::min(x0 + 1, w2 - 1);
+            const int y1 = std::min(y0 + 1, h2 - 1);
+            const float tx = std::clamp(fx - static_cast<float>(x0), 0.0f, 1.0f);
+            const float ty = std::clamp(fy - static_cast<float>(y0), 0.0f, 1.0f);
+            const size_t i00 = (static_cast<size_t>(y0) * static_cast<size_t>(w2) + static_cast<size_t>(x0)) * 3u;
+            const size_t i10 = (static_cast<size_t>(y0) * static_cast<size_t>(w2) + static_cast<size_t>(x1)) * 3u;
+            const size_t i01 = (static_cast<size_t>(y1) * static_cast<size_t>(w2) + static_cast<size_t>(x0)) * 3u;
+            const size_t i11 = (static_cast<size_t>(y1) * static_cast<size_t>(w2) + static_cast<size_t>(x1)) * 3u;
             const size_t di = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3u;
-            rgb[di] = half[si];
-            rgb[di + 1] = half[si + 1];
-            rgb[di + 2] = half[si + 2];
+            for (int c = 0; c < 3; ++c) {
+                const float v00 = static_cast<float>(half[i00 + static_cast<size_t>(c)]);
+                const float v10 = static_cast<float>(half[i10 + static_cast<size_t>(c)]);
+                const float v01 = static_cast<float>(half[i01 + static_cast<size_t>(c)]);
+                const float v11 = static_cast<float>(half[i11 + static_cast<size_t>(c)]);
+                const float top = v00 + (v10 - v00) * tx;
+                const float bot = v01 + (v11 - v01) * tx;
+                const float v = top + (bot - top) * ty;
+                rgb[di + static_cast<size_t>(c)] =
+                    static_cast<unsigned char>(std::clamp(v, 0.0f, 255.0f));
+            }
         }
     }
 }
@@ -1839,6 +1903,51 @@ static void apply_rgb24_light_unsharp_after_denoise(std::vector<unsigned char>& 
     }
 
     rgb.swap(out);
+}
+
+static void apply_rgb24_denoise_pipeline(std::vector<unsigned char>& rgb, int w, int h, int denoise_strength_0_2,
+                                         int denoise_amount_percent) {
+    const int amount = std::clamp(denoise_amount_percent, 0, 100);
+    if (amount <= 0 || w < 2 || h < 2) {
+        return;
+    }
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 3u;
+    if (rgb.size() < n) {
+        return;
+    }
+
+    std::vector<unsigned char> original = rgb;
+    float ds = 1.35f;
+    float dr = 0.065f;
+    int rad = 2;
+    denoise_params_from_strength(denoise_strength_0_2, &ds, &dr, &rad);
+
+    // Scale filter aggressiveness with slider amount to preserve AA detail at lower amounts.
+    const float amount01 = static_cast<float>(amount) * (1.0f / 100.0f);
+    const float strength_scale = 0.58f + 0.72f * amount01;
+    ds *= strength_scale;
+    dr *= (0.55f + 0.80f * amount01);
+    if (amount < 45) {
+        rad = std::max(1, rad - 1);
+    }
+
+    apply_rgb24_edge_preserving_denoise_large(rgb, w, h, ds, dr, rad);
+    apply_rgb24_light_unsharp_after_denoise(rgb, w, h, denoise_strength_0_2);
+
+    // Final blend restores sub-pixel edge detail from the traced image while retaining denoise benefit.
+    #pragma omp parallel for schedule(static)
+    for (int y = 0; y < h; ++y) {
+        const size_t row = static_cast<size_t>(y) * static_cast<size_t>(w) * 3u;
+        for (int x = 0; x < w; ++x) {
+            const size_t i = row + static_cast<size_t>(x) * 3u;
+            for (int c = 0; c < 3; ++c) {
+                const float o = static_cast<float>(original[i + static_cast<size_t>(c)]);
+                const float d = static_cast<float>(rgb[i + static_cast<size_t>(c)]);
+                const float v = o + (d - o) * amount01;
+                rgb[i + static_cast<size_t>(c)] = static_cast<unsigned char>(std::clamp(v, 0.0f, 255.0f));
+            }
+        }
+    }
 }
 
 static bool rt_profile_enabled() {
@@ -2246,6 +2355,7 @@ struct CpuRenderThreadHub {
     bool job_enable_shadows = true;
     bool job_denoise = false;
     int job_denoise_strength = 0;
+    int job_denoise_amount_percent = 70;
     int job_min_passes_to_display = 1;
 
     Scene* scene_ptr = nullptr;
@@ -2270,6 +2380,7 @@ struct CpuRenderThreadHub {
             bool es = true;
             bool denoise = false;
             int denoise_strength = 0;
+            int denoise_amount_percent = 70;
             Scene* sc = nullptr;
             Renderer* rr = nullptr;
             RenderAnalysis* an = nullptr;
@@ -2287,6 +2398,7 @@ struct CpuRenderThreadHub {
                 es = job_enable_shadows;
                 denoise = job_denoise;
                 denoise_strength = job_denoise_strength;
+                denoise_amount_percent = job_denoise_amount_percent;
                 sc = scene_ptr;
                 rr = renderer_ptr;
                 an = analysis_ptr;
@@ -2312,12 +2424,7 @@ struct CpuRenderThreadHub {
             } else {
                 const bool skip_denoise_intermediate_progressive = rr->enable_progressive && sched;
                 if (denoise && !skip_denoise_intermediate_progressive) {
-                    float ds = 1.35f;
-                    float dr = 0.065f;
-                    int rad = 2;
-                    denoise_params_from_strength(denoise_strength, &ds, &dr, &rad);
-                    apply_rgb24_edge_preserving_denoise_large(fb, iw, ih, ds, dr, rad);
-                    apply_rgb24_light_unsharp_after_denoise(fb, iw, ih, denoise_strength);
+                    apply_rgb24_denoise_pipeline(fb, iw, ih, denoise_strength, denoise_amount_percent);
                 }
                 auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -2344,7 +2451,8 @@ struct CpuRenderThreadHub {
     }
 
     void submit_job(const Camera& cam, const QualityPreset& preset_in, int iw, int ih, bool enable_shadows,
-                      bool denoise_after_trace, int denoise_strength_in, int min_passes_to_display) {
+                      bool denoise_after_trace, int denoise_strength_in, int denoise_amount_percent_in,
+                      int min_passes_to_display) {
         std::lock_guard<std::mutex> lk(job_mutex);
         job_cam = cam;
         job_preset = preset_in;
@@ -2353,6 +2461,7 @@ struct CpuRenderThreadHub {
         job_enable_shadows = enable_shadows;
         job_denoise = denoise_after_trace;
         job_denoise_strength = std::max(0, std::min(2, denoise_strength_in));
+        job_denoise_amount_percent = std::max(0, std::min(100, denoise_amount_percent_in));
         job_min_passes_to_display = std::max(1, min_passes_to_display);
         job_pending = true;
         job_cv.notify_one();
@@ -2493,6 +2602,7 @@ int main(int argc, char* argv[]) {
     bool enable_frustum = false;
     bool enable_denoiser = false;
     int denoise_strength = 0;
+    int denoise_amount_percent = 70;
     int min_progressive_display_passes = 1;
 
     // Create window
@@ -2887,6 +2997,10 @@ int main(int argc, char* argv[]) {
                                       << (denoise_strength == 0 ? "Light" : (denoise_strength == 1 ? "Med" : "Strong"))
                                       << std::endl;
                             need_render = true;
+                        } else if (click_result.denoise_amount_changed) {
+                            denoise_amount_percent = std::max(0, std::min(100, click_result.new_denoise_amount_percent));
+                            std::cout << "Denoise amount: " << denoise_amount_percent << "%" << std::endl;
+                            need_render = true;
                         } else if (click_result.min_prog_display_changed) {
                             min_progressive_display_passes = click_result.new_min_prog_display_passes;
                             std::cout << "Progressive min passes before display: " << min_progressive_display_passes
@@ -3162,7 +3276,7 @@ int main(int argc, char* argv[]) {
                 }
                 if (!cpu_render_hub.has_identical_pending_job(cam, preset)) {
                     cpu_render_hub.submit_job(cam, preset, image_width, image_height, enable_shadows, enable_denoiser,
-                                              denoise_strength, min_disp_submit);
+                                              denoise_strength, denoise_amount_percent, min_disp_submit);
                 }
                 need_render = false;
             }
@@ -3218,7 +3332,7 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
-                                 denoise_strength, min_progressive_display_passes,
+                                 denoise_strength, denoise_amount_percent, min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
                                  enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
                                  ray_renderer.enable_bvh,
@@ -3228,7 +3342,7 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
-                                 denoise_strength, min_progressive_display_passes,
+                                 denoise_strength, denoise_amount_percent, min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
                                  enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
                                  ray_renderer.enable_bvh,

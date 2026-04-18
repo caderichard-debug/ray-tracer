@@ -26,6 +26,7 @@ A high-performance ray tracer built from scratch in C++ with three distinct rend
 - Advanced optimization stack (23.2x speedup)
 - Progressive, adaptive, wavefront rendering modes
 - Full settings panel with live controls
+- Post denoise amount slider (0-100%) with improved detail retention
 - Analysis modes (normals, depth, albedo)
 - **Agent context**: claude-raytracer-cpu.md
 

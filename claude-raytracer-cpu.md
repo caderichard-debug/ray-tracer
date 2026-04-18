@@ -16,6 +16,8 @@ High-performance CPU ray tracer with AVX2 SIMD vectorization and OpenMP multi-th
 - ✅ Analysis modes (normals, depth, albedo)
 - ✅ Screenshot system (PNG output)
 - ✅ Settings panel with live controls
+- ✅ Post denoiser amount slider (0-100%) in CPU controls panel
+- ✅ Improved denoiser quality path (bilinear upsample + detail-preserving blend)
 
 ### Advanced Optimizations Implemented
 - ✅ **Shadow Ray Culling** (+8.6%): Skip shadow rays for backfaces
