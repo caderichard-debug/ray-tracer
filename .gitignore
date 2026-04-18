@@ -10,6 +10,10 @@ build/
 *.png
 *.jpg
 
+# Tracked README showcase (exceptions must follow broad *.png rule)
+!/readme-examples/
+!/readme-examples/**
+
 # IDE files
 .vscode/
 .idea/

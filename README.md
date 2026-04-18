@@ -2,6 +2,17 @@
 
 A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectorization, OpenMP multi-threading, and GPU acceleration. Features batch rendering, real-time interactive modes, and a retro ASCII terminal renderer.
 
+## Examples
+
+Cornell box (CPU batch, Phong shading, hard shadows, reflections):
+
+| Scanline path | Morton Z-order path | Higher-resolution batch |
+|:---:|:---:|:---:|
+| ![Cornell box — scanline CPU batch, 640×360, 2 samples per pixel](readme-examples/cornell-box-cpu-scanline.png) | ![Cornell box — Morton traversal, 640×360, 2 samples per pixel](readme-examples/cornell-box-cpu-morton.png) | ![Cornell box — CPU batch, 800×450](readme-examples/cornell-box-cpu-batch-800.png) |
+| `raytracer_batch_cpu -w 640 -s 2 -d 4` | same flags + `--morton` | earlier `make batch-cpu` render |
+
+*Interactive (SDL) and GPU modes produce similar scenes with live controls; see **Quick Start** below.*
+
 ## Features
 
 ### Multiple Rendering Modes
@@ -329,6 +340,7 @@ make compare
 ```
 ray-tracer/
 ├── README.md              # This file
+├── readme-examples/       # Showcase images linked from the README (tracked PNGs)
 ├── Makefile               # Build system
 ├── LLM_CONTEXT.md         # Project context for AI assistants (claude.md → symlink)
 ├── INTERACTIVE_GUIDE.md   # Interactive mode guide
