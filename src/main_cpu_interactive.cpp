@@ -367,7 +367,8 @@ private:
         std::string label;
         int value;
         int category; // 0: quality, 1: samples, 2: depth, 3: shadows, 4: reflections, 5: resolution, 6: debug,
-                      // 16 denoise toggle, 17 min prog, 18 denoise strength (value 0–2)
+                      // 16 denoise toggle, 17 min prog, 18 denoise strength (value 0–2),
+                      // 19 DOF aperture (milli-radius), 20 DOF focus distance (hundredths)
     };
     std::vector<Button> buttons;
     int panel_x, panel_y;
@@ -391,7 +392,7 @@ private:
                               bool enable_denoiser, int denoise_strength, int min_progressive_display_passes,
                               bool enable_wavefront,
                               bool enable_morton, bool enable_stratified, bool enable_frustum, bool enable_simd_packets,
-                              bool enable_bvh
+                              bool enable_bvh, float dof_lens_radius, float dof_focus_dist
 #ifdef GPU_RENDERING
                               , RendererType current_renderer
 #endif
@@ -424,6 +425,8 @@ private:
         mix(h, enable_frustum ? 3u : 1u);
         mix(h, enable_simd_packets ? 3u : 1u);
         mix(h, enable_bvh ? 3u : 1u);
+        mix(h, static_cast<uint64_t>(std::lround(static_cast<double>(dof_lens_radius) * 1000.0)));
+        mix(h, static_cast<uint64_t>(std::lround(static_cast<double>(dof_focus_dist) * 100.0)));
         mix(h, static_cast<uint64_t>(scroll_offset));
 #ifdef GPU_RENDERING
         mix(h, static_cast<uint64_t>(current_renderer == RendererType::GPU ? 2 : 1));
@@ -499,7 +502,8 @@ public:
                 int min_progressive_display_passes = 1,
                 bool enable_wavefront = false,
                 bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false,
-                bool enable_simd_packets = false, bool enable_bvh = false
+                bool enable_simd_packets = false, bool enable_bvh = false,
+                float dof_lens_radius = 0.0f, float dof_focus_dist = 3.0f
 #ifdef GPU_RENDERING
                 , RendererType current_renderer = RendererType::CPU
 #endif
@@ -518,7 +522,7 @@ public:
         const uint64_t hkey = panel_state_hash(window_width, window_height, quality_idx, preset, fps, render_time,
             analysis_mode_name, enable_shadows, enable_reflections, enable_progressive, enable_adaptive, enable_denoiser,
             denoise_strength, min_progressive_display_passes, enable_wavefront, enable_morton, enable_stratified,
-            enable_frustum, enable_simd_packets, enable_bvh
+            enable_frustum, enable_simd_packets, enable_bvh, dof_lens_radius, dof_focus_dist
 #ifdef GPU_RENDERING
             , current_renderer
 #endif
@@ -739,6 +743,44 @@ public:
         for (int i = 0; i < 5; i++) {
             bool is_active = (preset.width == resolution_values[i]);
             render_button(resolution_names[i], resolution_values[i], 5, is_active);
+        }
+        y_offset += 35;
+
+        // Depth of field (thin lens; lens radius == aperture, matches GPU-style controls)
+        label_surface = TTF_RenderText_Blended(font, "DOF lens radius:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        const int active_ap_milli = static_cast<int>(std::lround(static_cast<double>(dof_lens_radius) * 1000.0));
+        struct {
+            const char* lab;
+            int milli;
+        } dof_ap[] = {{"0", 0}, {".02", 20}, {".05", 50}, {".10", 100}, {".15", 150}, {".25", 250}};
+        for (const auto& e : dof_ap) {
+            render_button(e.lab, e.milli, 19, active_ap_milli == e.milli);
+        }
+        y_offset += 35;
+
+        label_surface = TTF_RenderText_Blended(font, "DOF focus dist:", title_color);
+        if (label_surface) {
+            SDL_Rect lr = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &lr);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        const int active_focus_hund = static_cast<int>(std::lround(static_cast<double>(dof_focus_dist) * 100.0));
+        struct {
+            const char* lab;
+            int hund;
+        } dof_fd[] = {
+            {"1", 100}, {"1.5", 150}, {"2", 200}, {"3", 300}, {"5", 500}, {"8", 800}, {"12", 1200}};
+        for (const auto& e : dof_fd) {
+            render_button(e.lab, e.hund, 20, active_focus_hund == e.hund);
         }
         y_offset += 35;
 
@@ -1401,6 +1443,10 @@ public:
         bool new_simd_packets;
         bool bvh_changed;
         bool new_bvh;
+        bool dof_aperture_changed;
+        int new_dof_aperture_milli;
+        bool dof_focus_changed;
+        int new_dof_focus_hundredths;
         bool button_clicked;
 
         ClickResult() : quality_changed(false), new_quality(0),
@@ -1416,6 +1462,8 @@ public:
                        morton_changed(false), stratified_changed(false), frustum_changed(false),
                        simd_packets_changed(false), new_simd_packets(false),
                        bvh_changed(false), new_bvh(false),
+                       dof_aperture_changed(false), new_dof_aperture_milli(0),
+                       dof_focus_changed(false), new_dof_focus_hundredths(300),
                        button_clicked(false) {}
     };
 
@@ -1521,6 +1569,14 @@ public:
                     case 15: // BVH toggle
                         result.bvh_changed = true;
                         result.new_bvh = button.value;
+                        break;
+                    case 19: // DOF lens radius (milli)
+                        result.dof_aperture_changed = true;
+                        result.new_dof_aperture_milli = button.value;
+                        break;
+                    case 20: // DOF focus distance (hundredths of world unit)
+                        result.dof_focus_changed = true;
+                        result.new_dof_focus_hundredths = button.value;
                         break;
                 }
                 break;
@@ -1892,16 +1948,15 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
 
     if (ray_renderer.enable_progressive && ray_renderer.enable_wavefront) {
         path_id = 1;
-        static std::vector<std::vector<Color>> wf_progressive_accum;
+        static std::vector<Color> wf_progressive_accum;
         static int wf_progressive_passes = 0;
         static bool wf_progressive_initialized = false;
 
+        const size_t wf_cells = static_cast<size_t>(image_width) * static_cast<size_t>(image_height);
         const bool wf_dims_mismatch =
-            static_cast<int>(wf_progressive_accum.size()) != image_height ||
-            (image_height > 0 && (wf_progressive_accum.empty() ||
-                                  static_cast<int>(wf_progressive_accum[0].size()) != image_width));
+            wf_progressive_accum.size() != wf_cells || image_height <= 0 || image_width <= 0;
         if (!wf_progressive_initialized || wf_dims_mismatch || progressive_view_changed) {
-            wf_progressive_accum.assign(image_height, std::vector<Color>(image_width, Color(0, 0, 0)));
+            wf_progressive_accum.assign(wf_cells, Color(0, 0, 0));
             wf_progressive_passes = 0;
             wf_progressive_initialized = true;
         }
@@ -1913,7 +1968,10 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
-                Color linear = wf_progressive_accum[j][i] * inv_passes;
+                Color linear =
+                    wf_progressive_accum[static_cast<size_t>(j) * static_cast<size_t>(image_width) +
+                                          static_cast<size_t>(i)] *
+                    inv_passes;
                 Color pixel_color(std::sqrt(linear.x), std::sqrt(linear.y), std::sqrt(linear.z));
                 int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
                 framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
@@ -1931,17 +1989,16 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         progressive_last_max_depth = ray_renderer.max_depth;
     } else if (ray_renderer.enable_progressive && ray_renderer.enable_simd_packets) {
         path_id = 2;
-        static std::vector<std::vector<Color>> simd_prog_linear_accum;
+        static std::vector<Color> simd_prog_linear_accum;
         static int simd_prog_passes = 0;
         static bool simd_prog_initialized = false;
 
+        const size_t simd_cells = static_cast<size_t>(image_width) * static_cast<size_t>(image_height);
         const bool simd_prog_dims_mismatch =
-            static_cast<int>(simd_prog_linear_accum.size()) != image_height ||
-            (image_height > 0 && (simd_prog_linear_accum.empty() ||
-                                  static_cast<int>(simd_prog_linear_accum[0].size()) != image_width));
+            simd_prog_linear_accum.size() != simd_cells || image_height <= 0 || image_width <= 0;
 
         if (!simd_prog_initialized || simd_prog_dims_mismatch || progressive_view_changed) {
-            simd_prog_linear_accum.assign(image_height, std::vector<Color>(image_width, Color(0, 0, 0)));
+            simd_prog_linear_accum.assign(simd_cells, Color(0, 0, 0));
             simd_prog_passes = 0;
             simd_prog_initialized = true;
         }
@@ -1953,7 +2010,10 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
-                Color linear = simd_prog_linear_accum[j][i] * inv_passes;
+                Color linear =
+                    simd_prog_linear_accum[static_cast<size_t>(j) * static_cast<size_t>(image_width) +
+                                           static_cast<size_t>(i)] *
+                    inv_passes;
                 Color pixel_color(std::sqrt(linear.x), std::sqrt(linear.y), std::sqrt(linear.z));
                 int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
                 framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
@@ -1971,17 +2031,16 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         progressive_last_max_depth = ray_renderer.max_depth;
     } else if (ray_renderer.enable_progressive) {
         path_id = 3;
-        static std::vector<std::vector<Color>> scalar_prog_linear_accum;
+        static std::vector<Color> scalar_prog_linear_accum;
         static int scalar_prog_passes = 0;
         static bool scalar_prog_initialized = false;
 
+        const size_t sp_cells = static_cast<size_t>(image_width) * static_cast<size_t>(image_height);
         const bool sp_dims_mismatch =
-            static_cast<int>(scalar_prog_linear_accum.size()) != image_height ||
-            (image_height > 0 && (scalar_prog_linear_accum.empty() ||
-                                  static_cast<int>(scalar_prog_linear_accum[0].size()) != image_width));
+            scalar_prog_linear_accum.size() != sp_cells || image_height <= 0 || image_width <= 0;
 
         if (!scalar_prog_initialized || sp_dims_mismatch || progressive_view_changed) {
-            scalar_prog_linear_accum.assign(image_height, std::vector<Color>(image_width, Color(0, 0, 0)));
+            scalar_prog_linear_accum.assign(sp_cells, Color(0, 0, 0));
             scalar_prog_passes = 0;
             scalar_prog_initialized = true;
         }
@@ -1993,7 +2052,8 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
                 float v = (j + random_float_pcg()) / (image_height - 1);
                 Ray r = cam.get_ray(u, v);
                 Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
-                scalar_prog_linear_accum[j][i] = scalar_prog_linear_accum[j][i] + sample_color;
+                const size_t ix = static_cast<size_t>(j) * static_cast<size_t>(image_width) + static_cast<size_t>(i);
+                scalar_prog_linear_accum[ix] = scalar_prog_linear_accum[ix] + sample_color;
             }
         }
 
@@ -2003,7 +2063,10 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
-                Color linear = scalar_prog_linear_accum[j][i] * inv_passes;
+                Color linear =
+                    scalar_prog_linear_accum[static_cast<size_t>(j) * static_cast<size_t>(image_width) +
+                                             static_cast<size_t>(i)] *
+                    inv_passes;
                 Color pixel_color(std::sqrt(linear.x), std::sqrt(linear.y), std::sqrt(linear.z));
                 int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
                 framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
@@ -2021,13 +2084,15 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         progressive_last_max_depth = ray_renderer.max_depth;
     } else if (ray_renderer.enable_wavefront) {
         path_id = 4;
-        std::vector<std::vector<Color>> wavefront_framebuffer(image_height, std::vector<Color>(image_width));
+        std::vector<Color> wavefront_framebuffer(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
         ray_renderer.render_wavefront(cam, scene, wavefront_framebuffer, image_width, image_height, preset.samples);
 
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
-                Color pixel_color = wavefront_framebuffer[j][i];
+                Color pixel_color =
+                    wavefront_framebuffer[static_cast<size_t>(j) * static_cast<size_t>(image_width) +
+                                          static_cast<size_t>(i)];
                 int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
                 framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
                 framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
@@ -2036,13 +2101,14 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         }
     } else if (ray_renderer.enable_simd_packets) {
         path_id = 5;
-        std::vector<std::vector<Color>> simd_framebuffer(image_height, std::vector<Color>(image_width));
+        std::vector<Color> simd_framebuffer(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
         ray_renderer.render_simd_packets(cam, scene, simd_framebuffer, image_width, image_height, preset.samples);
 
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
-                Color pixel_color = simd_framebuffer[j][i];
+                Color pixel_color =
+                    simd_framebuffer[static_cast<size_t>(j) * static_cast<size_t>(image_width) + static_cast<size_t>(i)];
                 int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
                 framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
                 framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
@@ -2051,13 +2117,15 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         }
     } else if (ray_renderer.enable_morton) {
         path_id = 7;
-        std::vector<std::vector<Color>> morton_framebuffer(image_height, std::vector<Color>(image_width));
+        std::vector<Color> morton_framebuffer(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
         ray_renderer.render_morton(cam, scene, morton_framebuffer, image_width, image_height, preset.samples);
 
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
-                Color pixel_color = morton_framebuffer[j][i];
+                Color pixel_color =
+                    morton_framebuffer[static_cast<size_t>(j) * static_cast<size_t>(image_width) +
+                                        static_cast<size_t>(i)];
                 int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
                 framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
                 framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
@@ -2824,6 +2892,19 @@ int main(int argc, char* argv[]) {
                             std::cout << "Progressive min passes before display: " << min_progressive_display_passes
                                       << std::endl;
                             need_render = true;
+                        } else if (click_result.dof_aperture_changed) {
+                            camera_controller.aperture =
+                                static_cast<float>(click_result.new_dof_aperture_milli) / 1000.0f;
+                            std::cout << "DOF lens radius: " << camera_controller.aperture << std::endl;
+                            need_render = true;
+                        } else if (click_result.dof_focus_changed) {
+                            camera_controller.dist_to_focus =
+                                static_cast<float>(click_result.new_dof_focus_hundredths) / 100.0f;
+                            if (camera_controller.dist_to_focus < 0.05f) {
+                                camera_controller.dist_to_focus = 0.05f;
+                            }
+                            std::cout << "DOF focus distance: " << camera_controller.dist_to_focus << std::endl;
+                            need_render = true;
                         } else if (click_result.wavefront_changed) {
                             ray_renderer.enable_wavefront = !ray_renderer.enable_wavefront;
                             if (ray_renderer.enable_wavefront && ray_renderer.enable_simd_packets) {
@@ -3139,7 +3220,9 @@ int main(int argc, char* argv[]) {
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
                                  denoise_strength, min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
-                                 ray_renderer.enable_simd_packets, ray_renderer.enable_bvh,
+                                 enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
+                                 ray_renderer.enable_bvh,
+                                 camera_controller.aperture, camera_controller.dist_to_focus,
                                  current_renderer);
 #else
             controls_panel.render(renderer, window_width, window_height,
@@ -3148,7 +3231,8 @@ int main(int argc, char* argv[]) {
                                  denoise_strength, min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
                                  enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
-                                 ray_renderer.enable_bvh);
+                                 ray_renderer.enable_bvh,
+                                 camera_controller.aperture, camera_controller.dist_to_focus);
 #endif
         }
 

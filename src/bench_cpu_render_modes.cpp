@@ -93,12 +93,13 @@ static void render_scalar_path(const Camera& cam, Scene& scene, Renderer& ray_re
     }
 }
 
-static void tonemap_to_rgb24(const std::vector<std::vector<Color>>& src, int image_width, int image_height,
+static void tonemap_to_rgb24(const std::vector<Color>& src, int image_width, int image_height,
                              std::vector<unsigned char>& framebuffer) {
     #pragma omp parallel for schedule(dynamic, 16)
     for (int j = image_height - 1; j >= 0; --j) {
         for (int i = 0; i < image_width; ++i) {
-            Color pixel_color = src[static_cast<size_t>(j)][static_cast<size_t>(i)];
+            Color pixel_color =
+                src[static_cast<size_t>(j) * static_cast<size_t>(image_width) + static_cast<size_t>(i)];
             const int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
             framebuffer[static_cast<size_t>(pixel_index) + 0] =
                 static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
@@ -215,13 +216,10 @@ int main(int argc, char** argv) {
         ray_renderer.enable_reflections = true;
         ray_renderer.enable_wavefront = false;
         ray_renderer.enable_simd_packets = true;
-        std::vector<std::vector<Color>> simd_fb(static_cast<size_t>(image_height),
-                                               std::vector<Color>(static_cast<size_t>(image_width)));
+        std::vector<Color> simd_fb(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
         std::vector<unsigned char> framebuffer(nbytes);
         bench("simd_packets    ", [&]() {
-            for (auto& row : simd_fb) {
-                std::fill(row.begin(), row.end(), Color(0, 0, 0));
-            }
+            std::fill(simd_fb.begin(), simd_fb.end(), Color(0, 0, 0));
             ray_renderer.render_simd_packets(cam, scene, simd_fb, image_width, image_height, samples);
             tonemap_to_rgb24(simd_fb, image_width, image_height, framebuffer);
         });
@@ -233,13 +231,10 @@ int main(int argc, char** argv) {
         ray_renderer.enable_reflections = true;
         ray_renderer.enable_wavefront = true;
         ray_renderer.enable_simd_packets = false;
-        std::vector<std::vector<Color>> wf_fb(static_cast<size_t>(image_height),
-                                             std::vector<Color>(static_cast<size_t>(image_width)));
+        std::vector<Color> wf_fb(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
         std::vector<unsigned char> framebuffer(nbytes);
         bench("wavefront       ", [&]() {
-            for (auto& row : wf_fb) {
-                std::fill(row.begin(), row.end(), Color(0, 0, 0));
-            }
+            std::fill(wf_fb.begin(), wf_fb.end(), Color(0, 0, 0));
             ray_renderer.render_wavefront(cam, scene, wf_fb, image_width, image_height, samples);
             tonemap_to_rgb24(wf_fb, image_width, image_height, framebuffer);
         });

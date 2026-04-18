@@ -181,13 +181,13 @@ int main(int argc, char* argv[]) {
 
     if (use_morton_render) {
         std::cerr << "Morton traversal: Renderer::render_morton (same path as interactive CPU)\n";
-        std::vector<std::vector<Color>> morton_fb(static_cast<size_t>(image_height),
-                                                  std::vector<Color>(static_cast<size_t>(image_width)));
+        std::vector<Color> morton_fb(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
         renderer.render_morton(cam, scene, morton_fb, image_width, image_height, samples_per_pixel);
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = 0; j < image_height; ++j) {
             for (int i = 0; i < image_width; ++i) {
-                const Color& pc = morton_fb[static_cast<size_t>(j)][static_cast<size_t>(i)];
+                const Color& pc =
+                    morton_fb[static_cast<size_t>(j) * static_cast<size_t>(image_width) + static_cast<size_t>(i)];
                 const int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
                 framebuffer[static_cast<size_t>(pixel_index) + 0] =
                     static_cast<unsigned char>(256 * std::clamp(pc.x, 0.0f, 0.999f));

@@ -136,12 +136,13 @@ static void render_scalar_interactive_like(const Camera& cam, Scene& scene, Rend
     }
 }
 
-static void tonemap_to_rgb24(const std::vector<std::vector<Color>>& src, int image_width, int image_height,
+static void tonemap_to_rgb24(const std::vector<Color>& src, int image_width, int image_height,
                              std::vector<unsigned char>& framebuffer) {
     #pragma omp parallel for schedule(dynamic, 16)
     for (int j = image_height - 1; j >= 0; --j) {
         for (int i = 0; i < image_width; ++i) {
-            Color pixel_color = src[static_cast<size_t>(j)][static_cast<size_t>(i)];
+            Color pixel_color =
+                src[static_cast<size_t>(j) * static_cast<size_t>(image_width) + static_cast<size_t>(i)];
             const int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
             framebuffer[static_cast<size_t>(pixel_index) + 0] =
                 static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
@@ -624,8 +625,7 @@ int main(int argc, char** argv) {
             rr.enable_shadows = true;
             rr.enable_reflections = true;
             rr.enable_simd_packets = true;
-            std::vector<std::vector<Color>> simd_fb(static_cast<size_t>(image_height),
-                                                     std::vector<Color>(static_cast<size_t>(image_width)));
+            std::vector<Color> simd_fb(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
             rr.render_simd_packets(cam, scene, simd_fb, image_width, image_height, samples);
             tonemap_to_rgb24(simd_fb, image_width, image_height, fb);
         },
@@ -638,8 +638,7 @@ int main(int argc, char** argv) {
             rr.enable_shadows = true;
             rr.enable_reflections = true;
             rr.enable_wavefront = true;
-            std::vector<std::vector<Color>> wf_fb(static_cast<size_t>(image_height),
-                                                  std::vector<Color>(static_cast<size_t>(image_width)));
+            std::vector<Color> wf_fb(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
             rr.render_wavefront(cam, scene, wf_fb, image_width, image_height, samples);
             tonemap_to_rgb24(wf_fb, image_width, image_height, fb);
         },
@@ -651,8 +650,7 @@ int main(int argc, char** argv) {
             Renderer rr(5);
             rr.enable_shadows = true;
             rr.enable_reflections = true;
-            std::vector<std::vector<Color>> mf(static_cast<size_t>(image_height),
-                                               std::vector<Color>(static_cast<size_t>(image_width)));
+            std::vector<Color> mf(static_cast<size_t>(image_width) * static_cast<size_t>(image_height));
             rr.render_morton(cam, scene, mf, image_width, image_height, samples);
             tonemap_to_rgb24(mf, image_width, image_height, fb);
         },
