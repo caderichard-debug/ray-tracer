@@ -24,13 +24,14 @@ public:
     // Build the SIMD sphere cache and non-sphere list.
     // Call once (single-threaded) before a parallel render pass.
     void build_simd_cache() const {
-        simd_sphere_cache.clear();
+        simd_geom_cache.clear();
         original_sphere_cache.clear();
         non_sphere_cache.clear();
         for (const auto& obj : objects) {
             auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
             if (sphere) {
-                simd_sphere_cache.emplace_back(sphere->center, sphere->radius, sphere->mat);
+                simd_geom_cache.push_back(SphereSimdGeom{sphere->center.x, sphere->center.y, sphere->center.z,
+                                                          sphere->radius});
                 original_sphere_cache.push_back(sphere);
             } else {
                 non_sphere_cache.push_back(obj);
@@ -119,29 +120,29 @@ public:
             hit_records[i].mat = nullptr;
         }
 
-        // Use pre-built cache; fall back to building on-the-fly if not ready
-        const std::vector<Sphere_SIMD>* simd_spheres_ptr;
+        const std::vector<SphereSimdGeom>* simd_geoms_ptr;
         const std::vector<std::shared_ptr<Sphere>>* original_spheres_ptr;
-        std::vector<Sphere_SIMD> temp_simd;
+        std::vector<SphereSimdGeom> temp_geom;
         std::vector<std::shared_ptr<Sphere>> temp_orig;
         if (simd_cache_ready) {
-            simd_spheres_ptr = &simd_sphere_cache;
+            simd_geoms_ptr = &simd_geom_cache;
             original_spheres_ptr = &original_sphere_cache;
         } else {
             for (const auto& obj : objects) {
                 auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
                 if (sphere) {
-                    temp_simd.emplace_back(sphere->center, sphere->radius, sphere->mat);
+                    temp_geom.push_back(SphereSimdGeom{sphere->center.x, sphere->center.y, sphere->center.z,
+                                                       sphere->radius});
                     temp_orig.push_back(sphere);
                 }
             }
-            simd_spheres_ptr = &temp_simd;
+            simd_geoms_ptr = &temp_geom;
             original_spheres_ptr = &temp_orig;
         }
-        const auto& simd_spheres = *simd_spheres_ptr;
+        const auto& simd_geoms = *simd_geoms_ptr;
         const auto& original_spheres = *original_spheres_ptr;
 
-        if (simd_spheres.empty()) {
+        if (simd_geoms.empty()) {
             // No spheres, fall back to scalar for each ray
             bool any_hit = false;
 
@@ -174,10 +175,9 @@ public:
             hit_sphere_indices[i] = -1;  // Properly initialize all 8 elements
         }
 
-        // Test ray packet against each sphere using SIMD
-        for (size_t sphere_idx = 0; sphere_idx < simd_spheres.size(); sphere_idx++) {
+        for (size_t sphere_idx = 0; sphere_idx < simd_geoms.size(); sphere_idx++) {
             HitRecordPacket packet_hits;
-            simd_spheres[sphere_idx].hit_packet(packet, packet_hits);
+            sphere_simd_geom_hit_packet(simd_geoms[sphere_idx], packet, packet_hits);
 
             // Check which rays have closer hits
             __m256 is_closer = _mm256_and_ps(packet_hits.valid,
@@ -254,7 +254,7 @@ public:
         return false;
     }
 private:
-    mutable std::vector<Sphere_SIMD> simd_sphere_cache;
+    mutable std::vector<SphereSimdGeom> simd_geom_cache;
     mutable std::vector<std::shared_ptr<Sphere>> original_sphere_cache;
     mutable std::vector<std::shared_ptr<Primitive>> non_sphere_cache;
     mutable bool simd_cache_ready;
