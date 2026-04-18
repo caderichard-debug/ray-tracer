@@ -3,7 +3,8 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -Wno-missing-field-initializers -Wno-deprecated-declarations -Xpreprocessor -fopenmp -flto
+# -fopenmp is appended only when ENABLE_OPENMP=1 (below) so ENABLE_OPENMP=0 yields deterministic single-thread batch.
+CXXFLAGS = -std=c++17 -Wall -Wextra -Wno-missing-field-initializers -Wno-deprecated-declarations -flto
 OPTFLAGS = -O3 -march=native -mavx2 -mfma -ffast-math \
            -funroll-loops \
            -finline-functions \
@@ -13,7 +14,7 @@ OPTFLAGS = -O3 -march=native -mavx2 -mfma -ffast-math \
            --param large-function-growth=100 \
            -fno-strict-aliasing
 INCLUDES = -Isrc -Iexternal -I/usr/local/opt/libomp/include
-LDFLAGS = -L/usr/local/opt/libomp/lib -lomp -flto
+LDFLAGS = -flto
 SDL_LDFLAGS = -L/usr/local/opt/sdl2/lib -lSDL2 -lSDL2_ttf
 SDL_INCLUDES = -I/usr/local/opt/sdl2/include
 OPENGL_LDFLAGS = -L/usr/local/opt/glew/lib -lGLEW -framework OpenGL
@@ -82,7 +83,7 @@ FEATURE_DEFINES = -DENABLE_SHADOWS=$(ENABLE_SHADOWS) \
 # Compiler flags based on features
 ifeq ($(ENABLE_OPENMP),1)
     CXXFLAGS += -Xpreprocessor -fopenmp
-    LDFLAGS += -lomp
+    LDFLAGS += -L/usr/local/opt/libomp/lib -lomp
 endif
 
 ifeq ($(ENABLE_PTHREADS),1)
@@ -687,6 +688,12 @@ clean:
 	rm -rf benchmark_results/runs
 	@echo "✓ Clean complete"
 
+# Deterministic PPM SHA-256 vs golden (see tests/regression/README.md)
+.PHONY: regression-test
+regression-test:
+	@chmod +x tests/regression/run.sh 2>/dev/null || true
+	@bash tests/regression/run.sh
+
 # Clean and rebuild
 .PHONY: rebuild
 rebuild: clean all
@@ -775,6 +782,7 @@ help:
 	@echo "  make ascii              - Build ASCII terminal ray tracer"
 	@echo "  make bench-cpu-modes    - Build headless SIMD/wavefront/scalar benchmark"
 	@echo "  make bench-feature-deltas - Build toggle/path matrix vs scalar baseline"
+	@echo "  make regression-test   - CPU batch PPM SHA-256 regression (OPENMP=0)"
 	@echo "  make all                - Build default (batch-cpu)"
 	@echo ""
 	@echo "Running:"

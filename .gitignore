@@ -1,9 +1,15 @@
-# Build artifacts
+# Build artifacts / stray symlinks
 raytracer
+raytracer_batch_cpu
+raytracer_interactive_cpu
+raytracer_interactive_gpu
+raytracer_gpu
+raytracer_ascii
 build/
 *.o
 *.exe
 *.out
+*.dSYM/
 
 # Generated images
 *.ppm
@@ -13,6 +19,9 @@ build/
 # Tracked README showcase (exceptions must follow broad *.png rule)
 !/readme-examples/
 !/readme-examples/**
+
+# Regression test output (golden hashes are tracked under tests/golden/)
+tests/regression/out.ppm
 
 # IDE files
 .vscode/

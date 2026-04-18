@@ -5,7 +5,6 @@
 #include "../math/ray.h"
 #include "../primitives/primitive.h"
 #include "../texture/texture.h"
-#include <random>
 #include <cmath>
 #include <memory>
 
@@ -110,11 +109,8 @@ public:
         // Check for total internal reflection
         bool cannot_refract = refraction_ratio * sin_theta > 1.0f;
 
-        // Generate random float for Fresnel effect
-        static thread_local std::mt19937 generator(std::random_device{}());
-        std::uniform_real_distribution<float> distribution(0.0f, 1.0f);
-
-        if (cannot_refract || reflectance(cos_theta, refraction_ratio) > distribution(generator)) {
+        // Fresnel path uses the same PCG stream as the rest of the renderer (deterministic per call order).
+        if (cannot_refract || reflectance(cos_theta, refraction_ratio) > random_float_pcg()) {
             // Total internal reflection or Fresnel reflection - reflect the ray
             Vec3 reflected = reflect(unit_direction, rec.normal);
             scattered = Ray(rec.p, reflected);

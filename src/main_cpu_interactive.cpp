@@ -7,6 +7,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <string>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -17,8 +18,11 @@
 #include <thread>
 #include <omp.h>
 #include <fstream>
+#include <sys/stat.h>
+
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include "post/rgb24_postprocess.h"
 #include "math/vec3.h"
 #include "math/ray.h"
 #include "math/morton.h"
@@ -123,31 +127,60 @@ bool validate_current_settings(const QualityPreset& preset) {
     return true;
 }
 
-// Save CPU renderer texture to PNG file
-void save_cpu_screenshot(SDL_Renderer* renderer, SDL_Texture* texture, int width, int height, const char* filename) {
-    (void)texture;  // Unused parameter - we read from renderer instead
-    // Allocate buffer for pixel data
-    std::vector<unsigned char> pixels(width * height * 3);
+// Read back the stretched scene from the renderer right after it is drawn (no histogram, panel, or help).
+// Full output size — the scene was already drawn across the whole target; UI is not composited yet.
+// Pixel format: never pass non-RGBA layouts straight to stbi_write_png (ARGB/BGRA order differs per backend).
+static bool save_window_scene_readback_png(SDL_Renderer* renderer, const char* filename) {
+    int out_w = 0, out_h = 0;
+    if (SDL_GetRendererOutputSize(renderer, &out_w, &out_h) != 0 || out_w <= 0 || out_h <= 0) {
+        std::cerr << "Screenshot failed: SDL_GetRendererOutputSize: " << SDL_GetError() << "\n";
+        return false;
+    }
+    const SDL_Rect clip{0, 0, out_w, out_h};
+    const size_t n = static_cast<size_t>(out_w) * static_cast<size_t>(out_h);
+    const int pitch4 = out_w * 4;
 
-    // Read pixels from texture
-    SDL_Rect rect = {0, 0, width, height};
-    SDL_RenderReadPixels(renderer, &rect, SDL_PIXELFORMAT_RGB24, pixels.data(), width * 3);
-
-    // Flip vertically (SDL has top-left origin, but texture might be flipped)
-    std::vector<unsigned char> flipped_pixels(width * height * 3);
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            int src_idx = ((height - 1 - y) * width + x) * 3;
-            int dst_idx = (y * width + x) * 3;
-            flipped_pixels[dst_idx + 0] = pixels[src_idx + 0]; // R
-            flipped_pixels[dst_idx + 1] = pixels[src_idx + 1]; // G
-            flipped_pixels[dst_idx + 2] = pixels[src_idx + 2]; // B
+    // Prefer packed RGB (matches on-screen color without channel reorder bugs).
+    {
+        std::vector<unsigned char> rgb(n * 3u);
+        const int pitch3 = out_w * 3;
+        if (SDL_RenderReadPixels(renderer, &clip, SDL_PIXELFORMAT_RGB24, rgb.data(), pitch3) == 0) {
+            stbi_write_png(filename, out_w, out_h, 3, rgb.data(), pitch3);
+            std::cout << "Screenshot saved: " << filename << " (" << out_w << "x" << out_h << ")\n";
+            return true;
         }
     }
+    SDL_ClearError();
 
-    // Save as PNG
-    stbi_write_png(filename, width, height, 3, flipped_pixels.data(), width * 3);
-    std::cout << "Screenshot saved: " << filename << std::endl;
+    std::vector<unsigned char> src(n * 4u);
+    const Uint32 try_read[] = {
+        SDL_PIXELFORMAT_RGBA8888,
+        SDL_PIXELFORMAT_BGRA8888,
+        SDL_PIXELFORMAT_ARGB8888,
+        SDL_PIXELFORMAT_ABGR8888,
+    };
+    for (Uint32 fmt : try_read) {
+        if (SDL_RenderReadPixels(renderer, &clip, fmt, src.data(), pitch4) != 0) {
+            SDL_ClearError();
+            continue;
+        }
+        if (fmt == SDL_PIXELFORMAT_RGBA8888) {
+            stbi_write_png(filename, out_w, out_h, 4, src.data(), pitch4);
+            std::cout << "Screenshot saved: " << filename << " (" << out_w << "x" << out_h << ")\n";
+            return true;
+        }
+        std::vector<unsigned char> rgba(n * 4u);
+        if (SDL_ConvertPixels(out_w, out_h, fmt, src.data(), pitch4, SDL_PIXELFORMAT_RGBA8888, rgba.data(), pitch4) !=
+            0) {
+            SDL_ClearError();
+            continue;
+        }
+        stbi_write_png(filename, out_w, out_h, 4, rgba.data(), pitch4);
+        std::cout << "Screenshot saved: " << filename << " (" << out_w << "x" << out_h << ")\n";
+        return true;
+    }
+    std::cerr << "Screenshot failed: SDL_RenderReadPixels: " << SDL_GetError() << "\n";
+    return false;
 }
 
 // Camera controller
@@ -219,6 +252,65 @@ public:
     }
 
     Point3 get_position() const { return position; }
+
+    // Apply eye / look-at from a simple text file (hot reload). Updates yaw/pitch via update_from_angles().
+    bool try_load_hot_reload_file(const char* path) {
+        std::ifstream in(path);
+        if (!in) {
+            return false;
+        }
+        bool have_eye = false;
+        bool have_at = false;
+        Point3 eye = position;
+        Point3 at = lookat;
+        Vec3 up = vup;
+        float new_vfov = vfov;
+        float new_aperture = aperture;
+        float new_focus = dist_to_focus;
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.empty() || line[0] == '#') {
+                continue;
+            }
+            std::istringstream iss(line);
+            std::string key;
+            iss >> key;
+            if (key == "eye" || key == "lookfrom") {
+                iss >> eye.x >> eye.y >> eye.z;
+                have_eye = true;
+            } else if (key == "at" || key == "lookat") {
+                iss >> at.x >> at.y >> at.z;
+                have_at = true;
+            } else if (key == "up" || key == "vup") {
+                iss >> up.x >> up.y >> up.z;
+            } else if (key == "vfov") {
+                iss >> new_vfov;
+            } else if (key == "aperture") {
+                iss >> new_aperture;
+            } else if (key == "focus" || key == "dist_to_focus") {
+                iss >> new_focus;
+            }
+        }
+        if (!have_eye || !have_at) {
+            return false;
+        }
+        position = eye;
+        lookat = at;
+        vup = up;
+        vfov = new_vfov;
+        aperture = new_aperture;
+        dist_to_focus = new_focus;
+        Vec3 d = lookat - position;
+        const float len = d.length();
+        if (len > 1e-6f) {
+            d = d * (1.0f / len);
+            pitch = std::asin(std::clamp(d.y, -1.0f, 1.0f)) * 180.0f / static_cast<float>(M_PI);
+            yaw = std::atan2(d.z, d.x) * 180.0f / static_cast<float>(M_PI);
+        }
+        update_from_angles();
+        std::cout << "Hot reload: camera updated from \"" << path << "\"\n";
+        return true;
+    }
 };
 
 // Help overlay system
@@ -307,7 +399,8 @@ public:
             "Click window to capture mouse for looking around",
             "MOVE: WASD + Arrows | LOOK: Mouse",
             "1-6: Quality | M: Analysis | SPACE: Pause",
-            "S: Screenshot | C: Controls Panel | H: Help | ESC: Quit"
+            "G: Luma histogram | F5: Reload camera file (RT_HOT_RELOAD_CAMERA)",
+            "S: Window screenshot (no UI) | C: Controls Panel | H: Help | ESC: Quit"
         };
 
         int y_offset = 50;
@@ -375,6 +468,9 @@ private:
     int panel_x, panel_y;
     // Last overlay size from render() — needed so hit tests match SDL_RenderCopy (non-scrollable stretch).
     int panel_layout_w, panel_layout_h;
+    // Screenshot button rect in panel content coordinates (for pressed-state hit test after layout).
+    int screenshot_hit_x, screenshot_hit_y, screenshot_hit_w, screenshot_hit_h;
+    bool screenshot_button_pressed;
 
     // Scroll functionality
     int scroll_offset;
@@ -440,7 +536,9 @@ private:
 public:
     ControlsPanel()
         : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0), panel_layout_w(0),
-          panel_layout_h(0), scroll_offset(0), max_scroll_offset(0), content_height(0), is_scrollable(false),
+          panel_layout_h(0), screenshot_hit_x(0), screenshot_hit_y(0), screenshot_hit_w(0), screenshot_hit_h(0),
+          screenshot_button_pressed(false),
+          scroll_offset(0), max_scroll_offset(0), content_height(0), is_scrollable(false),
           panel_snap_tex(nullptr), panel_snap_key(0), panel_snap_w(0), panel_snap_h(0) {
         text_color = {20, 20, 20, 255};
         background_color = {50, 50, 60, 230};  // Dark blue-gray
@@ -536,11 +634,12 @@ public:
 
         // Scrollable document surface (cap size to reduce allocation on very tall windows)
         int content_surface_height = std::min(3200, std::max(1800, panel_height + 1200));
-        SDL_Surface* content_surface = SDL_CreateRGBSurface(0, panel_width, content_surface_height, 32, 0, 0, 0, 0);
+        SDL_Surface* content_surface =
+            SDL_CreateRGBSurfaceWithFormat(0, panel_width, content_surface_height, 32, SDL_PIXELFORMAT_RGBA8888);
         if (!content_surface) return;
 
-        // Fill content background
-        SDL_FillRect(content_surface, nullptr, SDL_MapRGBA(content_surface->format, 50, 50, 60, 230));
+        SDL_FillRect(content_surface, nullptr, SDL_MapRGBA(content_surface->format, 0, 0, 0, 0));
+        SDL_FillRect(content_surface, nullptr, SDL_MapRGBA(content_surface->format, 50, 50, 60, 135));
 
         // Render title
         const char* title_text = "SETTINGS";
@@ -553,7 +652,7 @@ public:
 
         // Draw separator line
         SDL_Rect separator = {10, 35, panel_width - 20, 1};
-        SDL_FillRect(content_surface, &separator, SDL_MapRGBA(content_surface->format, 100, 100, 120, 255));
+        SDL_FillRect(content_surface, &separator, SDL_MapRGBA(content_surface->format, 100, 100, 120, 200));
 
         int y_offset = 50;
         const int line_height = 28;
@@ -641,17 +740,17 @@ public:
             // Draw button background
             Uint32 button_bg;
             if (is_active) {
-                button_bg = SDL_MapRGBA(content_surface->format, 100, 150, 200, 255);
+                button_bg = SDL_MapRGBA(content_surface->format, 100, 150, 200, 235);
             } else {
-                button_bg = SDL_MapRGBA(content_surface->format, 70, 70, 90, 255);
+                button_bg = SDL_MapRGBA(content_surface->format, 70, 70, 90, 235);
             }
             SDL_FillRect(content_surface, &button_rect, button_bg);
 
             // Draw button border
             SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
-            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
             border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
-            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
             // Draw button text
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, label, text_color);
@@ -811,14 +910,14 @@ public:
             enable_shadows ? button_active_color.r : button_color.r,
             enable_shadows ? button_active_color.g : button_color.g,
             enable_shadows ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &shadows_button_rect, shadows_button_bg);
 
         // Draw shadows button border
         SDL_Rect shadows_border = {shadows_button_rect.x, shadows_button_rect.y, shadows_button_rect.w, 2};
-        SDL_FillRect(content_surface, &shadows_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &shadows_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         shadows_border = {shadows_button_rect.x, shadows_button_rect.y + shadows_button_rect.h - 2, shadows_button_rect.w, 2};
-        SDL_FillRect(content_surface, &shadows_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &shadows_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         // Draw shadows button text
         SDL_Surface* shadows_text_surface = TTF_RenderText_Blended(font, shadows_label, text_color);
@@ -846,14 +945,14 @@ public:
             enable_reflections ? button_active_color.r : button_color.r,
             enable_reflections ? button_active_color.g : button_color.g,
             enable_reflections ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &reflections_button_rect, reflections_button_bg);
 
         // Draw reflections button border
         SDL_Rect reflections_border = {reflections_button_rect.x, reflections_button_rect.y, reflections_button_rect.w, 2};
-        SDL_FillRect(content_surface, &reflections_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &reflections_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         reflections_border = {reflections_button_rect.x, reflections_button_rect.y + reflections_button_rect.h - 2, reflections_button_rect.w, 2};
-        SDL_FillRect(content_surface, &reflections_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &reflections_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         // Draw reflections button text
         SDL_Surface* reflections_text_surface = TTF_RenderText_Blended(font, reflections_label, text_color);
@@ -881,20 +980,25 @@ public:
         const char* screenshot_label = "Save Screenshot";
         int screenshot_button_width = 120;
         SDL_Rect screenshot_button_rect = {15, y_offset, screenshot_button_width, 24};
+        screenshot_hit_x = screenshot_button_rect.x;
+        screenshot_hit_y = screenshot_button_rect.y;
+        screenshot_hit_w = screenshot_button_rect.w;
+        screenshot_hit_h = screenshot_button_rect.h;
 
         // Store button for click detection (category 7 = screenshot)
         buttons.push_back({{screenshot_button_rect.x + panel_x, screenshot_button_rect.y + panel_y, screenshot_button_rect.w, screenshot_button_rect.h},
                           "screenshot", 1, 7});
 
         // Draw screenshot button background (make it brighter like the "on" toggle state)
-        Uint32 screenshot_button_bg = SDL_MapRGBA(content_surface->format, button_active_color.r, button_active_color.g, button_active_color.b, 255);
+        Uint32 screenshot_button_bg =
+            SDL_MapRGBA(content_surface->format, button_active_color.r, button_active_color.g, button_active_color.b, 232);
         SDL_FillRect(content_surface, &screenshot_button_rect, screenshot_button_bg);
 
         // Draw screenshot button border
         SDL_Rect screenshot_border = {screenshot_button_rect.x, screenshot_button_rect.y, screenshot_button_rect.w, 2};
-        SDL_FillRect(content_surface, &screenshot_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &screenshot_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         screenshot_border = {screenshot_button_rect.x, screenshot_button_rect.y + screenshot_button_rect.h - 2, screenshot_button_rect.w, 2};
-        SDL_FillRect(content_surface, &screenshot_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &screenshot_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         // Draw screenshot button text
         SDL_Surface* screenshot_text_surface = TTF_RenderText_Blended(font, screenshot_label, text_color);
@@ -959,14 +1063,14 @@ public:
                 is_active ? button_active_color.r : button_color.r,
                 is_active ? button_active_color.g : button_color.g,
                 is_active ? button_active_color.b : button_color.b,
-                255);
+                232);
             SDL_FillRect(content_surface, &button_rect, button_bg);
 
             // Draw button border
             SDL_Rect border = {button_rect.x, button_rect.y, button_rect.w, 2};
-            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
             border = {button_rect.x, button_rect.y + button_rect.h - 2, button_rect.w, 2};
-            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+            SDL_FillRect(content_surface, &border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
             // Draw button text
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, analysis_modes[i], text_color);
@@ -1005,14 +1109,14 @@ public:
             enable_progressive ? button_active_color.r : button_color.r,
             enable_progressive ? button_active_color.g : button_color.g,
             enable_progressive ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &progressive_button_rect, progressive_button_bg);
 
         // Draw progressive button border
         SDL_Rect progressive_border = {progressive_button_rect.x, progressive_button_rect.y, progressive_button_rect.w, 2};
-        SDL_FillRect(content_surface, &progressive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &progressive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         progressive_border = {progressive_button_rect.x, progressive_button_rect.y + progressive_button_rect.h - 2, progressive_button_rect.w, 2};
-        SDL_FillRect(content_surface, &progressive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &progressive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         // Draw progressive button text
         SDL_Surface* progressive_text_surface = TTF_RenderText_Blended(font, progressive_label, text_color);
@@ -1040,14 +1144,14 @@ public:
             enable_adaptive ? button_active_color.r : button_color.r,
             enable_adaptive ? button_active_color.g : button_color.g,
             enable_adaptive ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &adaptive_button_rect, adaptive_button_bg);
 
         // Draw adaptive button border
         SDL_Rect adaptive_border = {adaptive_button_rect.x, adaptive_button_rect.y, adaptive_button_rect.w, 2};
-        SDL_FillRect(content_surface, &adaptive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &adaptive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         adaptive_border = {adaptive_button_rect.x, adaptive_button_rect.y + adaptive_button_rect.h - 2, adaptive_button_rect.w, 2};
-        SDL_FillRect(content_surface, &adaptive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &adaptive_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         // Draw adaptive button text
         SDL_Surface* adaptive_text_surface = TTF_RenderText_Blended(font, adaptive_label, text_color);
@@ -1077,14 +1181,14 @@ public:
             enable_morton ? button_active_color.r : button_color.r,
             enable_morton ? button_active_color.g : button_color.g,
             enable_morton ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &morton_button_rect, morton_button_bg);
 
         // Draw morton button border
         SDL_Rect morton_border = {morton_button_rect.x, morton_button_rect.y, morton_button_rect.w, 2};
-        SDL_FillRect(content_surface, &morton_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &morton_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         morton_border = {morton_button_rect.x, morton_button_rect.y + morton_button_rect.h - 2, morton_button_rect.w, 2};
-        SDL_FillRect(content_surface, &morton_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &morton_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         // Draw morton button text
         SDL_Surface* morton_text_surface = TTF_RenderText_Blended(font, morton_label, text_color);
@@ -1112,14 +1216,14 @@ public:
             enable_stratified ? button_active_color.r : button_color.r,
             enable_stratified ? button_active_color.g : button_color.g,
             enable_stratified ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &stratified_button_rect, stratified_button_bg);
 
         // Draw stratified button border
         SDL_Rect stratified_border = {stratified_button_rect.x, stratified_button_rect.y, stratified_button_rect.w, 2};
-        SDL_FillRect(content_surface, &stratified_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &stratified_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         stratified_border = {stratified_button_rect.x, stratified_button_rect.y + stratified_button_rect.h - 2, stratified_button_rect.w, 2};
-        SDL_FillRect(content_surface, &stratified_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &stratified_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         // Draw stratified button text
         SDL_Surface* stratified_text_surface = TTF_RenderText_Blended(font, stratified_label, text_color);
@@ -1148,13 +1252,13 @@ public:
             enable_frustum ? button_active_color.r : button_color.r,
             enable_frustum ? button_active_color.g : button_color.g,
             enable_frustum ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &frustum_button_rect, frustum_button_bg);
 
         SDL_Rect frustum_border = {frustum_button_rect.x, frustum_button_rect.y, frustum_button_rect.w, 2};
-        SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         frustum_border = {frustum_button_rect.x, frustum_button_rect.y + frustum_button_rect.h - 2, frustum_button_rect.w, 2};
-        SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         SDL_Surface* frustum_text_surface = TTF_RenderText_Blended(font, frustum_label, text_color);
         if (frustum_text_surface) {
@@ -1176,12 +1280,12 @@ public:
             enable_bvh ? button_active_color.r : button_color.r,
             enable_bvh ? button_active_color.g : button_color.g,
             enable_bvh ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &bvh_button_rect, bvh_button_bg);
         SDL_Rect bvh_border = {bvh_button_rect.x, bvh_button_rect.y, bvh_button_rect.w, 2};
-        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         bvh_border = {bvh_button_rect.x, bvh_button_rect.y + bvh_button_rect.h - 2, bvh_button_rect.w, 2};
-        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         SDL_Surface* bvh_text_surface = TTF_RenderText_Blended(font, bvh_label, text_color);
         if (bvh_text_surface) {
             SDL_Rect bvh_text_rect = {
@@ -1207,13 +1311,13 @@ public:
             enable_simd_packets ? button_active_color.r : button_color.r,
             enable_simd_packets ? button_active_color.g : button_color.g,
             enable_simd_packets ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &simd_button_rect, simd_button_bg);
 
         SDL_Rect simd_border = {simd_button_rect.x, simd_button_rect.y, simd_button_rect.w, 2};
-        SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         simd_border = {simd_button_rect.x, simd_button_rect.y + simd_button_rect.h - 2, simd_button_rect.w, 2};
-        SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &simd_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         SDL_Surface* simd_text_surface = TTF_RenderText_Blended(font, simd_label, text_color);
         if (simd_text_surface) {
@@ -1237,13 +1341,13 @@ public:
             enable_wavefront ? button_active_color.r : button_color.r,
             enable_wavefront ? button_active_color.g : button_color.g,
             enable_wavefront ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &wavefront_button_rect, wavefront_button_bg);
 
         SDL_Rect wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y, wavefront_button_rect.w, 2};
-        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         wavefront_border = {wavefront_button_rect.x, wavefront_button_rect.y + wavefront_button_rect.h - 2, wavefront_button_rect.w, 2};
-        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &wavefront_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
 
         SDL_Surface* wavefront_text_surface = TTF_RenderText_Blended(font, wavefront_label, text_color);
         if (wavefront_text_surface) {
@@ -1269,12 +1373,12 @@ public:
             enable_denoiser ? button_active_color.r : button_color.r,
             enable_denoiser ? button_active_color.g : button_color.g,
             enable_denoiser ? button_active_color.b : button_color.b,
-            255);
+            232);
         SDL_FillRect(content_surface, &denoise_button_rect, denoise_button_bg);
         SDL_Rect denoise_border = {denoise_button_rect.x, denoise_button_rect.y, denoise_button_rect.w, 2};
-        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         denoise_border = {denoise_button_rect.x, denoise_button_rect.y + denoise_button_rect.h - 2, denoise_button_rect.w, 2};
-        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
         SDL_Surface* denoise_text_surface = TTF_RenderText_Blended(font, denoise_label, text_color);
         if (denoise_text_surface) {
             SDL_Rect denoise_text_rect = {
@@ -1308,12 +1412,12 @@ public:
                     active ? button_active_color.r : button_color.r,
                     active ? button_active_color.g : button_color.g,
                     active ? button_active_color.b : button_color.b,
-                    255);
+                    232);
                 SDL_FillRect(content_surface, &r, bg);
                 SDL_Rect btop = {r.x, r.y, r.w, 2};
-                SDL_FillRect(content_surface, &btop, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+                SDL_FillRect(content_surface, &btop, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
                 SDL_Rect bbot = {r.x, r.y + r.h - 2, r.w, 2};
-                SDL_FillRect(content_surface, &bbot, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+                SDL_FillRect(content_surface, &bbot, SDL_MapRGBA(content_surface->format, 120, 120, 140, 200));
                 SDL_Surface* ts = TTF_RenderText_Blended(font, str_names[si], text_color);
                 if (ts) {
                     SDL_Rect tr = {r.x + (str_bw - ts->w) / 2, r.y + (24 - ts->h) / 2, ts->w, ts->h};
@@ -1325,31 +1429,16 @@ public:
 
         y_offset += 35;
 
-        label_surface = TTF_RenderText_Blended(font, "Denoise amount:", title_color);
-        if (label_surface) {
-            SDL_Rect lr = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, content_surface, &lr);
-            SDL_FreeSurface(label_surface);
-        }
-        char denoise_pct_label[16];
-        snprintf(denoise_pct_label, sizeof(denoise_pct_label), "%d%%", std::clamp(denoise_amount_percent, 0, 100));
-        SDL_Surface* pct_surface = TTF_RenderText_Blended(font, denoise_pct_label, value_color);
-        if (pct_surface) {
-            SDL_Rect pr = {panel_width - pct_surface->w - 15, y_offset, pct_surface->w, pct_surface->h};
-            SDL_BlitSurface(pct_surface, nullptr, content_surface, &pr);
-            SDL_FreeSurface(pct_surface);
-        }
-        y_offset += 22;
         {
             SDL_Rect slider_track = {15, y_offset + 8, 255, 8};
-            SDL_FillRect(content_surface, &slider_track, SDL_MapRGBA(content_surface->format, 55, 60, 75, 255));
+            SDL_FillRect(content_surface, &slider_track, SDL_MapRGBA(content_surface->format, 55, 60, 75, 210));
             const int amount = std::clamp(denoise_amount_percent, 0, 100);
             const int fill_w = std::max(1, (slider_track.w * amount) / 100);
             SDL_Rect slider_fill = {slider_track.x, slider_track.y, fill_w, slider_track.h};
-            SDL_FillRect(content_surface, &slider_fill, SDL_MapRGBA(content_surface->format, 100, 150, 200, 255));
+            SDL_FillRect(content_surface, &slider_fill, SDL_MapRGBA(content_surface->format, 100, 150, 200, 225));
             const int knob_x = slider_track.x + ((slider_track.w - 1) * amount) / 100;
             SDL_Rect knob = {knob_x - 4, slider_track.y - 4, 8, 16};
-            SDL_FillRect(content_surface, &knob, SDL_MapRGBA(content_surface->format, 170, 210, 245, 255));
+            SDL_FillRect(content_surface, &knob, SDL_MapRGBA(content_surface->format, 170, 210, 245, 230));
 
             SDL_Rect slider_hit = {15, y_offset, 255, 24};
             buttons.push_back({{slider_hit.x + panel_x, slider_hit.y + panel_y, slider_hit.w, slider_hit.h},
@@ -1384,9 +1473,27 @@ public:
         max_scroll_offset = is_scrollable ? (content_height - panel_height) : 0;
         scroll_offset = std::min(scroll_offset, max_scroll_offset);  // Clamp scroll offset
 
-        // Convert surface to texture
+        if (screenshot_button_pressed && screenshot_hit_w > 0) {
+            SDL_Rect pr = {screenshot_hit_x, screenshot_hit_y, screenshot_hit_w, screenshot_hit_h};
+            SDL_FillRect(content_surface, &pr, SDL_MapRGBA(content_surface->format, 48, 56, 72, 228));
+            SDL_Rect s_top = {pr.x, pr.y, pr.w, 2};
+            SDL_FillRect(content_surface, &s_top, SDL_MapRGBA(content_surface->format, 32, 38, 48, 210));
+            SDL_Rect s_bot = {pr.x, pr.y + pr.h - 2, pr.w, 2};
+            SDL_FillRect(content_surface, &s_bot, SDL_MapRGBA(content_surface->format, 32, 38, 48, 210));
+            const char* pressed_label = "Save Screenshot";
+            SDL_Color lit_text = {210, 220, 235, 255};
+            SDL_Surface* ts = TTF_RenderText_Blended(font, pressed_label, lit_text);
+            if (ts) {
+                SDL_Rect tr = {pr.x + (pr.w - ts->w) / 2, pr.y + (pr.h - ts->h) / 2, ts->w, ts->h};
+                SDL_BlitSurface(ts, nullptr, content_surface, &tr);
+                SDL_FreeSurface(ts);
+            }
+        }
+
+        // Convert surface to texture (alpha blend over the ray-traced view)
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, content_surface);
         if (texture) {
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
             // Source rect: only show the visible portion based on scroll_offset
             SDL_Rect src_rect = {0, is_scrollable ? scroll_offset : 0, panel_width,
                                  is_scrollable ? panel_height : content_height};
@@ -1402,24 +1509,19 @@ public:
                 int thumb_height = static_cast<int>(thumb_ratio * scrollbar_height);
                 int thumb_y = static_cast<float>(scroll_offset) / max_scroll_offset * (scrollbar_height - thumb_height);
 
-                // Draw scrollbar background
-                SDL_Rect scrollbar_bg = {scrollbar_x, 0, scrollbar_width, scrollbar_height};
-                Uint32 scrollbar_bg_color = SDL_MapRGBA(content_surface->format, 40, 40, 50, 200);
-                SDL_FillRect(content_surface, &scrollbar_bg, scrollbar_bg_color);
-
-                // Draw thumb
-                SDL_Rect thumb = {scrollbar_x, thumb_y, scrollbar_width, thumb_height};
-                Uint32 thumb_color = SDL_MapRGBA(content_surface->format, 100, 150, 200, 255);
-                SDL_FillRect(content_surface, &thumb, thumb_color);
-
-                // Convert scrollbar to texture and render
-                SDL_Surface* scrollbar_surface = SDL_CreateRGBSurface(0, scrollbar_width, scrollbar_height, 32, 0, 0, 0, 0);
+                // Scrollbar is a separate blended texture (main panel texture is already uploaded above).
+                SDL_Surface* scrollbar_surface = SDL_CreateRGBSurfaceWithFormat(
+                    0, scrollbar_width, scrollbar_height, 32, SDL_PIXELFORMAT_RGBA8888);
                 if (scrollbar_surface) {
-                    SDL_FillRect(scrollbar_surface, nullptr, SDL_MapRGBA(scrollbar_surface->format, 40, 40, 50, 200));
-                    SDL_FillRect(scrollbar_surface, &thumb, SDL_MapRGBA(scrollbar_surface->format, 100, 150, 200, 255));
+                    SDL_FillRect(scrollbar_surface, nullptr, SDL_MapRGBA(scrollbar_surface->format, 0, 0, 0, 0));
+                    SDL_FillRect(scrollbar_surface, nullptr, SDL_MapRGBA(scrollbar_surface->format, 40, 40, 50, 170));
+                    SDL_Rect thumb_local = {0, thumb_y, scrollbar_width, thumb_height};
+                    SDL_FillRect(scrollbar_surface, &thumb_local,
+                                 SDL_MapRGBA(scrollbar_surface->format, 100, 150, 200, 220));
 
                     SDL_Texture* scrollbar_texture = SDL_CreateTextureFromSurface(renderer, scrollbar_surface);
                     if (scrollbar_texture) {
+                        SDL_SetTextureBlendMode(scrollbar_texture, SDL_BLENDMODE_BLEND);
                         SDL_Rect scrollbar_dest = {panel_x + scrollbar_x, panel_y, scrollbar_width, scrollbar_height};
                         SDL_RenderCopy(renderer, scrollbar_texture, nullptr, &scrollbar_dest);
                         SDL_DestroyTexture(scrollbar_texture);
@@ -1570,6 +1672,7 @@ public:
                         result.new_analysis_mode = button.value;
                         break;
                     case 7: // Screenshot
+                        screenshot_button_pressed = true;
                         result.screenshot_requested = true;
                         break;
                     case 8: // Progressive toggle
@@ -1630,6 +1733,10 @@ public:
             }
         }
         return result;
+    }
+
+    void release_pressed_buttons() {
+        screenshot_button_pressed = false;
     }
 
     // Adjust scroll offset by delta (positive = scroll down, negative = scroll up)
@@ -1705,83 +1812,18 @@ static void denoise_params_from_strength(int strength, float* out_sigma_s, float
     }
 }
 
-// Lightweight edge-preserving smooth (bilateral on luminance) for packed RGB24. Runs on producer thread.
-static void apply_rgb24_edge_preserving_denoise(std::vector<unsigned char>& rgb, int w, int h, float sigma_s,
-                                               float sigma_r, int spatial_radius) {
-    if (spatial_radius < 1) {
-        spatial_radius = 1;
-    }
-    const int need = spatial_radius * 2 + 1;
-    if (w < need || h < need || rgb.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 3u) {
-        return;
-    }
-    const size_t nbytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 3u;
-    std::vector<unsigned char> out(nbytes);
-    const float inv_two_ss = 1.0f / (2.0f * sigma_s * sigma_s);
-    const float inv_two_sr = 1.0f / (2.0f * sigma_r * sigma_r);
-
-    #pragma omp parallel for schedule(dynamic, 8)
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            const size_t cidx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3u;
-            const float c0r = rgb[cidx] * (1.0f / 255.0f);
-            const float c0g = rgb[cidx + 1] * (1.0f / 255.0f);
-            const float c0b = rgb[cidx + 2] * (1.0f / 255.0f);
-            const float l0 = 0.299f * c0r + 0.587f * c0g + 0.114f * c0b;
-            float sumw = 0.0f;
-            float sumr = 0.0f;
-            float sumg = 0.0f;
-            float sumb = 0.0f;
-            for (int dy = -spatial_radius; dy <= spatial_radius; ++dy) {
-                const int yy = y + dy;
-                if (yy < 0 || yy >= h) {
-                    continue;
-                }
-                for (int dx = -spatial_radius; dx <= spatial_radius; ++dx) {
-                    const int xx = x + dx;
-                    if (xx < 0 || xx >= w) {
-                        continue;
-                    }
-                    const size_t nidx = (static_cast<size_t>(yy) * static_cast<size_t>(w) + static_cast<size_t>(xx)) * 3u;
-                    const float nr = rgb[nidx] * (1.0f / 255.0f);
-                    const float ng = rgb[nidx + 1] * (1.0f / 255.0f);
-                    const float nb = rgb[nidx + 2] * (1.0f / 255.0f);
-                    const float l1 = 0.299f * nr + 0.587f * ng + 0.114f * nb;
-                    const float ds = static_cast<float>(dx * dx + dy * dy);
-                    const float ws = std::exp(-ds * inv_two_ss);
-                    const float dl = l1 - l0;
-                    const float wr = std::exp(-(dl * dl) * inv_two_sr);
-                    const float wgt = ws * wr;
-                    sumw += wgt;
-                    sumr += wgt * nr;
-                    sumg += wgt * ng;
-                    sumb += wgt * nb;
-                }
-            }
-            if (sumw < 1e-6f) {
-                sumw = 1.0f;
-            }
-            const float inv = 1.0f / sumw;
-            out[cidx] = static_cast<unsigned char>(std::clamp(sumr * inv * 255.0f, 0.0f, 255.0f));
-            out[cidx + 1] = static_cast<unsigned char>(std::clamp(sumg * inv * 255.0f, 0.0f, 255.0f));
-            out[cidx + 2] = static_cast<unsigned char>(std::clamp(sumb * inv * 255.0f, 0.0f, 255.0f));
-        }
-    }
-    rgb.swap(out);
-}
-
-// Half-resolution bilateral pass then nearest upscale (large frames only).
+// Half-resolution bilateral pass then bilinear upscale (large frames only). Inner filter = separable bilateral.
 static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>& rgb, int w, int h, float sigma_s,
                                                       float sigma_r, int spatial_radius) {
     const int need_half = spatial_radius * 2 + 1;
     if (w < 10 || h < 10 || static_cast<long long>(w) * h < 400000) {
-        apply_rgb24_edge_preserving_denoise(rgb, w, h, sigma_s, sigma_r, spatial_radius);
+        rgb24_post::apply_separable_bilateral_rgb24(rgb, w, h, sigma_s, sigma_r, spatial_radius);
         return;
     }
     const int w2 = w / 2;
     const int h2 = h / 2;
     if (w2 < need_half || h2 < need_half) {
-        apply_rgb24_edge_preserving_denoise(rgb, w, h, sigma_s, sigma_r, spatial_radius);
+        rgb24_post::apply_separable_bilateral_rgb24(rgb, w, h, sigma_s, sigma_r, spatial_radius);
         return;
     }
     std::vector<unsigned char> half(static_cast<size_t>(w2) * static_cast<size_t>(h2) * 3u);
@@ -1806,7 +1848,7 @@ static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>
             half[di + 2] = static_cast<unsigned char>(acc_b / cnt);
         }
     }
-    apply_rgb24_edge_preserving_denoise(half, w2, h2, sigma_s, sigma_r, spatial_radius);
+    rgb24_post::apply_separable_bilateral_rgb24(half, w2, h2, sigma_s, sigma_r, spatial_radius);
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
@@ -1916,7 +1958,12 @@ static void apply_rgb24_denoise_pipeline(std::vector<unsigned char>& rgb, int w,
         return;
     }
 
-    std::vector<unsigned char> original = rgb;
+    const std::vector<unsigned char> original = rgb;
+    std::vector<float> l_orig;
+    rgb24_post::build_luminance_buffer(original, w, h, l_orig);
+    std::vector<float> lum_var;
+    rgb24_post::luminance_variance_3x3(l_orig, w, h, lum_var);
+
     float ds = 1.35f;
     float dr = 0.065f;
     int rad = 2;
@@ -1934,20 +1981,54 @@ static void apply_rgb24_denoise_pipeline(std::vector<unsigned char>& rgb, int w,
     apply_rgb24_edge_preserving_denoise_large(rgb, w, h, ds, dr, rad);
     apply_rgb24_light_unsharp_after_denoise(rgb, w, h, denoise_strength_0_2);
 
-    // Final blend restores sub-pixel edge detail from the traced image while retaining denoise benefit.
+    // Variance-guided mix: high local luminance variance → keep more of the original (edges / noise structure).
+    constexpr float k_var = 320.0f;
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; ++y) {
         const size_t row = static_cast<size_t>(y) * static_cast<size_t>(w) * 3u;
+        const size_t lrow = static_cast<size_t>(y) * static_cast<size_t>(w);
         for (int x = 0; x < w; ++x) {
             const size_t i = row + static_cast<size_t>(x) * 3u;
+            const float var = lum_var[lrow + static_cast<size_t>(x)];
+            const float edge_preserve = 1.0f / (1.0f + k_var * var);
+            const float mix = amount01 * edge_preserve;
             for (int c = 0; c < 3; ++c) {
                 const float o = static_cast<float>(original[i + static_cast<size_t>(c)]);
-                const float d = static_cast<float>(rgb[i + static_cast<size_t>(c)]);
-                const float v = o + (d - o) * amount01;
+                const float dn = static_cast<float>(rgb[i + static_cast<size_t>(c)]);
+                const float v = o + (dn - o) * mix;
                 rgb[i + static_cast<size_t>(c)] = static_cast<unsigned char>(std::clamp(v, 0.0f, 255.0f));
             }
         }
     }
+}
+
+// Live luminance histogram (64 bins) — bottom-left overlay.
+static void render_luminance_histogram_overlay(SDL_Renderer* renderer, const uint32_t bins64[64], int window_width,
+                                               int window_height) {
+    uint32_t mx = 1u;
+    for (int i = 0; i < 64; ++i) {
+        mx = std::max(mx, bins64[i]);
+    }
+    const int pad = 10;
+    const int bar_total_w = 192;
+    const int h_max = 56;
+    const int base_x = pad;
+    const int base_y = window_height - pad - h_max;
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_Rect backdrop = {base_x - 4, base_y - 18, bar_total_w + 8, h_max + 26};
+    SDL_SetRenderDrawColor(renderer, 20, 20, 30, 160);
+    SDL_RenderFillRect(renderer, &backdrop);
+    for (int i = 0; i < 64; ++i) {
+        const int bh = static_cast<int>((static_cast<uint64_t>(bins64[i]) * static_cast<uint64_t>(h_max)) /
+                                         static_cast<uint64_t>(mx));
+        const int bx = base_x + (i * bar_total_w) / 64;
+        const int bw = std::max(1, bar_total_w / 64 - 1);
+        SDL_Rect bar = {bx, base_y + h_max - bh, bw, std::max(1, bh)};
+        const int t = (i * 4) + 32;
+        SDL_SetRenderDrawColor(renderer, std::min(255, t + 40), std::min(255, 180 - i), 220, 230);
+        SDL_RenderFillRect(renderer, &bar);
+    }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
 static bool rt_profile_enabled() {
@@ -2715,6 +2796,13 @@ int main(int argc, char* argv[]) {
     bool paused = false;
     bool need_render = true;
     bool show_help = false;
+    bool show_luma_histogram = false;
+    time_t hot_reload_last_mtime = 0;
+    bool hot_reload_have_mtime = false;
+    const char* hot_reload_path = std::getenv("RT_HOT_RELOAD_CAMERA");
+    if (!hot_reload_path || !hot_reload_path[0]) {
+        hot_reload_path = "config/camera_hot_reload.txt";
+    }
 
     // Initialize help overlay
     HelpOverlay help_overlay;
@@ -2733,6 +2821,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Note: Controls panel unavailable (SDL_ttf not found)\n";
         show_controls = false;
     }
+
+    bool pending_window_screenshot = false;
+    int pending_window_screenshot_delay_frames = 0;
 
     // Initialize render analysis system
     RenderAnalysis analysis;
@@ -2763,9 +2854,11 @@ int main(int argc, char* argv[]) {
     std::cout << "  1-6           - Change quality level\n";
     std::cout << "  C             - Toggle interactive controls panel\n";
     std::cout << "  H             - Toggle help overlay\n";
+    std::cout << "  G             - Toggle live luminance histogram\n";
+    std::cout << "  F5            - Reload camera from config (or RT_HOT_RELOAD_CAMERA)\n";
     std::cout << "  R             - Toggle CPU/GPU renderer\n";
     std::cout << "  Space         - Pause rendering\n";
-    std::cout << "  S             - Save screenshot (screenshots/screenshot_*.png)\n";
+    std::cout << "  S             - Save window screenshot, no UI (screenshots/screenshot_*.png)\n";
     std::cout << "  ESC           - Quit\n";
     std::cout << "\n";
     std::cout << "Quality Levels (affects rendering samples, not window size):\n";
@@ -2788,6 +2881,20 @@ int main(int argc, char* argv[]) {
                     case SDLK_h:
                         show_help = !show_help;
                         break;
+                    case SDLK_g:
+                        show_luma_histogram = !show_luma_histogram;
+                        std::cout << "Luminance histogram: " << (show_luma_histogram ? "ON" : "OFF") << std::endl;
+                        break;
+                    case SDLK_F5: {
+                        struct stat st;
+                        if (stat(hot_reload_path, &st) == 0) {
+                            hot_reload_last_mtime = st.st_mtime;
+                            hot_reload_have_mtime = true;
+                        }
+                        camera_controller.try_load_hot_reload_file(hot_reload_path);
+                        need_render = true;
+                        break;
+                    }
                     case SDLK_c:
                         show_controls = !show_controls;
                         break;
@@ -2823,15 +2930,10 @@ int main(int argc, char* argv[]) {
                         paused = !paused;
                         std::cout << (paused ? "Paused" : "Resumed") << std::endl;
                         break;
-                    case SDLK_s: {  // Save screenshot
-                        system("mkdir -p screenshots");
-                        auto now = std::chrono::system_clock::now();
-                        auto time = std::chrono::system_clock::to_time_t(now);
-                        std::stringstream ss;
-                        ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
-                        save_cpu_screenshot(renderer, texture, image_width, image_height, ss.str().c_str());
+                    case SDLK_s:  // Deferred: read back after scene draw (see pending_window_screenshot)
+                        pending_window_screenshot = true;
+                        pending_window_screenshot_delay_frames = 1;
                         break;
-                    }
                     case SDLK_1: case SDLK_2: case SDLK_3:
                     case SDLK_4: case SDLK_5: case SDLK_6: {
                         int new_quality = event.key.keysym.sym - SDLK_1;
@@ -2964,13 +3066,8 @@ int main(int argc, char* argv[]) {
                                 need_render = true;
                             }
                         } else if (click_result.screenshot_requested) {
-                            // Handle screenshot request
-                            system("mkdir -p screenshots");
-                            auto now = std::chrono::system_clock::now();
-                            auto time = std::chrono::system_clock::to_time_t(now);
-                            std::stringstream ss;
-                            ss << "screenshots/screenshot_" << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") << ".png";
-                            save_cpu_screenshot(renderer, texture, image_width, image_height, ss.str().c_str());
+                            pending_window_screenshot = true;
+                            pending_window_screenshot_delay_frames = 1;
                         } else if (click_result.progressive_changed) {
                             // Toggle progressive rendering
                             ray_renderer.enable_progressive = !ray_renderer.enable_progressive;
@@ -3168,6 +3265,10 @@ int main(int argc, char* argv[]) {
                         SDL_SetRelativeMouseMode(captured ? SDL_FALSE : SDL_TRUE);
                     }
                 }
+            } else if (event.type == SDL_MOUSEBUTTONUP) {
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    controls_panel.release_pressed_buttons();
+                }
             } else if (event.type == SDL_MOUSEMOTION) {
                 if (SDL_GetRelativeMouseMode()) {
                     camera_controller.rotate(
@@ -3324,6 +3425,28 @@ int main(int argc, char* argv[]) {
             SDL_RenderCopy(renderer, texture, nullptr, nullptr);
         }
 
+        if (pending_window_screenshot) {
+            if (pending_window_screenshot_delay_frames > 0) {
+                --pending_window_screenshot_delay_frames;
+            } else {
+                pending_window_screenshot = false;
+                system("mkdir -p screenshots");
+                const auto now = std::chrono::system_clock::now();
+                const std::time_t t = std::chrono::system_clock::to_time_t(now);
+                std::stringstream ss;
+                ss << "screenshots/screenshot_" << std::put_time(std::localtime(&t), "%Y%m%d_%H%M%S") << ".png";
+                const std::string path = ss.str();
+                if (!save_window_scene_readback_png(renderer, path.c_str())) {
+                    std::cerr << "Window screenshot failed (try again next frame)\n";
+                }
+            }
+        }
+
+        if (show_luma_histogram && !framebuffer.empty() && image_width > 0 && image_height > 0) {
+            uint32_t hbins[64];
+            rgb24_post::histogram_luminance_64(framebuffer, image_width, image_height, hbins);
+            render_luminance_histogram_overlay(renderer, hbins, window_width, window_height);
+        }
 
         // Render controls panel if active
         if (show_controls) {
@@ -3356,6 +3479,28 @@ int main(int argc, char* argv[]) {
         }
 
         SDL_RenderPresent(renderer);
+
+        if (std::getenv("RT_HOT_RELOAD_POLL")) {
+            static int hr_poll_i = 0;
+            if (++hr_poll_i >= 90) {
+                hr_poll_i = 0;
+                struct stat st;
+                if (stat(hot_reload_path, &st) == 0) {
+                    if (!hot_reload_have_mtime) {
+                        hot_reload_last_mtime = st.st_mtime;
+                        hot_reload_have_mtime = true;
+                        if (camera_controller.try_load_hot_reload_file(hot_reload_path)) {
+                            need_render = true;
+                        }
+                    } else if (st.st_mtime != hot_reload_last_mtime) {
+                        hot_reload_last_mtime = st.st_mtime;
+                        if (camera_controller.try_load_hot_reload_file(hot_reload_path)) {
+                            need_render = true;
+                        }
+                    }
+                }
+            }
+        }
 
         const bool idle_cpu = !work_done && !need_render && !cpu_followup && !paused;
         SDL_Delay(idle_cpu ? 14 : 2);

@@ -14,10 +14,17 @@ High-performance CPU ray tracer with AVX2 SIMD vectorization and OpenMP multi-th
 - ✅ Quality presets (6 levels: 320x180 to 1920x1080)
 - ✅ Camera controls (WASD + mouse)
 - ✅ Analysis modes (normals, depth, albedo)
-- ✅ Screenshot system (PNG output)
-- ✅ Settings panel with live controls
+- ✅ Screenshot system (PNG): **S** / panel button save a **full render-target** grab via `SDL_RenderReadPixels` immediately after the scene texture is drawn (excludes histogram, controls panel, help). Uses **RGB24** when supported, otherwise reads with the backend format and **`SDL_ConvertPixels`** to **RGBA8888** before `stbi_write_png` (avoids ARGB/BGRA channel-order tinting).
+- ✅ Settings panel with live controls (RGBA surface + `SDL_BLENDMODE_BLEND` on panel textures for translucency over the render view)
 - ✅ Post denoiser amount slider (0-100%) in CPU controls panel
-- ✅ Improved denoiser quality path (bilinear upsample + detail-preserving blend)
+- ✅ Improved denoiser quality path (separable bilateral, variance-guided blend, bilinear upscale)
+- ✅ Live luminance histogram overlay (G), camera hot-reload file (F5 / RT_HOT_RELOAD_POLL)
+  - **Hot reload:** Edit `config/camera_hot_reload.txt` (copy from `config/camera_hot_reload.txt.example`) or set `RT_HOT_RELOAD_CAMERA` to a file path. Required keys: `eye` (or `lookfrom`) and `at` (or `lookat`); optional `up`/`vup`, `vfov`, `aperture`, `focus`/`dist_to_focus`. Press **F5** to reload from disk. Set **`RT_HOT_RELOAD_POLL`** (any value) to watch mtime and reload automatically about every 90 frames.
+
+### Regression / batch
+- `make regression-test` (deterministic PPM SHA-256; see tests/regression/)
+- Batch: `--deterministic`, `--fixed-ppm`, `ENABLE_OPENMP=0` via Makefile for stable output
+- ✅ Batch CPU camera moved 1 unit closer to room center (`lookfrom.z`: 15 -> 14) with refreshed README high-quality sample image
 
 ### Advanced Optimizations Implemented
 - ✅ **Shadow Ray Culling** (+8.6%): Skip shadow rays for backfaces

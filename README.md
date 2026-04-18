@@ -1,6 +1,8 @@
-# SIMD Ray Tracer
+# SIMD Ray Tracer (CPU-first)
 
-A high-performance ray tracer built from scratch in C++ with AVX2 SIMD vectorization, OpenMP multi-threading, and GPU acceleration. Features batch rendering, real-time interactive modes, and a retro ASCII terminal renderer.
+A high-performance **CPU ray tracer** built from scratch in C++ with AVX2 SIMD vectorization and OpenMP multi-threading. Includes a real-time SDL2 interactive mode, batch/offline rendering, and a retro ASCII terminal renderer.
+
+**GPU renderer:** WIP (not the main focus of this repo right now).
 
 ## Examples
 
@@ -8,28 +10,26 @@ Cornell box (CPU batch, Phong shading, hard shadows, reflections):
 
 | Scanline path | Morton Z-order path | Higher-resolution batch |
 |:---:|:---:|:---:|
-| ![Cornell box — scanline CPU batch, 640×360, 2 samples per pixel](readme-examples/cornell-box-cpu-scanline.png) | ![Cornell box — Morton traversal, 640×360, 2 samples per pixel](readme-examples/cornell-box-cpu-morton.png) | ![Cornell box — CPU batch, 800×450](readme-examples/cornell-box-cpu-batch-800.png) |
-| `raytracer_batch_cpu -w 640 -s 2 -d 4` | same flags + `--morton` | earlier `make batch-cpu` render |
+| ![Cornell box — scanline CPU batch, 640×360, 2 samples per pixel](readme-examples/cornell-box-cpu-scanline.png) | ![Cornell box — Morton traversal, 640×360, 2 samples per pixel](readme-examples/cornell-box-cpu-morton.png) | ![Cornell box — CPU batch, 1920×1080, 256 samples per pixel, depth 10](readme-examples/cornell-box-cpu-batch-800.png) |
+| `raytracer_batch_cpu -w 640 -s 2 -d 4` | same flags + `--morton` | `raytracer_batch_cpu -w 1920 -s 256 -d 10 --morton` |
 
-*Interactive (SDL) and GPU modes produce similar scenes with live controls; see **Quick Start** below.*
+*Interactive (SDL) mode produces similar scenes with live controls; see **Quick Start** below. GPU mode is WIP.*
 
 ## Features
 
-### Multiple Rendering Modes
+### Rendering Modes
 
-**CPU Interactive Mode**
+**CPU Interactive Mode (primary)**
 - Real-time SDL2-based rendering with full controls
 - 6 quality levels (320x180 to 1920x1080)
 - WASD + mouse camera controls
-- Screenshot capture (PNG)
+- Window screenshot capture (PNG, no UI)
 - Settings panel with live adjustments
 - Performance stats (FPS, MRays/sec)
 
-**GPU Interactive Mode**
-- OpenGL compute shader acceleration
-- 60-300x faster than CPU (depending on GPU)
-- Same controls as CPU mode
-- Real-time GPU/CPU switching
+**GPU Interactive Mode (WIP)**
+- Work in progress; feature set and build path are not stable
+- Mentioned for completeness, but the README focuses on CPU
 
 **ASCII Terminal Mode**
 - Pure terminal rendering (no GUI required)
@@ -94,23 +94,9 @@ pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf
 make batch-cpu
 make run
 
-# GPU Batch Rendering
-make batch-gpu
-make run-gpu
-
 # CPU Interactive Mode (recommended for beginners)
 make interactive-cpu
 make runi-cpu
-
-# GPU Interactive Mode (standalone, GLSL 1.20)
-make interactive-gpu
-make runi-gpu
-
-# GPU Quality Presets
-make gpu-fast           # Maximum performance (Phong only)
-make gpu-interactive    # Balanced quality and performance
-make gpu-production     # High quality for final renders
-make gpu-showcase       # Maximum quality all features
 
 # ASCII Terminal Mode (retro style)
 make ascii
@@ -172,30 +158,9 @@ The settings panel (press **C**) provides:
 - Screenshot button
 - Reset defaults
 
-### GPU Interactive Mode
+### GPU Interactive Mode (WIP)
 
-**Movement:**
-- **WASD** - Move forward/left/backward/right
-- **Arrow Keys** - Move up/down
-- **Mouse** - Look around (when captured)
-- **Left Click** - Capture/release mouse
-
-**Rendering Controls:**
-- **R** - Toggle reflections
-- **P** - Toggle Phong/PBR lighting
-- **L** - Cycle light configurations (1 → 2 → 3 lights)
-- **G** - Toggle Global Illumination
-- **[ / ]** - Adjust GI samples (1-8)
-- **- / =** - Adjust GI intensity
-- **H** - Help overlay
-- **C** - Controls panel
-- **S** - Save screenshot (PNG)
-- **ESC** - Quit
-
-**Phase 3 Features:**
-- ✅ **Global Illumination**: Real-time color bleeding and indirect lighting
-- ✅ **Quality Presets**: Fast (2 samples), Balanced (4 samples), Quality (8 samples)
-- ✅ **Interactive Adjustment**: Fine-tune GI in real-time
+The GPU renderer is currently **work in progress**. The README intentionally focuses on the CPU renderer’s features, controls, and performance.
 
 ## Performance
 
@@ -247,20 +212,9 @@ The settings panel (press **C**) provides:
 - **Adaptive (1.702x)**: Variance-based sampling (uses half the samples)
 - **Wavefront (1.358x)**: Tiled cache-coherent processing (better CPU cache utilization)
 
-### GPU Performance
+### GPU Performance (WIP)
 
-**Expected Performance (by GPU tier):**
-- **Low-end GPUs**: 30-60 MRays/sec (30-75x faster than CPU)
-- **Mid-range GPUs**: 100-200 MRays/sec (100-250x faster)
-- **High-end GPUs**: 300-500 MRays/sec (300-600x faster)
-
-**GPU vs CPU Comparison (1920x1080):**
-| Samples | CPU Time | GPU Time | Speedup |
-|---------|----------|----------|---------|
-| 1       | 2.5s     | 0.04s    | 62x     |
-| 4       | 10.0s    | 0.08s    | 125x    |
-| 16      | 40.0s    | 0.25s    | 160x    |
-| 64      | 160.0s   | 0.80s    | 200x    |
+GPU performance numbers will be added once the GPU path is stable.
 
 **Interactive Performance:**
 - **640x360** (1 sample): 120-240 FPS

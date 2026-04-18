@@ -1,6 +1,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../external/stb_image_write.h"
 
+#include <cstdio>
 #include <iostream>
 #include <vector>
 #include <limits>
@@ -41,6 +42,18 @@ inline float random_float() {
     return (seed & 0xFFFFFF) / 16777216.0f;
 }
 
+// Deterministic per-pixel RNG for regression (bit-stable across runs when combined with --deterministic).
+inline uint32_t det_rng_mix(uint32_t i, uint32_t j) {
+    return 0x243F6A88u ^ (i * 2246822519u) ^ (j * 3266489917u);
+}
+
+inline float det_rand_u01(uint32_t& state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return (state & 0xFFFFFFu) / 16777216.0f;
+}
+
 // Generate unique output filename with timestamp
 std::string generate_output_filename(const std::string& prefix = "output", const std::string& ext = "png") {
     auto now = std::chrono::system_clock::now();
@@ -62,8 +75,10 @@ int main(int argc, char* argv[]) {
     int samples_per_pixel = 64; // Anti-aliasing (64 samples per pixel for better quality)
     int max_depth = 5; // Max reflection bounces
     std::string output_prefix = "cornell_box";
+    std::string fixed_ppm_path;
     bool opt_frustum = false;
     bool opt_morton = false;
+    bool opt_deterministic = false;
 
     // Parse command-line arguments
     for (int i = 1; i < argc; ++i) {
@@ -91,10 +106,16 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 output_prefix = argv[++i];
             }
+        } else if (arg == "--fixed-ppm") {
+            if (i + 1 < argc) {
+                fixed_ppm_path = argv[++i];
+            }
         } else if (arg == "--frustum") {
             opt_frustum = true;
         } else if (arg == "--morton") {
             opt_morton = true;
+        } else if (arg == "--deterministic") {
+            opt_deterministic = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
@@ -102,8 +123,10 @@ int main(int argc, char* argv[]) {
                       << "  -s, --samples <count>     Samples per pixel (1-256, default: 16)\n"
                       << "  -d, --depth <bounces>     Max reflection depth (1-10, default: 5)\n"
                       << "  -o, --output <prefix>     Output filename prefix (default: cornell_box)\n"
+                      << "      --fixed-ppm <path>    Write P6 PPM to this exact path (for regression tests)\n"
                       << "      --frustum             Primary-ray view frustum culling (matches interactive)\n"
                       << "      --morton              Morton Z-order via Renderer::render_morton (matches interactive)\n"
+                      << "      --deterministic       Stable RNG for regression (use with --fixed-ppm)\n"
                       << "  -h, --help                Show this help message\n"
                       << "\nExample:\n"
                       << "  " << argv[0] << " -w 1920 -s 32 -d 8 -o my_scene\n";
@@ -131,7 +154,7 @@ int main(int argc, char* argv[]) {
                            samples_per_pixel, max_depth);
 
     // Camera setup
-    Point3 lookfrom(0, 2, 15);  // Further back, not too deep inside
+    Point3 lookfrom(0, 2, 14);  // Move one unit closer to room center
     Point3 lookat(0, 2, 0);     // Looking at center height
     Vec3 vup(0, 1, 0);
     float vfov = 60;
@@ -208,7 +231,7 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < image_width; ++i) {
             Color pixel_color(0, 0, 0);
 
-#ifdef ENABLE_STRATIFIED
+#if ENABLE_STRATIFIED
             // Generate stratified samples for this pixel
             auto stratified_samples = Stratified::generate_stratified_samples(samples_per_pixel);
 
@@ -221,10 +244,19 @@ int main(int argc, char* argv[]) {
                 pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
             }
 #else
-            // Sample pixels for anti-aliasing (16 samples)
+            uint32_t det_state = det_rng_mix(static_cast<uint32_t>(i), static_cast<uint32_t>(j));
             for (int s = 0; s < samples_per_pixel; ++s) {
-                float u = (i + random_float()) / (image_width - 1);
-                float v = (j + random_float()) / (image_height - 1);
+                float ru;
+                float rv;
+                if (opt_deterministic) {
+                    ru = det_rand_u01(det_state);
+                    rv = det_rand_u01(det_state);
+                } else {
+                    ru = random_float();
+                    rv = random_float();
+                }
+                float u = (i + ru) / (image_width - 1);
+                float v = (j + rv) / (image_height - 1);
 
                 Ray r = cam.get_ray(u, v);
                 pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
@@ -255,17 +287,29 @@ int main(int argc, char* argv[]) {
     stbi_write_png(png_filename.c_str(), image_width, image_height, 3,
                    framebuffer.data(), image_width * 3);
 
-    // Also write PPM for compatibility
-    FILE* ppm_file = fopen(ppm_filename.c_str(), "w");
-    if (ppm_file) {
-        fprintf(ppm_file, "P6\n%d %d\n255\n", image_width, image_height);
-        fwrite(framebuffer.data(), 1, framebuffer.size(), ppm_file);
-        fclose(ppm_file);
-    }
+    if (!fixed_ppm_path.empty()) {
+        FILE* fixed_ppm = std::fopen(fixed_ppm_path.c_str(), "wb");
+        if (fixed_ppm) {
+            std::fprintf(fixed_ppm, "P6\n%d %d\n255\n", image_width, image_height);
+            std::fwrite(framebuffer.data(), 1, framebuffer.size(), fixed_ppm);
+            std::fclose(fixed_ppm);
+            std::cerr << "✓ Fixed PPM: " << fixed_ppm_path << "\n";
+        } else {
+            std::cerr << "✗ Failed to write --fixed-ppm " << fixed_ppm_path << "\n";
+        }
+    } else {
+        // Also write PPM for compatibility
+        FILE* ppm_file = std::fopen(ppm_filename.c_str(), "wb");
+        if (ppm_file) {
+            std::fprintf(ppm_file, "P6\n%d %d\n255\n", image_width, image_height);
+            std::fwrite(framebuffer.data(), 1, framebuffer.size(), ppm_file);
+            std::fclose(ppm_file);
+        }
 
-    std::cerr << "✓ Done. Images saved to:\n";
-    std::cerr << "  PNG: " << png_filename << "\n";
-    std::cerr << "  PPM: " << ppm_filename << "\n";
+        std::cerr << "✓ Done. Images saved to:\n";
+        std::cerr << "  PNG: " << png_filename << "\n";
+        std::cerr << "  PPM: " << ppm_filename << "\n";
+    }
 
     // Calculate and print performance statistics
     perf.calculate_ray_count();

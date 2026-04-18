@@ -1,0 +1,9 @@
+# Copy to config/camera_hot_reload.txt (or set RT_HOT_RELOAD_CAMERA).
+# Press F5 in CPU interactive to reload, or set RT_HOT_RELOAD_POLL=1 for automatic polling.
+
+eye   0.0 2.0 14.0
+lookat 0.0 2.0 0.0
+up    0.0 1.0 0.0
+vfov 60.0
+aperture 0.0
+focus 14.0
