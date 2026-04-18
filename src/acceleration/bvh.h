@@ -59,6 +59,34 @@ struct AABB {
     }
 };
 
+// Slab AABB test for a ray (used by flat BVH + packet culling).
+inline bool ray_hit_aabb_raw(const Ray& r, const float bmin[3], const float bmax[3], float t_min, float t_max) {
+    for (int axis = 0; axis < 3; ++axis) {
+        const float inv_d = 1.0f / r.direction()[axis];
+        float t0 = (bmin[axis] - r.origin()[axis]) * inv_d;
+        float t1 = (bmax[axis] - r.origin()[axis]) * inv_d;
+        if (inv_d < 0.0f) {
+            std::swap(t0, t1);
+        }
+        t_min = std::max(t0, t_min);
+        t_max = std::min(t1, t_max);
+        if (t_max <= t_min) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Linearized BVH node for cache-friendly traversal (contiguous array).
+struct BVFlatNode {
+    float bmin[3];
+    float bmax[3];
+    int left;        // child node index, or -1 in a leaf
+    int right;       // child node index, or -1 in a leaf
+    int prim_start;  // leaf: base index into flat_leaf_prim_indices
+    int prim_count;  // leaf: number of primitives; 0 = internal node
+};
+
 // BVH Node
 struct BVHNode {
     AABB bbox;
@@ -75,11 +103,20 @@ class BVH {
     std::shared_ptr<BVHNode> root;
     std::vector<std::shared_ptr<Sphere>> primitives;
 
+    std::vector<BVFlatNode> flat_nodes;
+    std::vector<int> flat_leaf_prim_indices;
+    int flat_root_index;
+
 public:
-    BVH() {}
+    BVH() : flat_root_index(-1) {}
 
     // Build BVH from primitives
     void build(const std::vector<std::shared_ptr<Sphere>>& spheres);
+
+    bool has_flat_layout() const { return flat_root_index >= 0 && !flat_nodes.empty(); }
+    const std::vector<BVFlatNode>& get_flat_nodes() const { return flat_nodes; }
+    const std::vector<int>& get_flat_leaf_prims() const { return flat_leaf_prim_indices; }
+    int get_flat_root() const { return flat_root_index; }
 
     // Traverse BVH to find closest hit. Optional view_frustum skips sphere tests outside the frustum
     // (same convention as Scene::hit — use for primary rays only).
@@ -95,6 +132,11 @@ private:
                      HitRecord& rec,
                      const std::vector<std::shared_ptr<Sphere>>& spheres,
                      const Frustum::Frustum* view_frustum) const;
+
+    int flatten_node(const std::shared_ptr<BVHNode>& node);
+    bool hit_flat_iterative(const Ray& r, float t_min, float t_max, HitRecord& rec,
+                            const std::vector<std::shared_ptr<Sphere>>& spheres,
+                            const Frustum::Frustum* view_frustum) const;
 };
 
 #endif // BVH_H
