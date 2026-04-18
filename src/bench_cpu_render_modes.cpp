@@ -28,6 +28,7 @@ static void render_scalar_path(const Camera& cam, Scene& scene, Renderer& ray_re
                                RenderAnalysis& analysis, int image_width, int image_height,
                                int samples, bool enable_shadows, std::vector<unsigned char>& framebuffer) {
     (void)ray_renderer.enable_adaptive;
+    ray_renderer.sync_frustum(cam);
     #pragma omp parallel for schedule(dynamic, 16)
     for (int j = image_height - 1; j >= 0; --j) {
         for (int i = 0; i < image_width; ++i) {

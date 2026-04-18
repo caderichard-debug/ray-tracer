@@ -91,17 +91,19 @@ int BVH::split_primitives(const std::vector<int>& indices, AABB& bbox) {
 }
 
 bool BVH::hit(const Ray& r, float t_min, float t_max, HitRecord& rec,
-             const std::vector<std::shared_ptr<Sphere>>& spheres) const {
+             const std::vector<std::shared_ptr<Sphere>>& spheres,
+             const Frustum::Frustum* view_frustum) const {
     if (!root) {
         return false;
     }
-    return hit_recursive(root, r, t_min, t_max, rec, spheres);
+    return hit_recursive(root, r, t_min, t_max, rec, spheres, view_frustum);
 }
 
 bool BVH::hit_recursive(std::shared_ptr<BVHNode> node,
                         const Ray& r, float t_min, float t_max,
                         HitRecord& rec,
-                        const std::vector<std::shared_ptr<Sphere>>& spheres) const {
+                        const std::vector<std::shared_ptr<Sphere>>& spheres,
+                        const Frustum::Frustum* view_frustum) const {
     // Check if ray hits node's bounding box
     if (!node->bbox.hit(r, t_min, t_max)) {
         return false;
@@ -113,8 +115,12 @@ bool BVH::hit_recursive(std::shared_ptr<BVHNode> node,
         float closest_so_far = t_max;
 
         for (int idx : node->primitive_indices) {
+            const auto& sp = spheres[idx];
+            if (view_frustum && !view_frustum->is_sphere_inside(sp->center, sp->radius)) {
+                continue;
+            }
             HitRecord temp_rec;
-            if (spheres[idx]->hit(r, t_min, closest_so_far, temp_rec)) {
+            if (sp->hit(r, t_min, closest_so_far, temp_rec)) {
                 hit_anything = true;
                 closest_so_far = temp_rec.t;
                 rec = temp_rec;
@@ -125,8 +131,8 @@ bool BVH::hit_recursive(std::shared_ptr<BVHNode> node,
 
     // Internal node: recurse children
     HitRecord left_rec, right_rec;
-    bool hit_left = hit_recursive(node->left, r, t_min, t_max, left_rec, spheres);
-    bool hit_right = hit_recursive(node->right, r, t_min, t_max, right_rec, spheres);
+    bool hit_left = hit_recursive(node->left, r, t_min, t_max, left_rec, spheres, view_frustum);
+    bool hit_right = hit_recursive(node->right, r, t_min, t_max, right_rec, spheres, view_frustum);
 
     if (hit_left && hit_right) {
         rec = (left_rec.t < right_rec.t) ? left_rec : right_rec;

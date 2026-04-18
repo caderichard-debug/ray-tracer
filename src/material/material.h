@@ -72,6 +72,27 @@ public:
     }
 };
 
+// Area-style light source (emits radiance; does not scatter secondary rays in the CPU path tracer)
+class Emissive : public Material {
+public:
+    Color emit;
+
+    Emissive(const Color& e) : Material(Color(0.0f, 0.0f, 0.0f), 0.0f, 1.0f), emit(e) {}
+
+    bool scatter(
+        const Ray& r_in,
+        const HitRecord& rec,
+        Color& attenuation,
+        Ray& scattered
+    ) const override {
+        (void)r_in;
+        (void)rec;
+        (void)attenuation;
+        (void)scattered;
+        return false;
+    }
+};
+
 class Dielectric : public Material {
 public:
     float ir; // Index of refraction (e.g., 1.5 for glass, 1.0 for air, 2.4 for diamond)

@@ -77,8 +77,6 @@ inline Frustum create_frustum(Vec3 position, Vec3 forward, Vec3 up, Vec3 right,
     float tan_half_fov = std::tan(fov_y / 2.0f);
 
     // Calculate frustum dimensions
-    float near_height = 2.0f * near_plane * tan_half_fov;
-    float near_width = near_height * aspect_ratio;
     float far_height = 2.0f * far_plane * tan_half_fov;
     float far_width = far_height * aspect_ratio;
 
@@ -87,27 +85,38 @@ inline Frustum create_frustum(Vec3 position, Vec3 forward, Vec3 up, Vec3 right,
     Vec3 far_center = position + forward * far_plane;
 
     // Calculate plane normals and distances
-    Vec3 far_normal = -forward; // Pointing inward
+    Vec3 far_normal = -forward; // Pointing inward (camera side of far plane)
     frustum.planes[4] = Plane(far_normal, -dot(far_center, far_normal));
 
-    Vec3 near_normal = forward; // Pointing inward
+    Vec3 near_normal = forward; // Pointing inward (into the frustum from near plane)
     frustum.planes[5] = Plane(near_normal, -dot(near_center, near_normal));
 
-    // Right plane
-    Vec3 right_normal = (cross(up, (forward * far_plane + right * (far_width / 2.0f)) - position)).normalized();
-    frustum.planes[0] = Plane(right_normal, -dot(position, right_normal));
+    // Side planes from camera + far-face corners; orient so a deep interior point is "inside".
+    const float hw = far_width * 0.5f;
+    const float hh = far_height * 0.5f;
+    const Vec3 far_tl = far_center - right * hw + up * hh;
+    const Vec3 far_tr = far_center + right * hw + up * hh;
+    const Vec3 far_bl = far_center - right * hw - up * hh;
+    const Vec3 far_br = far_center + right * hw - up * hh;
+    const Vec3 inside_hint = position + forward * (0.5f * (near_plane + far_plane));
 
-    // Left plane
-    Vec3 left_normal = (cross((forward * far_plane - right * (far_width / 2.0f)) - position, up)).normalized();
-    frustum.planes[1] = Plane(left_normal, -dot(position, left_normal));
+    auto oriented_plane = [](Vec3 p0, Vec3 p1, Vec3 p2, Vec3 inside_pt) {
+        Vec3 e1 = p1 - p0;
+        Vec3 e2 = p2 - p0;
+        Vec3 n = unit_vector(cross(e1, e2));
+        float dist = -dot(p0, n);
+        if (dot(inside_pt, n) + dist < 0.0f) {
+            n = -n;
+            dist = -dot(p0, n);
+        }
+        return Plane(n, dist);
+    };
 
-    // Top plane
-    Vec3 top_normal = (cross(right, (forward * far_plane + up * (far_height / 2.0f)) - position)).normalized();
-    frustum.planes[2] = Plane(top_normal, -dot(position, top_normal));
-
-    // Bottom plane
-    Vec3 bottom_normal = (cross((forward * far_plane - up * (far_height / 2.0f)) - position, right)).normalized();
-    frustum.planes[3] = Plane(bottom_normal, -dot(position, bottom_normal));
+    // planes[0..3]: right, left, top, bottom (historical order; all tested in is_sphere_inside)
+    frustum.planes[0] = oriented_plane(position, far_tr, far_br, inside_hint);
+    frustum.planes[1] = oriented_plane(position, far_bl, far_tl, inside_hint);
+    frustum.planes[2] = oriented_plane(position, far_tl, far_tr, inside_hint);
+    frustum.planes[3] = oriented_plane(position, far_br, far_bl, inside_hint);
 
     return frustum;
 }

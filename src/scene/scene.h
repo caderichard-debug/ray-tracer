@@ -3,21 +3,57 @@
 
 #include <vector>
 #include <memory>
-#include <fstream>
 #include "../primitives/primitive.h"
 #include "../primitives/sphere.h"
 #include "../primitives/sphere_simd.h"
 #include "../math/ray.h"
 #include "../math/ray_packet.h"
+#include "../math/frustum.h"
 #include "light.h"
 
 class Scene {
 public:
     std::vector<std::shared_ptr<Primitive>> objects;
     std::vector<Light> lights;
-    Color ambient_light; // Ambient illumination
+    Color ambient_light;
 
-    Scene() : ambient_light(0.1f, 0.1f, 0.1f) {}
+    Scene() : ambient_light(0.1f, 0.1f, 0.1f), simd_cache_ready(false) {}
+
+    bool simd_scene_cache_ready() const { return simd_cache_ready; }
+
+    // Build the SIMD sphere cache and non-sphere list.
+    // Call once (single-threaded) before a parallel render pass.
+    void build_simd_cache() const {
+        simd_sphere_cache.clear();
+        original_sphere_cache.clear();
+        non_sphere_cache.clear();
+        for (const auto& obj : objects) {
+            auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
+            if (sphere) {
+                simd_sphere_cache.emplace_back(sphere->center, sphere->radius, sphere->mat);
+                original_sphere_cache.push_back(sphere);
+            } else {
+                non_sphere_cache.push_back(obj);
+            }
+        }
+        simd_cache_ready = true;
+    }
+
+    // Test non-sphere objects (triangles, quads) for the closest hit.
+    // Used after SIMD sphere intersection to check if non-sphere geometry is closer.
+    bool hit_non_spheres(const Ray& r, float t_min, float t_max, HitRecord& rec) const {
+        bool hit_anything = false;
+        float closest_so_far = t_max;
+        for (const auto& obj : non_sphere_cache) {
+            HitRecord temp;
+            if (obj->hit(r, t_min, closest_so_far, temp)) {
+                hit_anything = true;
+                closest_so_far = temp.t;
+                rec = temp;
+            }
+        }
+        return hit_anything;
+    }
 
     void add_object(std::shared_ptr<Primitive> obj) {
         objects.push_back(obj);
@@ -33,13 +69,19 @@ public:
         // Keeping method for compatibility
     }
 
-    // Check if ray hits any object in the scene
-    // Returns the closest hit (smallest t)
-    bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const {
+    // Check if ray hits any object in the scene (closest hit). When view_frustum is non-null, sphere
+    // primitives fully outside the frustum are skipped (primary rays only — pass nullptr for bounces).
+    bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec, const Frustum::Frustum* view_frustum) const {
         bool hit_anything = false;
         float closest_so_far = t_max;
 
         for (const auto& object : objects) {
+            if (view_frustum) {
+                auto sp = std::dynamic_pointer_cast<Sphere>(object);
+                if (sp && !view_frustum->is_sphere_inside(sp->center, sp->radius)) {
+                    continue;
+                }
+            }
             HitRecord temp_rec;
             if (object->hit(r, t_min, closest_so_far, temp_rec)) {
                 hit_anything = true;
@@ -50,6 +92,8 @@ public:
 
         return hit_anything;
     }
+
+    bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec) const { return hit(r, t_min, t_max, rec, nullptr); }
 
     // Check if any object blocks the shadow ray
     // Returns true if shadow ray is blocked
@@ -65,26 +109,37 @@ public:
         return false;
     }
 
-    // SIMD packet intersection: test 8 rays against all scene objects
-    // Returns vector of 8 HitRecords (one per ray)
+    // SIMD packet intersection: tests spheres using AVX2.
+    // Call build_simd_cache() once before using this in a parallel loop.
     bool hit_packet(const RayPacket& packet,
                     float t_min, float t_max, std::vector<HitRecord>& hit_records) const {
         hit_records.resize(8);
         for (int i = 0; i < 8; i++) {
             hit_records[i].t = infinity;
-            hit_records[i].mat = nullptr;  // Initialize to null
+            hit_records[i].mat = nullptr;
         }
 
-        // Extract spheres from scene for SIMD processing
-        std::vector<Sphere_SIMD> simd_spheres;
-        std::vector<std::shared_ptr<Sphere>> original_spheres;
-        for (const auto& obj : objects) {
-            auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
-            if (sphere) {
-                simd_spheres.push_back(Sphere_SIMD(sphere->center, sphere->radius, sphere->mat));
-                original_spheres.push_back(sphere);
+        // Use pre-built cache; fall back to building on-the-fly if not ready
+        const std::vector<Sphere_SIMD>* simd_spheres_ptr;
+        const std::vector<std::shared_ptr<Sphere>>* original_spheres_ptr;
+        std::vector<Sphere_SIMD> temp_simd;
+        std::vector<std::shared_ptr<Sphere>> temp_orig;
+        if (simd_cache_ready) {
+            simd_spheres_ptr = &simd_sphere_cache;
+            original_spheres_ptr = &original_sphere_cache;
+        } else {
+            for (const auto& obj : objects) {
+                auto sphere = std::dynamic_pointer_cast<Sphere>(obj);
+                if (sphere) {
+                    temp_simd.emplace_back(sphere->center, sphere->radius, sphere->mat);
+                    temp_orig.push_back(sphere);
+                }
             }
+            simd_spheres_ptr = &temp_simd;
+            original_spheres_ptr = &temp_orig;
         }
+        const auto& simd_spheres = *simd_spheres_ptr;
+        const auto& original_spheres = *original_spheres_ptr;
 
         if (simd_spheres.empty()) {
             // No spheres, fall back to scalar for each ray
@@ -120,7 +175,6 @@ public:
         }
 
         // Test ray packet against each sphere using SIMD
-        int total_simd_hits = 0;
         for (size_t sphere_idx = 0; sphere_idx < simd_spheres.size(); sphere_idx++) {
             HitRecordPacket packet_hits;
             simd_spheres[sphere_idx].hit_packet(packet, packet_hits);
@@ -131,84 +185,27 @@ public:
 
             int hit_mask = _mm256_movemask_ps(is_closer);
             if (hit_mask) {
-                total_simd_hits += __builtin_popcount(hit_mask);
-
-                // FIX: Extract t-values from packet_hits BEFORE updating closest_t
-                // This ensures each ray gets the correct t-value from the correct sphere
                 float t_arr[8];
                 _mm256_storeu_ps(t_arr, packet_hits.t);
 
-                // Update closest t values for next iteration
-                closest_t = _mm256_min_ps(closest_t, packet_hits.t);
+                // Only update closest_t for lanes with a valid closer hit.
+                // _mm256_min_ps would corrupt inactive lanes with negative/garbage t values
+                // (e.g. from spheres behind the camera), breaking all subsequent comparisons.
+                closest_t = _mm256_blendv_ps(closest_t, packet_hits.t, is_closer);
 
-                // Track which sphere each ray hit and assign correct t-value
                 for (int i = 0; i < 8; i++) {
                     if (hit_mask & (1 << i)) {
                         hit_sphere_indices[i] = sphere_idx;
                         hit_records[i].t = t_arr[i];
-                        // NOTE: Material will be set AFTER all spheres are tested
                     }
                 }
             }
         }
 
-        // Set materials based on which sphere each ray hit (FIX: Set materials AFTER all spheres tested)
-        // Debug: log material assignments for all rays
-        static bool debug_mat_assign_once = true;
-        if (debug_mat_assign_once) {
-            std::ofstream debug_log("simd_debug.log", std::ios::app);
-            debug_log << "SIMD: Material assignments (detailed):" << std::endl;
-            for (int i = 0; i < 8; i++) {
-                if (hit_sphere_indices[i] >= 0) {
-                    // Log BEFORE assignment
-                    debug_log << "  Ray " << i << ": sphere_idx=" << hit_sphere_indices[i];
-                    debug_log << " original_sphere_mat_albedo=("
-                              << original_spheres[hit_sphere_indices[i]]->mat->albedo.x << ","
-                              << original_spheres[hit_sphere_indices[i]]->mat->albedo.y << ","
-                              << original_spheres[hit_sphere_indices[i]]->mat->albedo.z << ")";
-                }
-            }
-            debug_log << std::endl;
-
-            // Now assign materials
-            for (int i = 0; i < 8; i++) {
-                if (hit_sphere_indices[i] >= 0) {
-                    hit_records[i].mat = original_spheres[hit_sphere_indices[i]]->mat;
-                }
-            }
-
-            // Log AFTER assignment
-            debug_log << "SIMD: After material assignment:" << std::endl;
-            for (int i = 0; i < 8; i++) {
-                debug_log << "  Ray " << i << ": sphere_idx=" << hit_sphere_indices[i];
-                if (hit_records[i].mat) {
-                    debug_log << " hit_record_mat_albedo=("
-                              << hit_records[i].mat->albedo.x << ","
-                              << hit_records[i].mat->albedo.y << ","
-                              << hit_records[i].mat->albedo.z << ")";
-                    // Verify they match
-                    if (hit_sphere_indices[i] >= 0) {
-                        auto& orig_albedo = original_spheres[hit_sphere_indices[i]]->mat->albedo;
-                        auto& hit_albedo = hit_records[i].mat->albedo;
-                        if (orig_albedo.x != hit_albedo.x ||
-                            orig_albedo.y != hit_albedo.y ||
-                            orig_albedo.z != hit_albedo.z) {
-                            debug_log << " MISMATCH!";
-                        }
-                    }
-                } else {
-                    debug_log << " mat=nullptr";
-                }
-                debug_log << std::endl;
-            }
-            debug_log.close();
-            debug_mat_assign_once = false;
-        } else {
-            // Non-debug version: just assign materials
-            for (int i = 0; i < 8; i++) {
-                if (hit_sphere_indices[i] >= 0) {
-                    hit_records[i].mat = original_spheres[hit_sphere_indices[i]]->mat;
-                }
+        // Assign materials after all spheres tested to ensure correct sphere-per-ray pairing
+        for (int i = 0; i < 8; i++) {
+            if (hit_sphere_indices[i] >= 0) {
+                hit_records[i].mat = original_spheres[hit_sphere_indices[i]]->mat;
             }
         }
 
@@ -248,23 +245,6 @@ public:
             }
         }
 
-        static bool debug_simd_once = true;
-        if (debug_simd_once) {
-            std::ofstream debug_log("simd_debug.log", std::ios::app);
-            debug_log << "SIMD: Computed position/normal for hits" << std::endl;
-            for (int i = 0; i < 8; i++) {
-                if (hit_sphere_indices[i] >= 0) {
-                    debug_log << "  Ray " << i << ": t=" << hit_records[i].t
-                              << " p=(" << hit_records[i].p.x << "," << hit_records[i].p.y << "," << hit_records[i].p.z << ")"
-                              << " n=(" << hit_records[i].normal.x << "," << hit_records[i].normal.y << "," << hit_records[i].normal.z << ")"
-                              << " mat=" << (hit_records[i].mat ? "yes" : "no")
-                              << " front_face=" << hit_records[i].front_face << std::endl;
-                }
-            }
-            debug_log.close();
-            debug_simd_once = false;
-        }
-
         // Check if any ray hit
         for (int i = 0; i < 8; i++) {
             if (hit_records[i].t < infinity) {
@@ -273,6 +253,11 @@ public:
         }
         return false;
     }
+private:
+    mutable std::vector<Sphere_SIMD> simd_sphere_cache;
+    mutable std::vector<std::shared_ptr<Sphere>> original_sphere_cache;
+    mutable std::vector<std::shared_ptr<Primitive>> non_sphere_cache;
+    mutable bool simd_cache_ready;
 };
 
 #endif // SCENE_H

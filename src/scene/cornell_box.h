@@ -21,7 +21,6 @@ inline void setup_cornell_box_scene(Scene& scene) {
     auto material_gray = std::make_shared<Lambertian>(Color(0.73f, 0.73f, 0.73f));
     auto material_blue = std::make_shared<Lambertian>(Color(0.1f, 0.2f, 0.7f));
     auto material_yellow = std::make_shared<Lambertian>(Color(0.8f, 0.7f, 0.1f));
-    auto material_light = std::make_shared<Lambertian>(Color(15.0f, 15.0f, 15.0f));
     auto material_metal = std::make_shared<Metal>(Color(0.8f, 0.8f, 0.8f), 0.0); // Perfect mirror
     auto material_metal_fuzz = std::make_shared<Metal>(Color(0.7f, 0.6f, 0.5f), 0.3); // Fuzzy metal
     auto material_gold = std::make_shared<Metal>(Color(1.0f, 0.77f, 0.35f), 0.1); // Gold-like
@@ -37,6 +36,10 @@ inline void setup_cornell_box_scene(Scene& scene) {
 
     // Ceiling (gray)
     scene.add_object(std::make_shared<Sphere>(Point3(0, 20.0, 0), 16.0, material_gray));
+
+    // Emissive ceiling lamp (area light for GPU path tracing)
+    auto ceiling_emit = std::make_shared<Emissive>(Color(3.5f, 3.5f, 3.2f));
+    scene.add_object(std::make_shared<Sphere>(Point3(0.0f, 16.2f, 0.0f), 1.4f, ceiling_emit));
 
     // Left wall (red)
     scene.add_object(std::make_shared<Sphere>(Point3(-20.0, 0, 0), 16.0, material_red));

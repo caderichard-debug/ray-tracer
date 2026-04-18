@@ -24,7 +24,6 @@
 #include "renderer/renderer.h"
 #include "renderer/performance.h"
 #include "scene/cornell_box.h"
-#include "math/morton.h"
 #include "math/stratified.h"
 
 // Fast XOR-shift random number generator with atomic counter
@@ -63,6 +62,8 @@ int main(int argc, char* argv[]) {
     int samples_per_pixel = 64; // Anti-aliasing (64 samples per pixel for better quality)
     int max_depth = 5; // Max reflection bounces
     std::string output_prefix = "cornell_box";
+    bool opt_frustum = false;
+    bool opt_morton = false;
 
     // Parse command-line arguments
     for (int i = 1; i < argc; ++i) {
@@ -90,6 +91,10 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 output_prefix = argv[++i];
             }
+        } else if (arg == "--frustum") {
+            opt_frustum = true;
+        } else if (arg == "--morton") {
+            opt_morton = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
@@ -97,6 +102,8 @@ int main(int argc, char* argv[]) {
                       << "  -s, --samples <count>     Samples per pixel (1-256, default: 16)\n"
                       << "  -d, --depth <bounces>     Max reflection depth (1-10, default: 5)\n"
                       << "  -o, --output <prefix>     Output filename prefix (default: cornell_box)\n"
+                      << "      --frustum             Primary-ray view frustum culling (matches interactive)\n"
+                      << "      --morton              Morton Z-order via Renderer::render_morton (matches interactive)\n"
                       << "  -h, --help                Show this help message\n"
                       << "\nExample:\n"
                       << "  " << argv[0] << " -w 1920 -s 32 -d 8 -o my_scene\n";
@@ -142,6 +149,13 @@ int main(int argc, char* argv[]) {
     // Performance optimization: build spatial cache
     scene.optimize_spatial_layout();
 
+    // Match interactive CPU: frustum tests need a synced clip volume; ray_color uses it when enable_frustum is on.
+    renderer.sync_frustum(cam);
+    if (opt_frustum) {
+        renderer.enable_frustum = true;
+        std::cerr << "View frustum culling: ON (primary rays)\n";
+    }
+
     // Create renders directory and generate unique output filename
     system("mkdir -p renders");
 
@@ -159,66 +173,31 @@ int main(int argc, char* argv[]) {
     std::cerr << "OpenMP threads: " << omp_get_max_threads() << std::endl;
     #endif
 
-#ifdef ENABLE_MORTON
-    // Use Morton Z-curve ordering for cache-friendly rendering
-    std::cerr << "Using Morton Z-curve ordering for cache optimization" << std::endl;
-
-    // Generate Morton-ordered pixel list
-    auto morton_pixels = Morton::generate_morton_pixels(image_width, image_height);
-
-    // Process pixels in Morton order (Z-curve) for better cache locality
-    #pragma omp parallel for schedule(dynamic, 4)
-    for (size_t idx = 0; idx < morton_pixels.size(); ++idx) {
-        const auto& pixel = morton_pixels[idx];
-        int i = pixel.x;
-        int j = pixel.y;
-
-        if (idx % (image_width * 10) == 0) {
-            #pragma omp critical
-            std::cerr << "\rMorton pixels processed: " << idx << '/' << morton_pixels.size() << ' ' << std::flush;
-        }
-
-        Color pixel_color(0, 0, 0);
-
-#ifdef ENABLE_STRATIFIED
-        // Generate stratified samples for this pixel
-        auto stratified_samples = Stratified::generate_stratified_samples(samples_per_pixel);
-
-        // Sample using stratified pattern for faster convergence
-        for (const auto& sample : stratified_samples) {
-            float u = (i + sample.first) / (image_width - 1);
-            float v = (j + sample.second) / (image_height - 1);
-
-            Ray r = cam.get_ray(u, v);
-            pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
-        }
+#if ENABLE_MORTON
+    const bool use_morton_render = true;
 #else
-        // Sample pixels for anti-aliasing
-        for (int s = 0; s < samples_per_pixel; ++s) {
-            float u = (i + random_float()) / (image_width - 1);
-            float v = (j + random_float()) / (image_height - 1);
-
-            Ray r = cam.get_ray(u, v);
-            pixel_color = pixel_color + renderer.ray_color(r, scene, renderer.max_depth);
-        }
+    const bool use_morton_render = opt_morton;
 #endif
 
-        // Average the samples
-        float scale = 1.0f / samples_per_pixel;
-        pixel_color = pixel_color * scale;
-
-        // Gamma correction (gamma 2)
-        pixel_color.x = std::sqrt(pixel_color.x);
-        pixel_color.y = std::sqrt(pixel_color.y);
-        pixel_color.z = std::sqrt(pixel_color.z);
-
-        // Write to framebuffer (convert to 0-255 range)
-        int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
-        framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
-        framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
-        framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
-    }
-#else
+    if (use_morton_render) {
+        std::cerr << "Morton traversal: Renderer::render_morton (same path as interactive CPU)\n";
+        std::vector<std::vector<Color>> morton_fb(static_cast<size_t>(image_height),
+                                                  std::vector<Color>(static_cast<size_t>(image_width)));
+        renderer.render_morton(cam, scene, morton_fb, image_width, image_height, samples_per_pixel);
+        #pragma omp parallel for schedule(dynamic, 16)
+        for (int j = 0; j < image_height; ++j) {
+            for (int i = 0; i < image_width; ++i) {
+                const Color& pc = morton_fb[static_cast<size_t>(j)][static_cast<size_t>(i)];
+                const int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[static_cast<size_t>(pixel_index) + 0] =
+                    static_cast<unsigned char>(256 * std::clamp(pc.x, 0.0f, 0.999f));
+                framebuffer[static_cast<size_t>(pixel_index) + 1] =
+                    static_cast<unsigned char>(256 * std::clamp(pc.y, 0.0f, 0.999f));
+                framebuffer[static_cast<size_t>(pixel_index) + 2] =
+                    static_cast<unsigned char>(256 * std::clamp(pc.z, 0.0f, 0.999f));
+            }
+        }
+    } else {
     // Standard scanline rendering (top to bottom, left to right)
     #pragma omp parallel for schedule(dynamic, 4)
     for (int j = image_height - 1; j >= 0; --j) {
@@ -268,7 +247,7 @@ int main(int argc, char* argv[]) {
             framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
         }
     }
-#endif
+    }
 
     std::cerr << "\n";
 

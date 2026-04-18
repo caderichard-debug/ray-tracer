@@ -3,6 +3,7 @@
 
 #include "ray.h"
 #include "vec3_avx2.h"
+#include <cmath>
 
 // Large number constant for ray tracing
 const float infinity = 1.0e30f;
@@ -57,18 +58,23 @@ struct RayPacket {
                               _mm256_loadu_ps(z_arr));
     }
 
-    // Load 8 rays from array
+    // Load 8 rays from array, normalizing directions.
+    // Required because the SIMD sphere intersection assumes unit-length directions (a=1).
     void load_rays(const Ray rays[8]) {
-        // Manually extract origins and directions
         float ox[8], oy[8], oz[8];
         float dx[8], dy[8], dz[8];
         for (int i = 0; i < 8; i++) {
             ox[i] = rays[i].origin().x;
             oy[i] = rays[i].origin().y;
             oz[i] = rays[i].origin().z;
-            dx[i] = rays[i].direction().x;
-            dy[i] = rays[i].direction().y;
-            dz[i] = rays[i].direction().z;
+            // Normalize: camera get_ray() returns non-unit directions
+            float len = std::sqrt(rays[i].direction().x * rays[i].direction().x +
+                                  rays[i].direction().y * rays[i].direction().y +
+                                  rays[i].direction().z * rays[i].direction().z);
+            float inv_len = (len > 0.0f) ? (1.0f / len) : 1.0f;
+            dx[i] = rays[i].direction().x * inv_len;
+            dy[i] = rays[i].direction().y * inv_len;
+            dz[i] = rays[i].direction().z * inv_len;
         }
         origins = Vec3_AVX2(_mm256_loadu_ps(ox), _mm256_loadu_ps(oy), _mm256_loadu_ps(oz));
         directions = Vec3_AVX2(_mm256_loadu_ps(dx), _mm256_loadu_ps(dy), _mm256_loadu_ps(dz));

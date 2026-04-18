@@ -442,7 +442,7 @@ docs:
 	@echo ""
 	@echo "Main Documentation:"
 	@echo "  README.md              - Project overview and quick start"
-	@echo "  CLAUDE.md              - Project context for AI assistants"
+	@echo "  LLM_CONTEXT.md         - Project context for AI assistants (claude.md → symlink)"
 	@echo "  INTERACTIVE_GUIDE.md   - Interactive mode guide"
 	@echo "  CHANGELOG.md           - Development history"
 	@echo ""

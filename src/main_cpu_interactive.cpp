@@ -58,7 +58,7 @@ struct QualityPreset {
 };
 
 QualityPreset quality_levels[] = {
-    {960, 1, 3, "Large Window (Default)"},  // Medium resolution (960x540) with large window
+    {960, 4, 3, "Large Window (Default)"},  // Medium resolution (960x540) with large window
     {640, 1, 3, "Low (Fast)"},
     {800, 4, 3, "Medium"},
     {1280, 16, 5, "High"},
@@ -366,10 +366,13 @@ private:
         SDL_Rect rect;
         std::string label;
         int value;
-        int category; // 0: quality, 1: samples, 2: depth, 3: shadows, 4: reflections, 5: resolution, 6: debug, 17: min prog display passes
+        int category; // 0: quality, 1: samples, 2: depth, 3: shadows, 4: reflections, 5: resolution, 6: debug,
+                      // 16 denoise toggle, 17 min prog, 18 denoise strength (value 0–2)
     };
     std::vector<Button> buttons;
     int panel_x, panel_y;
+    // Last overlay size from render() — needed so hit tests match SDL_RenderCopy (non-scrollable stretch).
+    int panel_layout_w, panel_layout_h;
 
     // Scroll functionality
     int scroll_offset;
@@ -385,7 +388,8 @@ private:
     uint64_t panel_state_hash(int window_width, int window_height, int quality_idx, const QualityPreset& preset,
                               double fps, double render_time, const char* analysis_mode_name,
                               bool enable_shadows, bool enable_reflections, bool enable_progressive, bool enable_adaptive,
-                              bool enable_denoiser, int min_progressive_display_passes, bool enable_wavefront,
+                              bool enable_denoiser, int denoise_strength, int min_progressive_display_passes,
+                              bool enable_wavefront,
                               bool enable_morton, bool enable_stratified, bool enable_frustum, bool enable_simd_packets,
                               bool enable_bvh
 #ifdef GPU_RENDERING
@@ -412,6 +416,7 @@ private:
         mix(h, enable_progressive ? 3u : 1u);
         mix(h, enable_adaptive ? 3u : 1u);
         mix(h, enable_denoiser ? 3u : 1u);
+        mix(h, static_cast<uint64_t>(denoise_strength + 16));
         mix(h, static_cast<uint64_t>(min_progressive_display_passes));
         mix(h, enable_wavefront ? 3u : 1u);
         mix(h, enable_morton ? 3u : 1u);
@@ -428,9 +433,9 @@ private:
 
 public:
     ControlsPanel()
-        : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0), scroll_offset(0),
-          max_scroll_offset(0), content_height(0), is_scrollable(false), panel_snap_tex(nullptr), panel_snap_key(0),
-          panel_snap_w(0), panel_snap_h(0) {
+        : font(nullptr), title_font(nullptr), initialized(false), panel_x(0), panel_y(0), panel_layout_w(0),
+          panel_layout_h(0), scroll_offset(0), max_scroll_offset(0), content_height(0), is_scrollable(false),
+          panel_snap_tex(nullptr), panel_snap_key(0), panel_snap_w(0), panel_snap_h(0) {
         text_color = {20, 20, 20, 255};
         background_color = {50, 50, 60, 230};  // Dark blue-gray
         title_color = {100, 200, 255, 255};     // Light blue
@@ -490,6 +495,7 @@ public:
                 int quality_idx, const QualityPreset& preset, double fps, double render_time,
                 const char* analysis_mode_name = nullptr, bool enable_shadows = true, bool enable_reflections = true,
                 bool enable_progressive = false, bool enable_adaptive = false, bool enable_denoiser = false,
+                int denoise_strength = 0,
                 int min_progressive_display_passes = 1,
                 bool enable_wavefront = false,
                 bool enable_morton = false, bool enable_stratified = false, bool enable_frustum = false,
@@ -505,24 +511,20 @@ public:
         int panel_height = std::max(1, window_height - 20);
         panel_x = window_width - panel_width - 10;
         panel_y = 10;
+        panel_layout_w = panel_width;
+        panel_layout_h = panel_height;
         SDL_Rect overlay_rect = {panel_x, panel_y, panel_width, panel_height};
 
         const uint64_t hkey = panel_state_hash(window_width, window_height, quality_idx, preset, fps, render_time,
             analysis_mode_name, enable_shadows, enable_reflections, enable_progressive, enable_adaptive, enable_denoiser,
-            min_progressive_display_passes, enable_wavefront, enable_morton, enable_stratified, enable_frustum,
-            enable_simd_packets, enable_bvh
+            denoise_strength, min_progressive_display_passes, enable_wavefront, enable_morton, enable_stratified,
+            enable_frustum, enable_simd_packets, enable_bvh
 #ifdef GPU_RENDERING
             , current_renderer
 #endif
         );
-        if (panel_snap_tex && hkey == panel_snap_key) {
-            int tw = 0, th = 0;
-            if (SDL_QueryTexture(panel_snap_tex, nullptr, nullptr, &tw, &th) == 0 && tw == overlay_rect.w &&
-                th == overlay_rect.h) {
-                SDL_RenderCopy(renderer, panel_snap_tex, nullptr, &overlay_rect);
-                return;
-            }
-        }
+        // Do not short-circuit with a cached texture: skipping the layout pass leaves `buttons` stale vs
+        // `panel_x`/`panel_y` (e.g. after resize) and breaks hit testing. Rebuild the panel every frame.
 
         // Scrollable document surface (cap size to reduce allocation on very tall windows)
         int content_surface_height = std::min(3200, std::max(1800, panel_height + 1200));
@@ -593,14 +595,14 @@ public:
         SDL_Surface* renderer_surface = TTF_RenderText_Blended(font, "Renderer:", title_color);
         if (renderer_surface) {
             SDL_Rect renderer_rect = {15, y_offset, renderer_surface->w, renderer_surface->h};
-            SDL_BlitSurface(renderer_surface, nullptr, surface, &renderer_rect);
+            SDL_BlitSurface(renderer_surface, nullptr, content_surface, &renderer_rect);
             SDL_FreeSurface(renderer_surface);
 
             // Render the actual mode with color
             SDL_Surface* mode_surface = TTF_RenderText_Blended(font, renderer_mode, renderer_color);
             if (mode_surface) {
                 SDL_Rect mode_rect = {70, y_offset, mode_surface->w, mode_surface->h};
-                SDL_BlitSurface(mode_surface, nullptr, surface, &mode_rect);
+                SDL_BlitSurface(mode_surface, nullptr, content_surface, &mode_rect);
                 SDL_FreeSurface(mode_surface);
             }
             y_offset += 22;
@@ -933,9 +935,9 @@ public:
             }
         }
 
-        // Advanced Rendering Features section
+        // Optimizations: paths, sampling, acceleration (single panel section)
         y_offset += 35;
-        label_surface = TTF_RenderText_Blended(font, "Advanced Rendering:", title_color);
+        label_surface = TTF_RenderText_Blended(font, "Optimizations:", title_color);
         if (label_surface) {
             SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
             SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
@@ -1015,63 +1017,6 @@ public:
 
         y_offset += 35;
 
-        // Post denoise (edge-preserving filter on CPU worker after each traced frame)
-        const char* denoise_label = enable_denoiser ? "Denoise: ON" : "Denoise: OFF";
-        int denoise_button_width = 120;
-        SDL_Rect denoise_button_rect = {15, y_offset, denoise_button_width, 24};
-        buttons.push_back({{denoise_button_rect.x + panel_x, denoise_button_rect.y + panel_y, denoise_button_rect.w, denoise_button_rect.h},
-                          "denoise", enable_denoiser ? 1 : 0, 16});
-
-        Uint32 denoise_button_bg = SDL_MapRGBA(content_surface->format,
-            enable_denoiser ? button_active_color.r : button_color.r,
-            enable_denoiser ? button_active_color.g : button_color.g,
-            enable_denoiser ? button_active_color.b : button_color.b,
-            255);
-        SDL_FillRect(content_surface, &denoise_button_rect, denoise_button_bg);
-        SDL_Rect denoise_border = {denoise_button_rect.x, denoise_button_rect.y, denoise_button_rect.w, 2};
-        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
-        denoise_border = {denoise_button_rect.x, denoise_button_rect.y + denoise_button_rect.h - 2, denoise_button_rect.w, 2};
-        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
-        SDL_Surface* denoise_text_surface = TTF_RenderText_Blended(font, denoise_label, text_color);
-        if (denoise_text_surface) {
-            SDL_Rect denoise_text_rect = {
-                denoise_button_rect.x + (denoise_button_width - denoise_text_surface->w) / 2,
-                y_offset + (24 - denoise_text_surface->h) / 2,
-                denoise_text_surface->w, denoise_text_surface->h
-            };
-            SDL_BlitSurface(denoise_text_surface, nullptr, content_surface, &denoise_text_rect);
-            SDL_FreeSurface(denoise_text_surface);
-        }
-
-        y_offset += 35;
-
-        // Progressive: minimum accumulated passes before publishing a frame (CPU worker).
-        label_surface = TTF_RenderText_Blended(font, "Prog display min:", title_color);
-        if (label_surface) {
-            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
-            SDL_FreeSurface(label_surface);
-        }
-        y_offset += 22;
-
-        int min_disp_values[] = {1, 2, 4, 8, 16, 32};
-        for (int v : min_disp_values) {
-            char label[12];
-            snprintf(label, sizeof(label), "%d", v);
-            bool is_active = (min_progressive_display_passes == v);
-            render_button(label, v, 17, is_active);
-        }
-        y_offset += 35;
-
-        // Phase 2 Optimizations section
-        label_surface = TTF_RenderText_Blended(font, "Phase 2 Optimizations:", title_color);
-        if (label_surface) {
-            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
-            SDL_FreeSurface(label_surface);
-        }
-        y_offset += 22;
-
         // Morton Z-curve toggle button
         const char* morton_label = enable_morton ? "Morton: ON" : "Morton: OFF";
         int morton_button_width = 120;
@@ -1144,7 +1089,7 @@ public:
 
         y_offset += 35;
 
-        // Frustum culling toggle button (new row)
+        // Frustum + BVH (independent of SIMD/wavefront packet path)
         const char* frustum_label = enable_frustum ? "Frustum: ON" : "Frustum: OFF";
         int frustum_button_width = 120;
         SDL_Rect frustum_button_rect = {15, y_offset, frustum_button_width, 24};
@@ -1153,7 +1098,6 @@ public:
         buttons.push_back({{frustum_button_rect.x + panel_x, frustum_button_rect.y + panel_y, frustum_button_rect.w, frustum_button_rect.h},
                           "frustum", enable_frustum ? 1 : 0, 13});
 
-        // Draw frustum button background
         Uint32 frustum_button_bg = SDL_MapRGBA(content_surface->format,
             enable_frustum ? button_active_color.r : button_color.r,
             enable_frustum ? button_active_color.g : button_color.g,
@@ -1161,13 +1105,11 @@ public:
             255);
         SDL_FillRect(content_surface, &frustum_button_rect, frustum_button_bg);
 
-        // Draw frustum button border
         SDL_Rect frustum_border = {frustum_button_rect.x, frustum_button_rect.y, frustum_button_rect.w, 2};
         SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
         frustum_border = {frustum_button_rect.x, frustum_button_rect.y + frustum_button_rect.h - 2, frustum_button_rect.w, 2};
         SDL_FillRect(content_surface, &frustum_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
 
-        // Draw frustum button text
         SDL_Surface* frustum_text_surface = TTF_RenderText_Blended(font, frustum_label, text_color);
         if (frustum_text_surface) {
             SDL_Rect frustum_text_rect = {
@@ -1179,18 +1121,35 @@ public:
             SDL_FreeSurface(frustum_text_surface);
         }
 
+        const char* bvh_label = enable_bvh ? "BVH: ON" : "BVH: OFF";
+        int bvh_button_width = 120;
+        SDL_Rect bvh_button_rect = {150, y_offset, bvh_button_width, 24};
+        buttons.push_back({{bvh_button_rect.x + panel_x, bvh_button_rect.y + panel_y, bvh_button_rect.w, bvh_button_rect.h},
+                          "bvh", enable_bvh ? 1 : 0, 15});
+        Uint32 bvh_button_bg = SDL_MapRGBA(content_surface->format,
+            enable_bvh ? button_active_color.r : button_color.r,
+            enable_bvh ? button_active_color.g : button_color.g,
+            enable_bvh ? button_active_color.b : button_color.b,
+            255);
+        SDL_FillRect(content_surface, &bvh_button_rect, bvh_button_bg);
+        SDL_Rect bvh_border = {bvh_button_rect.x, bvh_button_rect.y, bvh_button_rect.w, 2};
+        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        bvh_border = {bvh_button_rect.x, bvh_button_rect.y + bvh_button_rect.h - 2, bvh_button_rect.w, 2};
+        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_Surface* bvh_text_surface = TTF_RenderText_Blended(font, bvh_label, text_color);
+        if (bvh_text_surface) {
+            SDL_Rect bvh_text_rect = {
+                bvh_button_rect.x + (bvh_button_width - bvh_text_surface->w) / 2,
+                y_offset + (24 - bvh_text_surface->h) / 2,
+                bvh_text_surface->w, bvh_text_surface->h
+            };
+            SDL_BlitSurface(bvh_text_surface, nullptr, content_surface, &bvh_text_rect);
+            SDL_FreeSurface(bvh_text_surface);
+        }
+
         y_offset += 35;
 
-        // Phase 3: SIMD packet tracing vs wavefront (mutually exclusive render paths)
-        label_surface = TTF_RenderText_Blended(font, "Phase 3 (SIMD or Wavefront):", title_color);
-        if (label_surface) {
-            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
-            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
-            SDL_FreeSurface(label_surface);
-        }
-        y_offset += 22;
-
-        // SIMD and Wavefront on one row — only one should be ON at a time
+        // SIMD vs wavefront: mutually exclusive packet render paths (BVH can stay on for scalar hits)
         const char* simd_label = enable_simd_packets ? "SIMD: ON" : "SIMD: OFF";
         int simd_button_width = 120;
         SDL_Rect simd_button_rect = {15, y_offset, simd_button_width, 24};
@@ -1253,40 +1212,90 @@ public:
 
         y_offset += 35;
 
-        // BVH toggle button (new row)
-        const char* bvh_label = enable_bvh ? "BVH: ON" : "BVH: OFF";
-        int bvh_button_width = 120;
-        SDL_Rect bvh_button_rect = {15, y_offset, bvh_button_width, 24};
+        // Post denoise (edge-preserving filter on CPU worker after each traced frame)
+        const char* denoise_label = enable_denoiser ? "Denoise: ON" : "Denoise: OFF";
+        int denoise_button_width = 120;
+        SDL_Rect denoise_button_rect = {15, y_offset, denoise_button_width, 24};
+        buttons.push_back({{denoise_button_rect.x + panel_x, denoise_button_rect.y + panel_y, denoise_button_rect.w, denoise_button_rect.h},
+                          "denoise", enable_denoiser ? 1 : 0, 16});
 
-        // Store button for click detection (category 15 = bvh)
-        buttons.push_back({{bvh_button_rect.x + panel_x, bvh_button_rect.y + panel_y, bvh_button_rect.w, bvh_button_rect.h},
-                          "bvh", enable_bvh ? 1 : 0, 15});
-
-        // Draw BVH button background
-        Uint32 bvh_button_bg = SDL_MapRGBA(content_surface->format,
-            enable_bvh ? button_active_color.r : button_color.r,
-            enable_bvh ? button_active_color.g : button_color.g,
-            enable_bvh ? button_active_color.b : button_color.b,
+        Uint32 denoise_button_bg = SDL_MapRGBA(content_surface->format,
+            enable_denoiser ? button_active_color.r : button_color.r,
+            enable_denoiser ? button_active_color.g : button_color.g,
+            enable_denoiser ? button_active_color.b : button_color.b,
             255);
-        SDL_FillRect(content_surface, &bvh_button_rect, bvh_button_bg);
-
-        // Draw BVH button border
-        SDL_Rect bvh_border = {bvh_button_rect.x, bvh_button_rect.y, bvh_button_rect.w, 2};
-        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
-        bvh_border = {bvh_button_rect.x, bvh_button_rect.y + bvh_button_rect.h - 2, bvh_button_rect.w, 2};
-        SDL_FillRect(content_surface, &bvh_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
-
-        // Draw BVH button text
-        SDL_Surface* bvh_text_surface = TTF_RenderText_Blended(font, bvh_label, text_color);
-        if (bvh_text_surface) {
-            SDL_Rect bvh_text_rect = {
-                bvh_button_rect.x + (bvh_button_width - bvh_text_surface->w) / 2,
-                y_offset + (24 - bvh_text_surface->h) / 2,
-                bvh_text_surface->w, bvh_text_surface->h
+        SDL_FillRect(content_surface, &denoise_button_rect, denoise_button_bg);
+        SDL_Rect denoise_border = {denoise_button_rect.x, denoise_button_rect.y, denoise_button_rect.w, 2};
+        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        denoise_border = {denoise_button_rect.x, denoise_button_rect.y + denoise_button_rect.h - 2, denoise_button_rect.w, 2};
+        SDL_FillRect(content_surface, &denoise_border, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+        SDL_Surface* denoise_text_surface = TTF_RenderText_Blended(font, denoise_label, text_color);
+        if (denoise_text_surface) {
+            SDL_Rect denoise_text_rect = {
+                denoise_button_rect.x + (denoise_button_width - denoise_text_surface->w) / 2,
+                y_offset + (24 - denoise_text_surface->h) / 2,
+                denoise_text_surface->w, denoise_text_surface->h
             };
-            SDL_BlitSurface(bvh_text_surface, nullptr, content_surface, &bvh_text_rect);
-            SDL_FreeSurface(bvh_text_surface);
+            SDL_BlitSurface(denoise_text_surface, nullptr, content_surface, &denoise_text_rect);
+            SDL_FreeSurface(denoise_text_surface);
         }
+
+        y_offset += 28;
+        label_surface = TTF_RenderText_Blended(font, "Denoise str:", title_color);
+        if (label_surface) {
+            SDL_Rect lr = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &lr);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        {
+            const char* str_names[] = {"Light", "Med", "Strong"};
+            const int str_bw = 74;
+            const int str_gap = 5;
+            const int str_x0 = 15;
+            for (int si = 0; si < 3; ++si) {
+                SDL_Rect r = {str_x0 + si * (str_bw + str_gap), y_offset, str_bw, 24};
+                const bool active = (denoise_strength == si);
+                buttons.push_back({{r.x + panel_x, r.y + panel_y, r.w, r.h}, str_names[si], si, 18});
+                Uint32 bg = SDL_MapRGBA(content_surface->format,
+                    active ? button_active_color.r : button_color.r,
+                    active ? button_active_color.g : button_color.g,
+                    active ? button_active_color.b : button_color.b,
+                    255);
+                SDL_FillRect(content_surface, &r, bg);
+                SDL_Rect btop = {r.x, r.y, r.w, 2};
+                SDL_FillRect(content_surface, &btop, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+                SDL_Rect bbot = {r.x, r.y + r.h - 2, r.w, 2};
+                SDL_FillRect(content_surface, &bbot, SDL_MapRGBA(content_surface->format, 120, 120, 140, 255));
+                SDL_Surface* ts = TTF_RenderText_Blended(font, str_names[si], text_color);
+                if (ts) {
+                    SDL_Rect tr = {r.x + (str_bw - ts->w) / 2, r.y + (24 - ts->h) / 2, ts->w, ts->h};
+                    SDL_BlitSurface(ts, nullptr, content_surface, &tr);
+                    SDL_FreeSurface(ts);
+                }
+            }
+        }
+
+        y_offset += 35;
+
+        // Minimum accumulated progressive passes before publishing a frame (CPU worker).
+        label_surface = TTF_RenderText_Blended(font, "Progressive display min passes:", title_color);
+        if (label_surface) {
+            SDL_Rect label_rect = {15, y_offset, label_surface->w, label_surface->h};
+            SDL_BlitSurface(label_surface, nullptr, content_surface, &label_rect);
+            SDL_FreeSurface(label_surface);
+        }
+        y_offset += 22;
+
+        int min_disp_values[] = {1, 2, 4, 8, 16, 32};
+        for (int v : min_disp_values) {
+            char label[12];
+            snprintf(label, sizeof(label), "%d", v);
+            bool is_active = (min_progressive_display_passes == v);
+            render_button(label, v, 17, is_active);
+        }
+        y_offset += 35;
 
         // Add padding at bottom for scrolling
         y_offset += 40;
@@ -1301,12 +1310,8 @@ public:
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, content_surface);
         if (texture) {
             // Source rect: only show the visible portion based on scroll_offset
-            SDL_Rect src_rect = {0, scroll_offset, panel_width, panel_height};
-
-            // If content is shorter than panel, show all content
-            if (!is_scrollable) {
-                src_rect.h = content_height;
-            }
+            SDL_Rect src_rect = {0, is_scrollable ? scroll_offset : 0, panel_width,
+                                 is_scrollable ? panel_height : content_height};
 
             SDL_RenderCopy(renderer, texture, &src_rect, &overlay_rect);
 
@@ -1384,6 +1389,8 @@ public:
         bool progressive_changed;
         bool adaptive_changed;
         bool denoiser_changed;
+        bool denoise_strength_changed;
+        int new_denoise_strength;
         bool min_prog_display_changed;
         int new_min_prog_display_passes;
         bool wavefront_changed;
@@ -1403,7 +1410,8 @@ public:
                        shadows_changed(false), reflections_changed(false),
                        analysis_mode_changed(false), new_analysis_mode(0),
                        screenshot_requested(false), progressive_changed(false),
-                       adaptive_changed(false), denoiser_changed(false), min_prog_display_changed(false),
+                       adaptive_changed(false), denoiser_changed(false), denoise_strength_changed(false),
+                       new_denoise_strength(0), min_prog_display_changed(false),
                        new_min_prog_display_passes(1), wavefront_changed(false),
                        morton_changed(false), stratified_changed(false), frustum_changed(false),
                        simd_packets_changed(false), new_simd_packets(false),
@@ -1413,12 +1421,37 @@ public:
 
     ClickResult handle_click(int mouse_x, int mouse_y) {
         ClickResult result;
-        // Adjust mouse_y for scroll offset
-        int adjusted_mouse_y = mouse_y + scroll_offset;
+        if (panel_layout_w <= 0 || panel_layout_h <= 0 || content_height <= 0) {
+            return result;
+        }
+
+        const int local_x = mouse_x - panel_x;
+        const int local_y = mouse_y - panel_y;
+        if (local_x < 0 || local_x >= panel_layout_w || local_y < 0 || local_y >= panel_layout_h) {
+            return result;
+        }
+
+        // Button rects use content Y + panel_y. Map click to content coordinates.
+        int content_mouse_y;
+        if (is_scrollable) {
+            content_mouse_y = local_y + scroll_offset;
+        } else {
+            // Match vertical stretch: src (content_height) scaled to dest (panel_layout_h).
+            content_mouse_y = static_cast<int>(std::floor(
+                (static_cast<double>(local_y) + 0.5) * static_cast<double>(content_height) /
+                static_cast<double>(panel_layout_h)));
+            if (content_mouse_y < 0) {
+                content_mouse_y = 0;
+            } else if (content_mouse_y >= content_height) {
+                content_mouse_y = content_height - 1;
+            }
+        }
 
         for (const auto& button : buttons) {
-            if (mouse_x >= button.rect.x && mouse_x < button.rect.x + button.rect.w &&
-                adjusted_mouse_y >= button.rect.y && adjusted_mouse_y < button.rect.y + button.rect.h) {
+            const int bx = button.rect.x - panel_x;
+            const int by = button.rect.y - panel_y;
+            if (local_x >= bx && local_x < bx + button.rect.w && content_mouse_y >= by &&
+                content_mouse_y < by + button.rect.h) {
 
                 result.button_clicked = true;
 
@@ -1461,6 +1494,10 @@ public:
                     case 16: // Post denoise toggle
                         result.denoiser_changed = true;
                         break;
+                    case 18: // Denoise strength (0 Light, 1 Med, 2 Strong)
+                        result.denoise_strength_changed = true;
+                        result.new_denoise_strength = button.value;
+                        break;
                     case 17: // Min progressive passes before display
                         result.min_prog_display_changed = true;
                         result.new_min_prog_display_passes = button.value;
@@ -1494,7 +1531,17 @@ public:
 
     // Adjust scroll offset by delta (positive = scroll down, negative = scroll up)
     void scroll(int delta) {
-        if (!is_scrollable) return;
+        if (!is_scrollable) {
+            if (scroll_offset != 0) {
+                scroll_offset = 0;
+                if (panel_snap_tex) {
+                    SDL_DestroyTexture(panel_snap_tex);
+                    panel_snap_tex = nullptr;
+                    panel_snap_key = 0;
+                }
+            }
+            return;
+        }
         scroll_offset -= delta;
         // Clamp scroll offset
         scroll_offset = std::max(0, std::min(scroll_offset, max_scroll_offset));
@@ -1537,15 +1584,36 @@ static void blit_packed_rgb24_to_texture(SDL_Texture* texture, const unsigned ch
     SDL_UnlockTexture(texture);
 }
 
+// Maps panel "Light / Med / Strong" to bilateral parameters (smaller spatial radius and sigmas => less blur).
+static void denoise_params_from_strength(int strength, float* out_sigma_s, float* out_sigma_r, int* out_spatial_radius) {
+    const int s = std::max(0, std::min(2, strength));
+    if (s <= 0) {
+        *out_sigma_s = 0.72f;
+        *out_sigma_r = 0.034f;
+        *out_spatial_radius = 1;
+    } else if (s == 1) {
+        *out_sigma_s = 1.35f;
+        *out_sigma_r = 0.065f;
+        *out_spatial_radius = 2;
+    } else {
+        *out_sigma_s = 1.58f;
+        *out_sigma_r = 0.088f;
+        *out_spatial_radius = 2;
+    }
+}
+
 // Lightweight edge-preserving smooth (bilateral on luminance) for packed RGB24. Runs on producer thread.
-static void apply_rgb24_edge_preserving_denoise(std::vector<unsigned char>& rgb, int w, int h) {
-    if (w < 5 || h < 5 || rgb.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 3u) {
+static void apply_rgb24_edge_preserving_denoise(std::vector<unsigned char>& rgb, int w, int h, float sigma_s,
+                                               float sigma_r, int spatial_radius) {
+    if (spatial_radius < 1) {
+        spatial_radius = 1;
+    }
+    const int need = spatial_radius * 2 + 1;
+    if (w < need || h < need || rgb.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 3u) {
         return;
     }
     const size_t nbytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 3u;
     std::vector<unsigned char> out(nbytes);
-    const float sigma_s = 1.35f;
-    const float sigma_r = 0.065f;
     const float inv_two_ss = 1.0f / (2.0f * sigma_s * sigma_s);
     const float inv_two_sr = 1.0f / (2.0f * sigma_r * sigma_r);
 
@@ -1561,12 +1629,12 @@ static void apply_rgb24_edge_preserving_denoise(std::vector<unsigned char>& rgb,
             float sumr = 0.0f;
             float sumg = 0.0f;
             float sumb = 0.0f;
-            for (int dy = -2; dy <= 2; ++dy) {
+            for (int dy = -spatial_radius; dy <= spatial_radius; ++dy) {
                 const int yy = y + dy;
                 if (yy < 0 || yy >= h) {
                     continue;
                 }
-                for (int dx = -2; dx <= 2; ++dx) {
+                for (int dx = -spatial_radius; dx <= spatial_radius; ++dx) {
                     const int xx = x + dx;
                     if (xx < 0 || xx >= w) {
                         continue;
@@ -1600,15 +1668,17 @@ static void apply_rgb24_edge_preserving_denoise(std::vector<unsigned char>& rgb,
 }
 
 // Half-resolution bilateral pass then nearest upscale (large frames only).
-static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>& rgb, int w, int h) {
+static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>& rgb, int w, int h, float sigma_s,
+                                                      float sigma_r, int spatial_radius) {
+    const int need_half = spatial_radius * 2 + 1;
     if (w < 10 || h < 10 || static_cast<long long>(w) * h < 400000) {
-        apply_rgb24_edge_preserving_denoise(rgb, w, h);
+        apply_rgb24_edge_preserving_denoise(rgb, w, h, sigma_s, sigma_r, spatial_radius);
         return;
     }
     const int w2 = w / 2;
     const int h2 = h / 2;
-    if (w2 < 5 || h2 < 5) {
-        apply_rgb24_edge_preserving_denoise(rgb, w, h);
+    if (w2 < need_half || h2 < need_half) {
+        apply_rgb24_edge_preserving_denoise(rgb, w, h, sigma_s, sigma_r, spatial_radius);
         return;
     }
     std::vector<unsigned char> half(static_cast<size_t>(w2) * static_cast<size_t>(h2) * 3u);
@@ -1633,7 +1703,7 @@ static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>
             half[di + 2] = static_cast<unsigned char>(acc_b / cnt);
         }
     }
-    apply_rgb24_edge_preserving_denoise(half, w2, h2);
+    apply_rgb24_edge_preserving_denoise(half, w2, h2, sigma_s, sigma_r, spatial_radius);
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
@@ -1646,6 +1716,73 @@ static void apply_rgb24_edge_preserving_denoise_large(std::vector<unsigned char>
             rgb[di + 2] = half[si + 2];
         }
     }
+}
+
+// Fast unsharp after denoise: 3x3 box blur as low-pass, one boost pass (OpenMP). Keeps edges from over-shooting.
+static void apply_rgb24_light_unsharp_after_denoise(std::vector<unsigned char>& rgb, int w, int h,
+                                                    int denoise_strength_0_2) {
+    if (w < 3 || h < 3) {
+        return;
+    }
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 3u;
+    if (rgb.size() < n) {
+        return;
+    }
+    const int s = std::max(0, std::min(2, denoise_strength_0_2));
+    // Slightly more pull-through for stronger bilateral (which softens more).
+    const float k = 0.38f + 0.11f * static_cast<float>(s);
+    const size_t row_stride = static_cast<size_t>(w) * 3u;
+
+    // Must not be thread_local: OpenMP worker threads each had their own tiny/unresized buffer → OOB/crash after denoise.
+    std::vector<unsigned char> out(n);
+
+    #pragma omp parallel for schedule(static)
+    for (int y = 1; y < h - 1; ++y) {
+        for (int x = 1; x < w - 1; ++x) {
+            const size_t ci = static_cast<size_t>(y) * row_stride + static_cast<size_t>(x) * 3u;
+            unsigned sumr = 0;
+            unsigned sumg = 0;
+            unsigned sumb = 0;
+            for (int dy = -1; dy <= 1; ++dy) {
+                const unsigned char* row = rgb.data() + (static_cast<size_t>(y + dy) * static_cast<size_t>(w) + static_cast<size_t>(x - 1)) * 3u;
+                sumr += static_cast<unsigned>(row[0]) + static_cast<unsigned>(row[3]) + static_cast<unsigned>(row[6]);
+                sumg += static_cast<unsigned>(row[1]) + static_cast<unsigned>(row[4]) + static_cast<unsigned>(row[7]);
+                sumb += static_cast<unsigned>(row[2]) + static_cast<unsigned>(row[5]) + static_cast<unsigned>(row[8]);
+            }
+            const float br = static_cast<float>(sumr) * (1.0f / 9.0f);
+            const float bg = static_cast<float>(sumg) * (1.0f / 9.0f);
+            const float bb = static_cast<float>(sumb) * (1.0f / 9.0f);
+            const float cr = static_cast<float>(rgb[ci]);
+            const float cg = static_cast<float>(rgb[ci + 1]);
+            const float cb = static_cast<float>(rgb[ci + 2]);
+            out[ci] = static_cast<unsigned char>(std::clamp(cr + k * (cr - br), 0.0f, 255.0f));
+            out[ci + 1] = static_cast<unsigned char>(std::clamp(cg + k * (cg - bg), 0.0f, 255.0f));
+            out[ci + 2] = static_cast<unsigned char>(std::clamp(cb + k * (cb - bb), 0.0f, 255.0f));
+        }
+    }
+
+    for (int x = 0; x < w; ++x) {
+        const size_t t = static_cast<size_t>(x) * 3u;
+        const size_t b = (static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3u;
+        out[t] = rgb[t];
+        out[t + 1] = rgb[t + 1];
+        out[t + 2] = rgb[t + 2];
+        out[b] = rgb[b];
+        out[b + 1] = rgb[b + 1];
+        out[b + 2] = rgb[b + 2];
+    }
+    for (int y = 1; y < h - 1; ++y) {
+        const size_t left = static_cast<size_t>(y) * row_stride;
+        const size_t right = left + static_cast<size_t>(w - 1) * 3u;
+        out[left] = rgb[left];
+        out[left + 1] = rgb[left + 1];
+        out[left + 2] = rgb[left + 2];
+        out[right] = rgb[right];
+        out[right + 1] = rgb[right + 1];
+        out[right + 2] = rgb[right + 2];
+    }
+
+    rgb.swap(out);
 }
 
 static bool rt_profile_enabled() {
@@ -1706,6 +1843,11 @@ struct CpuTracePassResult {
 static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam, const QualityPreset& preset, int image_width,
                                                        int image_height, Renderer& ray_renderer, RenderAnalysis& analysis,
                                                        bool enable_shadows, std::vector<unsigned char>& framebuffer) {
+    if (!scene.simd_scene_cache_ready()) {
+        scene.build_simd_cache();
+    }
+    ray_renderer.sync_frustum(cam);
+
     bool schedule_next_render = false;
     int progressive_pass_count = 0;
     const bool prof = rt_profile_enabled();
@@ -1715,14 +1857,38 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
     static Camera progressive_cam_anchor;
     static bool progressive_cam_anchor_valid = false;
     static int progressive_last_max_depth = -1;
+    static uint32_t last_rt_settings_sig_execute = ~0u;
     if (!ray_renderer.enable_progressive) {
         progressive_cam_anchor_valid = false;
         progressive_last_max_depth = -1;
     }
+    uint32_t rt_settings_sig =
+        (ray_renderer.enable_stratified ? 1u : 0u) |
+        (ray_renderer.enable_frustum ? 2u : 0u) |
+        (ray_renderer.enable_bvh ? 4u : 0u) |
+        (ray_renderer.enable_morton ? 8u : 0u) |
+        (ray_renderer.enable_wavefront ? 16u : 0u) |
+        (ray_renderer.enable_simd_packets ? 32u : 0u) |
+        (ray_renderer.enable_progressive ? 64u : 0u);
+    {
+        unsigned bucket = 0u;
+        if (ray_renderer.enable_progressive) {
+            if (ray_renderer.enable_wavefront) {
+                bucket = 1u;
+            } else if (ray_renderer.enable_simd_packets) {
+                bucket = 2u;
+            } else {
+                bucket = 3u;
+            }
+        }
+        rt_settings_sig |= bucket << 8u;
+    }
+    const bool rt_settings_changed = (rt_settings_sig != last_rt_settings_sig_execute);
+
     const bool progressive_view_changed =
         ray_renderer.enable_progressive &&
         (!progressive_cam_anchor_valid || progressive_view_differs(progressive_cam_anchor, cam) ||
-         progressive_last_max_depth != ray_renderer.max_depth);
+         progressive_last_max_depth != ray_renderer.max_depth || rt_settings_changed);
 
     if (ray_renderer.enable_progressive && ray_renderer.enable_wavefront) {
         path_id = 1;
@@ -1883,6 +2049,21 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
                 framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
             }
         }
+    } else if (ray_renderer.enable_morton) {
+        path_id = 7;
+        std::vector<std::vector<Color>> morton_framebuffer(image_height, std::vector<Color>(image_width));
+        ray_renderer.render_morton(cam, scene, morton_framebuffer, image_width, image_height, preset.samples);
+
+        #pragma omp parallel for schedule(dynamic, 16)
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                Color pixel_color = morton_framebuffer[j][i];
+                int pixel_index = ((image_height - 1 - j) * image_width + i) * 3;
+                framebuffer[pixel_index + 0] = static_cast<unsigned char>(256 * std::clamp(pixel_color.x, 0.0f, 0.999f));
+                framebuffer[pixel_index + 1] = static_cast<unsigned char>(256 * std::clamp(pixel_color.y, 0.0f, 0.999f));
+                framebuffer[pixel_index + 2] = static_cast<unsigned char>(256 * std::clamp(pixel_color.z, 0.0f, 0.999f));
+            }
+        }
     } else {
         #pragma omp parallel for schedule(dynamic, 16)
         for (int j = image_height - 1; j >= 0; --j) {
@@ -1897,9 +2078,21 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
                 int actual_samples =
                     ray_renderer.enable_adaptive ? std::max(1, preset.samples / 2) : preset.samples;
 
+                std::vector<std::pair<float, float>> stratified_samples;
+                if (ray_renderer.enable_stratified) {
+                    stratified_samples = Stratified::generate_stratified_samples(actual_samples);
+                }
+
                 for (int s = 0; s < actual_samples; ++s) {
-                    float u = (i + random_float_pcg()) / (image_width - 1);
-                    float v = (j + random_float_pcg()) / (image_height - 1);
+                    float u;
+                    float v;
+                    if (ray_renderer.enable_stratified) {
+                        u = (i + stratified_samples[static_cast<size_t>(s)].first) / (image_width - 1);
+                        v = (j + stratified_samples[static_cast<size_t>(s)].second) / (image_height - 1);
+                    } else {
+                        u = (i + random_float_pcg()) / (image_width - 1);
+                        v = (j + random_float_pcg()) / (image_height - 1);
+                    }
 
                     Ray r = cam.get_ray(u, v);
                     Color sample_color = ray_renderer.ray_color(r, scene, ray_renderer.max_depth);
@@ -1908,7 +2101,7 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
 
                     if (!ray_renderer.enable_adaptive) {
                         HitRecord rec;
-                        if (scene.hit(r, 0.001f, 1000.0f, rec)) {
+                        if (ray_renderer.trace_primary(r, 0.001f, 1000.0f, rec, scene)) {
                             total_depth += rec.t;
                             pixel_normal = pixel_normal + Color(rec.normal.x, rec.normal.y, rec.normal.z);
                             if (rec.mat) {
@@ -1967,6 +2160,8 @@ static CpuTracePassResult execute_cpu_ray_tracing_pass(Scene& scene, Camera cam,
         }
     }
 
+    last_rt_settings_sig_execute = rt_settings_sig;
+
     return {schedule_next_render, progressive_pass_count};
 }
 
@@ -1982,6 +2177,7 @@ struct CpuRenderThreadHub {
     int job_height = 0;
     bool job_enable_shadows = true;
     bool job_denoise = false;
+    int job_denoise_strength = 0;
     int job_min_passes_to_display = 1;
 
     Scene* scene_ptr = nullptr;
@@ -2005,6 +2201,7 @@ struct CpuRenderThreadHub {
             int ih = 0;
             bool es = true;
             bool denoise = false;
+            int denoise_strength = 0;
             Scene* sc = nullptr;
             Renderer* rr = nullptr;
             RenderAnalysis* an = nullptr;
@@ -2021,6 +2218,7 @@ struct CpuRenderThreadHub {
                 ih = job_height;
                 es = job_enable_shadows;
                 denoise = job_denoise;
+                denoise_strength = job_denoise_strength;
                 sc = scene_ptr;
                 rr = renderer_ptr;
                 an = analysis_ptr;
@@ -2046,7 +2244,12 @@ struct CpuRenderThreadHub {
             } else {
                 const bool skip_denoise_intermediate_progressive = rr->enable_progressive && sched;
                 if (denoise && !skip_denoise_intermediate_progressive) {
-                    apply_rgb24_edge_preserving_denoise_large(fb, iw, ih);
+                    float ds = 1.35f;
+                    float dr = 0.065f;
+                    int rad = 2;
+                    denoise_params_from_strength(denoise_strength, &ds, &dr, &rad);
+                    apply_rgb24_edge_preserving_denoise_large(fb, iw, ih, ds, dr, rad);
+                    apply_rgb24_light_unsharp_after_denoise(fb, iw, ih, denoise_strength);
                 }
                 auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -2073,7 +2276,7 @@ struct CpuRenderThreadHub {
     }
 
     void submit_job(const Camera& cam, const QualityPreset& preset_in, int iw, int ih, bool enable_shadows,
-                      bool denoise_after_trace, int min_passes_to_display) {
+                      bool denoise_after_trace, int denoise_strength_in, int min_passes_to_display) {
         std::lock_guard<std::mutex> lk(job_mutex);
         job_cam = cam;
         job_preset = preset_in;
@@ -2081,6 +2284,7 @@ struct CpuRenderThreadHub {
         job_height = ih;
         job_enable_shadows = enable_shadows;
         job_denoise = denoise_after_trace;
+        job_denoise_strength = std::max(0, std::min(2, denoise_strength_in));
         job_min_passes_to_display = std::max(1, min_passes_to_display);
         job_pending = true;
         job_cv.notify_one();
@@ -2220,6 +2424,7 @@ int main(int argc, char* argv[]) {
     bool enable_stratified = false;
     bool enable_frustum = false;
     bool enable_denoiser = false;
+    int denoise_strength = 0;
     int min_progressive_display_passes = 1;
 
     // Create window
@@ -2310,7 +2515,11 @@ int main(int argc, char* argv[]) {
     Renderer ray_renderer(preset.max_depth);
     ray_renderer.enable_shadows = enable_shadows;
     ray_renderer.enable_reflections = enable_reflections;
-    std::cout << "CPU Renderer initialized (OpenMP with " << omp_get_max_threads() << " threads)" << std::endl;
+    ray_renderer.enable_progressive = true;
+    ray_renderer.enable_adaptive = true;
+    ray_renderer.enable_simd_packets = true;
+    ray_renderer.initialize_progressive(image_width, image_height);
+    std::cout << "CPU Renderer initialized (OpenMP with " << omp_get_max_threads() << " threads; progressive, adaptive, SIMD on by default)" << std::endl;
 
 #ifdef GPU_RENDERING
     // Initialize GPU renderer (but don't crash if it fails)
@@ -2604,6 +2813,12 @@ int main(int argc, char* argv[]) {
                             enable_denoiser = !enable_denoiser;
                             std::cout << "Post denoise (CPU worker): " << (enable_denoiser ? "ON" : "OFF") << std::endl;
                             need_render = true;
+                        } else if (click_result.denoise_strength_changed) {
+                            denoise_strength = std::max(0, std::min(2, click_result.new_denoise_strength));
+                            std::cout << "Denoise strength: "
+                                      << (denoise_strength == 0 ? "Light" : (denoise_strength == 1 ? "Med" : "Strong"))
+                                      << std::endl;
+                            need_render = true;
                         } else if (click_result.min_prog_display_changed) {
                             min_progressive_display_passes = click_result.new_min_prog_display_passes;
                             std::cout << "Progressive min passes before display: " << min_progressive_display_passes
@@ -2618,14 +2833,25 @@ int main(int argc, char* argv[]) {
                             std::cout << "Wavefront rendering: " << (ray_renderer.enable_wavefront ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.morton_changed) {
-                            // Toggle Morton Z-curve ordering
+                            // Toggle Morton Z-curve ordering (scalar path; turn off packet paths so it takes effect)
                             enable_morton = !enable_morton;
                             ray_renderer.enable_morton = enable_morton;
+                            if (enable_morton) {
+                                if (ray_renderer.enable_wavefront) {
+                                    ray_renderer.enable_wavefront = false;
+                                    std::cout << "Wavefront OFF (Morton uses scalar traversal)\n";
+                                }
+                                if (ray_renderer.enable_simd_packets) {
+                                    ray_renderer.enable_simd_packets = false;
+                                    std::cout << "SIMD packets OFF (Morton uses scalar traversal)\n";
+                                }
+                            }
                             std::cout << "Morton Z-curve: " << (enable_morton ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.stratified_changed) {
                             // Toggle stratified sampling
                             enable_stratified = !enable_stratified;
+                            ray_renderer.enable_stratified = enable_stratified;
                             std::cout << "Stratified sampling: " << (enable_stratified ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.frustum_changed) {
@@ -2635,16 +2861,11 @@ int main(int argc, char* argv[]) {
                             std::cout << "Frustum culling: " << (enable_frustum ? "ON" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.simd_packets_changed) {
-                            // Toggle SIMD packet tracing (disable BVH if enabling SIMD)
                             std::cout << "SIMD button clicked - current state: " << (ray_renderer.enable_simd_packets ? "ON" : "OFF") << std::endl;
                             std::cout << "Button value: " << click_result.new_simd_packets << std::endl;
 
                             if (!ray_renderer.enable_simd_packets) {
                                 ray_renderer.enable_simd_packets = true;
-                                if (ray_renderer.enable_bvh) {
-                                    ray_renderer.enable_bvh = false;
-                                    std::cout << "BVH disabled (mutually exclusive with SIMD)" << std::endl;
-                                }
                                 if (ray_renderer.enable_wavefront) {
                                     ray_renderer.enable_wavefront = false;
                                     std::cout << "Wavefront disabled (SIMD and Wavefront use different render paths; pick one)\n";
@@ -2655,18 +2876,12 @@ int main(int argc, char* argv[]) {
                             std::cout << "SIMD packets: " << (ray_renderer.enable_simd_packets ? "ON (AVX2 intersection)" : "OFF") << std::endl;
                             need_render = true;
                         } else if (click_result.bvh_changed) {
-                            // Toggle BVH acceleration (disable SIMD if enabling BVH)
                             if (!ray_renderer.enable_bvh) {
-                                // Enabling BVH - disable SIMD
                                 ray_renderer.enable_bvh = true;
-                                if (ray_renderer.enable_simd_packets) {
-                                    ray_renderer.enable_simd_packets = false;
-                                    std::cout << "SIMD disabled (mutually exclusive with BVH)" << std::endl;
-                                }
                                 ray_renderer.build_bvh(scene);
                             } else {
-                                // Disabling BVH
                                 ray_renderer.enable_bvh = false;
+                                ray_renderer.release_bvh();
                             }
                             std::cout << "BVH: " << (ray_renderer.enable_bvh ? "ON" : "OFF") << std::endl;
                             need_render = true;
@@ -2866,7 +3081,7 @@ int main(int argc, char* argv[]) {
                 }
                 if (!cpu_render_hub.has_identical_pending_job(cam, preset)) {
                     cpu_render_hub.submit_job(cam, preset, image_width, image_height, enable_shadows, enable_denoiser,
-                                              min_disp_submit);
+                                              denoise_strength, min_disp_submit);
                 }
                 need_render = false;
             }
@@ -2922,7 +3137,7 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
-                                 min_progressive_display_passes,
+                                 denoise_strength, min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
                                  ray_renderer.enable_simd_packets, ray_renderer.enable_bvh,
                                  current_renderer);
@@ -2930,7 +3145,7 @@ int main(int argc, char* argv[]) {
             controls_panel.render(renderer, window_width, window_height,
                                  current_quality, preset, fps, render_time, mode_name, enable_shadows, enable_reflections,
                                  ray_renderer.enable_progressive, ray_renderer.enable_adaptive, enable_denoiser,
-                                 min_progressive_display_passes,
+                                 denoise_strength, min_progressive_display_passes,
                                  ray_renderer.enable_wavefront,
                                  enable_morton, enable_stratified, enable_frustum, ray_renderer.enable_simd_packets,
                                  ray_renderer.enable_bvh);

@@ -20,9 +20,10 @@ OPENGL_LDFLAGS = -L/usr/local/opt/glew/lib -lGLEW -framework OpenGL
 OPENGL_INCLUDES = -I/usr/local/opt/glew/include
 
 # Source files
-BATCH_CPU_SRC = src/main.cpp src/renderer/renderer.cpp
+BATCH_CPU_SRC = src/main.cpp src/renderer/renderer.cpp src/acceleration/bvh.cpp
 INTERACTIVE_CPU_SRC = src/main_cpu_interactive.cpp src/renderer/renderer.cpp src/acceleration/bvh.cpp
 BENCH_CPU_MODES_SRC = src/bench_cpu_render_modes.cpp src/renderer/renderer.cpp src/acceleration/bvh.cpp
+BENCH_FEATURE_DELTAS_SRC = src/bench_feature_deltas.cpp src/renderer/renderer.cpp src/acceleration/bvh.cpp
 INTERACTIVE_GPU_SRC = src/main_gpu_interactive.cpp
 ASCII_SRC = src/main_ascii.cpp src/renderer/renderer.cpp
 
@@ -174,6 +175,17 @@ bench-cpu-modes: $(BUILD_DIR)
 		$(BENCH_CPU_MODES_SRC) \
 		-o $(BUILD_DIR)/bench_cpu_render_modes $(LDFLAGS)
 	@echo "✓ bench_cpu_render_modes built: $(BUILD_DIR)/bench_cpu_render_modes"
+
+# Toggle / path deltas vs scalar baseline (Cornell box)
+.PHONY: bench-feature-deltas
+bench-feature-deltas: $(BUILD_DIR)
+	@echo "=========================================="
+	@echo "Building bench_feature_deltas"
+	@echo "=========================================="
+	$(CXX) $(CXXFLAGS) $(OPTFLAGS) $(INCLUDES) \
+		$(BENCH_FEATURE_DELTAS_SRC) \
+		-o $(BUILD_DIR)/bench_feature_deltas $(LDFLAGS)
+	@echo "✓ bench_feature_deltas built: $(BUILD_DIR)/bench_feature_deltas"
 
 # Convenience target for backward compatibility
 interactive: interactive-cpu
@@ -762,9 +774,11 @@ help:
 	@echo "  make interactive-gpu    - Build interactive GPU (GLSL 1.20)"
 	@echo "  make ascii              - Build ASCII terminal ray tracer"
 	@echo "  make bench-cpu-modes    - Build headless SIMD/wavefront/scalar benchmark"
+	@echo "  make bench-feature-deltas - Build toggle/path matrix vs scalar baseline"
 	@echo "  make all                - Build default (batch-cpu)"
 	@echo ""
 	@echo "Running:"
+	@echo "  ./benchmark_feature_deltas.sh - Run bench_feature_deltas → runs/ + summaries/"
 	@echo "  make run                - Build and run CPU batch"
 	@echo "  make run-gpu            - Build and run GPU batch"
 	@echo "  make runi-cpu           - Build and run interactive CPU"

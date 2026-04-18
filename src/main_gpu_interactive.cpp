@@ -4,6 +4,8 @@
 #include <cmath>
 #include <chrono>
 #include <sstream>
+#include <cstdio>
+#include <algorithm>
 
 // Include GLEW before SDL to avoid header conflicts
 #include <GL/glew.h>
@@ -18,6 +20,7 @@
 #include "scene/pbr_showcase.h"
 #include "scene/dof_showcase.h"
 #include "scene/fx_showcase.h"
+#include "scene/feature_showcase.h"
 #include "primitives/sphere.h"
 #include "primitives/triangle.h"
 #include "material/material.h"
@@ -171,11 +174,18 @@
 #define SCENE_NAME "cornell_box"  // Default scene
 #endif
 
-// Window dimensions
-// 640x360 keeps frames under ~1s on Intel integrated GPU (decent interactivity).
-// Bump to 1280x720 if you have a discrete GPU.
-const int WIDTH = 640;
-const int HEIGHT = 360;
+// Drawable size in pixels (updated from SDL each frame / on resize; starts at desktop resolution).
+static int g_fb_width = 0;
+static int g_fb_height = 0;
+
+static void refresh_framebuffer_size(SDL_Window* window) {
+    int w = 0, h = 0;
+    SDL_GL_GetDrawableSize(window, &w, &h);
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    g_fb_width = w;
+    g_fb_height = h;
+}
 
 // Camera controller
 class CameraController {
@@ -190,7 +200,7 @@ public:
 
 public:
     CameraController()
-        : vfov(60.0f), aspect_ratio((float)WIDTH / (float)HEIGHT), yaw(-90.0f), pitch(0.0f) {
+        : vfov(60.0f), aspect_ratio(16.0f / 9.0f), yaw(-90.0f), pitch(0.0f) {
         position[0] = 0.0f; position[1] = 2.0f; position[2] = 15.0f;
         lookat[0] = 0.0f; lookat[1] = 2.0f; lookat[2] = 0.0f;
         vup[0] = 0.0f; vup[1] = 1.0f; vup[2] = 0.0f;
@@ -256,6 +266,10 @@ public:
 
         update_from_angles();
     }
+
+    void set_aspect_from_framebuffer() {
+        aspect_ratio = (float)g_fb_width / (float)g_fb_height;
+    }
 };
 
 // Simple help overlay with text rendering
@@ -303,11 +317,9 @@ public:
         int width, height;
         SDL_GetWindowSize(window, &width, &height);
 
-        // Create renderer for this window
         SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
         if (!renderer) return;
 
-        // Semi-transparent background
         SDL_Rect bg_rect = {50, 50, width - 100, height - 100};
         SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
         SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
@@ -317,7 +329,6 @@ public:
         SDL_DestroyTexture(bg_texture);
         SDL_FreeSurface(bg_surface);
 
-        // Render help text
         const char* help_lines[] = {
             "=== GPU Ray Tracer Help ===",
             "",
@@ -407,11 +418,9 @@ public:
         int width, height;
         SDL_GetWindowSize(window, &width, &height);
 
-        // Create renderer for this window
         SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
         if (!renderer) return;
 
-        // Semi-transparent background
         SDL_Rect bg_rect = {width - 300, 50, 250, 250};
         SDL_Surface* bg_surface = SDL_CreateRGBSurface(0, bg_rect.w, bg_rect.h, 32, 0, 0, 0, 0);
         SDL_FillRect(bg_surface, nullptr, SDL_MapRGBA(bg_surface->format, background_color.r, background_color.g, background_color.b, background_color.a));
@@ -421,7 +430,6 @@ public:
         SDL_DestroyTexture(bg_texture);
         SDL_FreeSurface(bg_surface);
 
-        // Render settings text
         const char* title = "=== Settings ===";
         SDL_Surface* surface = TTF_RenderText_Blended(font, title, title_color);
         if (surface) {
@@ -516,6 +524,7 @@ struct SphereData {
     float gradient_offset;  // For gradient textures
     float roughness;        // PBR roughness (0=mirror, 1=matte)
     float metallic;         // PBR metallic (0=dielectric, 1=metal)
+    float ior;              // Index of refraction (glass / dielectric)
 };
 
 struct TriangleData {
@@ -559,6 +568,7 @@ uniform float sphere_gradient_scale[32];
 uniform float sphere_gradient_offset[32];
 uniform float sphere_roughness[32];     // PBR roughness (0=mirror, 1=matte)
 uniform float sphere_metallic[32];      // PBR metallic (0=dielectric, 1=metal)
+uniform float sphere_ior[32];           // Index of refraction (glass)
 uniform int num_spheres;
 
 uniform vec3 tri_v0[20];
@@ -654,6 +664,13 @@ uniform bool enable_taa;                 // Enable temporal anti-aliasing
 uniform sampler2D history_buffer;        // Previous frame color buffer
 uniform vec2 camera_velocity;            // Camera motion velocity
 uniform float taa_mix_factor;           // Temporal blend factor (0.0-1.0)
+
+// Path tracing (progressive accumulation in float FBO; gpu_pass 0=normal, 1=accum, 2=tonemap)
+uniform int gpu_pass;
+uniform sampler2D path_accum_tex;
+uniform float path_history_weight;
+uniform float frame_noise;
+uniform bool enable_path_trace;
 
 uniform int tone_mapping_op;             // Tone mapping operator (0=None, 1=ACES, 2=Reinhard, 3=Filmic, 4=Uncharted)
 uniform float exposure;                  // Exposure compensation (0.1-2.0)
@@ -768,6 +785,26 @@ vec3 stripe_texture(vec3 pos, vec3 color1, vec3 color2, float scale) {
 
 // Constants
 const float PI = 3.14159265359;
+
+// Schlick reflectance for dielectric (scalar form used by glass)
+float reflectance_schlick_scalar(float cosine, float ref_idx) {
+    float r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
+    r0 = r0 * r0;
+    return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
+}
+
+vec3 snell_refract(vec3 uv, vec3 n, float etai_over_etat) {
+    float cos_theta = min(dot(-uv, n), 1.0);
+    vec3 r_out_perp = etai_over_etat * (uv + cos_theta * n);
+    float rp2 = dot(r_out_perp, r_out_perp);
+    if (rp2 > 1.0) return vec3(0.0);
+    vec3 r_out_parallel = -sqrt(1.0 - rp2) * n;
+    return r_out_perp + r_out_parallel;
+}
+
+float tri_hash(vec2 p, float salt) {
+    return fract(sin(dot(p + vec2(salt, salt * 0.41), vec2(12.9898, 78.233))) * 43758.5453);
+}
 
 // Microfacet distribution function (GGX/Trowbridge-Reitz)
 // D: How many microfacets are aligned to reflect light toward viewer
@@ -1551,6 +1588,180 @@ vec3 color_pipeline_legacy(vec3 color) {
     return color;
 }
 
+// Closest hit for path tracing (sphere then triangle)
+void intersect_scene(vec3 ro, vec3 rd, inout float t_hit, inout int hit_object, inout int hit_type) {
+    hit_object = -1;
+    hit_type = -1;
+    for (int i = 0; i < num_spheres; i++) {
+        if (hit_sphere(ro, rd, sphere_centers[i], sphere_radii[i], t_hit)) {
+            hit_object = i;
+            hit_type = 0;
+        }
+    }
+    for (int i = 0; i < num_triangles; i++) {
+        if (hit_triangle(ro, rd, tri_v0[i], tri_v1[i], tri_v2[i], tri_normals[i], t_hit)) {
+            hit_object = i;
+            hit_type = 1;
+        }
+    }
+}
+
+// One-sample-per-pixel path tracer (diffuse + metal + glass + emissive + point-light NEE)
+vec3 ray_color_path(vec3 origin, vec3 direction) {
+    vec3 unit_bg_dir = normalize(direction);
+    float t_bg = 0.5 * (unit_bg_dir.y + 1.0);
+    vec3 background = mix(vec3(1.0), vec3(0.5, 0.7, 1.0), t_bg);
+
+    vec3 L = vec3(0.0);
+    vec3 beta = vec3(1.0);
+    vec3 cur_o = origin;
+    vec3 cur_d = direction;
+
+    for (int bounce = 0; bounce <= max_depth; bounce++) {
+        float t_min = 1000.0;
+        int hit_object = -1;
+        int hit_type = -1;
+        intersect_scene(cur_o, cur_d, t_min, hit_object, hit_type);
+
+        if (hit_object < 0) {
+            L += beta * background;
+            break;
+        }
+
+        vec3 hit_point = cur_o + t_min * cur_d;
+        vec3 albedo;
+        vec3 normal;
+        int material;
+        float roughness = 0.5;
+        float metallic = 0.0;
+        float ior_hit = 1.5;
+
+        if (hit_type == 0) {
+            normal = normalize(hit_point - sphere_centers[hit_object]);
+            albedo = sphere_colors[hit_object];
+            material = sphere_materials[hit_object];
+            roughness = sphere_roughness[hit_object];
+            metallic = sphere_metallic[hit_object];
+            ior_hit = sphere_ior[hit_object];
+            if (material == 4) {
+                albedo = checkerboard_texture(hit_point, vec3(0.8, 0.2, 0.2), vec3(0.2, 0.2, 0.8), 8.0);
+            } else if (material == 5) {
+                albedo = noise_texture(hit_point, vec3(1.0), vec3(0.0), 5.0);
+            } else if (material == 6) {
+                float gradient_t = (hit_point.y + 2.3) / 1.6;
+                gradient_t = clamp(gradient_t, 0.0, 1.0);
+                albedo = mix(vec3(0.6, 0.2, 0.8), vec3(0.9, 0.9, 0.2), gradient_t);
+            } else if (material == 7) {
+                albedo = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
+            }
+        } else {
+            normal = tri_normals[hit_object];
+            albedo = tri_colors[hit_object];
+            material = tri_materials[hit_object];
+            roughness = tri_roughness[hit_object];
+            metallic = tri_metallic[hit_object];
+            if (material == 8) {
+                albedo = checkerboard_texture(hit_point, vec3(0.1), vec3(0.9), 6.0);
+            } else if (material == 9) {
+                albedo = gradient_texture(hit_point, vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0),
+                                         tri_gradient_scale[hit_object], tri_gradient_offset[hit_object]);
+            }
+        }
+
+        if (material == 10) {
+            L += beta * albedo;
+            break;
+        }
+
+        vec3 outward = (dot(cur_d, normal) < 0.0) ? normal : -normal;
+        bool front_face = dot(cur_d, normal) < 0.0;
+        vec3 V = normalize(-cur_d);
+
+        if (material == 3) {
+            float eta = front_face ? (1.0 / ior_hit) : ior_hit;
+            vec3 unit_dir = normalize(cur_d);
+            float cos_theta = min(dot(-unit_dir, outward), 1.0);
+            float sin_theta2 = eta * eta * (1.0 - cos_theta * cos_theta);
+            float refl_p = reflectance_schlick_scalar(cos_theta, eta);
+            float rnd = tri_hash(gl_FragCoord.xy + vec2(float(bounce), frame_noise), frame_noise + float(bounce));
+            bool reflect_ray = (sin_theta2 > 1.0) || (rnd < refl_p);
+            if (reflect_ray) {
+                cur_d = reflect(unit_dir, outward);
+                cur_o = hit_point + outward * 0.001;
+            } else {
+                cur_d = snell_refract(unit_dir, outward, eta);
+                cur_o = hit_point - outward * 0.001;
+            }
+            continue;
+        }
+
+        if (material == 1 || material == 2) {
+            vec3 reflected = reflect(normalize(cur_d), outward);
+            if (material == 2) {
+                vec3 rndv = vec3(
+                    tri_hash(gl_FragCoord.xy, frame_noise + float(bounce) * 1.1) - 0.5,
+                    tri_hash(gl_FragCoord.xy, frame_noise + float(bounce) * 1.7) - 0.5,
+                    tri_hash(gl_FragCoord.xy, frame_noise + float(bounce) * 2.3) - 0.5
+                );
+                reflected = normalize(reflected + rndv * 0.4);
+            }
+            beta *= albedo;
+            cur_o = hit_point + outward * 0.001;
+            cur_d = reflected;
+            continue;
+        }
+
+        // Diffuse: next-event estimation to point lights + cosine hemisphere
+        vec3 N = outward;
+        vec3 direct = vec3(0.0);
+        for (int li = 0; li < 4; li++) {
+            if (li >= num_lights) break;
+            vec3 lp = light_positions[li];
+            vec3 toL = lp - hit_point;
+            float dist2 = dot(toL, toL);
+            if (dist2 < 1e-8) continue;
+            vec3 Ldir = normalize(toL);
+            float t_light = sqrt(dist2);
+            vec3 sh_o = hit_point + N * 0.001;
+            float t_sh = t_light;
+            bool blocked = false;
+            for (int sj = 0; sj < num_spheres; sj++) {
+                if (hit_sphere(sh_o, Ldir, sphere_centers[sj], sphere_radii[sj], t_sh)) {
+                    if (t_sh < t_light - 0.01) { blocked = true; break; }
+                }
+            }
+            if (!blocked) {
+                for (int tj = 0; tj < num_triangles; tj++) {
+                    if (hit_triangle(sh_o, Ldir, tri_v0[tj], tri_v1[tj], tri_v2[tj], tri_normals[tj], t_sh)) {
+                        if (t_sh < t_light - 0.01) { blocked = true; break; }
+                    }
+                }
+            }
+            if (!blocked) {
+                float ndotl = max(dot(N, Ldir), 0.0);
+                float atten = 1.0 / (1.0 + 0.09 * t_light + 0.032 * t_light * t_light);
+                direct += albedo * (1.0 / PI) * light_colors[li] * light_intensities[li] * atten * ndotl;
+            }
+        }
+        L += beta * direct;
+
+        vec3 tangent = normalize(abs(N.x) > 0.1 ? vec3(-N.y, N.x, 0.0) : vec3(0.0, -N.z, N.y));
+        vec3 bitan = cross(N, tangent);
+        float r1 = tri_hash(gl_FragCoord.xy * 1.7, frame_noise + float(bounce) * 3.7);
+        float r2 = tri_hash(gl_FragCoord.xy * 2.3, frame_noise + float(bounce) * 5.1);
+        float phi = 2.0 * PI * r2;
+        float s = sqrt(r1);
+        float x = cos(phi) * s;
+        float y = sin(phi) * s;
+        float z = sqrt(max(0.0, 1.0 - r1));
+        vec3 hemi = tangent * x + bitan * y + N * z;
+        cur_d = normalize(hemi);
+        cur_o = hit_point + N * 0.001;
+        beta *= albedo;
+    }
+    return L;
+}
+
 // Simple scene rendering with iterative reflections
 vec3 ray_color(vec3 origin, vec3 direction) {
     // Background gradient
@@ -1618,6 +1829,9 @@ vec3 ray_color(vec3 origin, vec3 direction) {
                 } else if (material == 7) {
                     // Stripe (orange and white horizontal)
                     albedo = stripe_texture(hit_point, vec3(0.8, 0.5, 0.2), vec3(0.9, 0.9, 0.9), 8.0);
+                } else if (material == 10) {
+                    // Emissive area light (radiance in albedo)
+                    apply_lighting = false;
                 }
             } else {
                 // Triangle hit
@@ -1684,40 +1898,57 @@ vec3 ray_color(vec3 origin, vec3 direction) {
             // Add contribution to final color
             final_color += accumulated_weight * color;
 
-            // Handle reflections for metallic materials
-            bool is_metallic = (material == 1 || material == 2); // Metal or fuzzy metal
-            bool is_glass = (material == 3); // Glass
+            if (material == 10) {
+                break;
+            }
+
+            bool is_metallic = (material == 1 || material == 2);
+            bool is_glass = (material == 3);
 
             if (enable_reflections && bounce < max_depth && (is_metallic || is_glass)) {
-                // Calculate reflection direction
-                vec3 reflect_dir = reflect(current_direction, normal);
+                vec3 outward = (dot(current_direction, normal) < 0.0) ? normal : -normal;
+                bool front_face = dot(current_direction, normal) < 0.0;
 
-                // Update ray for next bounce
-                current_origin = hit_point + normal * 0.001;
-                current_direction = reflect_dir;
-
-                // Update weight based on material reflectivity
-                float reflectivity;
                 if (is_glass) {
-                    reflectivity = 0.2; // Glass reflects less
-                } else if (material == 2) {
-                    reflectivity = 0.6; // Fuzzy metal
-                } else {
-                    reflectivity = 0.8; // Perfect metal
+                    float ior_val = (hit_type == 0) ? sphere_ior[hit_object] : 1.5;
+                    float eta = front_face ? (1.0 / ior_val) : ior_val;
+                    vec3 unit_dir = normalize(current_direction);
+                    float cos_theta = min(dot(-unit_dir, outward), 1.0);
+                    float sin_theta2 = eta * eta * (1.0 - cos_theta * cos_theta);
+                    float refl_p = reflectance_schlick_scalar(cos_theta, eta);
+                    float rnd = tri_hash(gl_FragCoord.xy + vec2(float(bounce), frame_noise * 10.0), frame_noise + float(bounce) * 0.31);
+                    bool reflect_ray = (sin_theta2 > 1.0) || (rnd < refl_p);
+                    if (reflect_ray) {
+                        current_direction = reflect(unit_dir, outward);
+                        current_origin = hit_point + outward * 0.001;
+                    } else {
+                        current_direction = snell_refract(unit_dir, outward, eta);
+                        current_origin = hit_point - outward * 0.001;
+                    }
+                    accumulated_weight *= 0.99;
+                    continue;
                 }
 
+                vec3 reflect_dir = reflect(normalize(current_direction), outward);
+                if (material == 2) {
+                    vec3 fuzz = vec3(
+                        tri_hash(gl_FragCoord.xy, frame_noise + float(bounce)) - 0.5,
+                        tri_hash(gl_FragCoord.xy * 1.3, frame_noise + float(bounce) * 1.7) - 0.5,
+                        tri_hash(gl_FragCoord.xy * 1.9, frame_noise + float(bounce) * 2.1) - 0.5
+                    );
+                    reflect_dir = normalize(reflect_dir + fuzz * 0.4);
+                }
+                float reflectivity = (material == 2) ? 0.6 : 0.8;
                 accumulated_weight *= reflectivity;
-
-                // Continue to next bounce
+                current_origin = hit_point + outward * 0.001;
+                current_direction = reflect_dir;
                 continue;
             } else if (!enable_reflections) {
-                // Even when reflections are disabled, metallic materials get some metallic appearance
                 if (is_metallic) {
                     final_color += accumulated_weight * 0.3 * color;
                 }
             }
 
-            // No more reflections, exit loop
             break;
         } else {
             // No hit, add background contribution and exit
@@ -1732,7 +1963,6 @@ vec3 ray_color(vec3 origin, vec3 direction) {
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution;
 
-    // Build camera basis from uniforms
     vec3 origin = camera_pos;
     vec3 w = normalize(origin - camera_lookat);
     vec3 u = normalize(cross(camera_vup, w));
@@ -1746,7 +1976,32 @@ void main() {
     vec3 vertical   = viewport_height * v;
     vec3 lower_left_corner = origin - horizontal * 0.5 - vertical * 0.5 - w;
 
-    // Base ray direction for this pixel
+    if (gpu_pass == 2) {
+        vec3 hdr = texture2D(path_accum_tex, uv).rgb;
+        vec3 color = hdr;
+        if (enable_taa && !enable_path_trace && taa_mix_factor > 0.0) {
+            vec3 history = texture2D(history_buffer, uv).rgb;
+            vec3 color_min = color * 0.85;
+            vec3 color_max = color * 1.15 + vec3(0.05);
+            history = clamp(history, color_min, color_max);
+            color = mix(color, history, taa_mix_factor);
+        }
+        color = color_pipeline(color, uv);
+        gl_FragColor = vec4(color, 1.0);
+        return;
+    }
+
+    if (gpu_pass == 1) {
+        vec2 j = vec2(tri_hash(gl_FragCoord.xy * 3.1, frame_noise), tri_hash(gl_FragCoord.xy * 5.7, frame_noise + 17.3));
+        vec2 suv = uv + (j - 0.5) / resolution;
+        vec3 dir1 = lower_left_corner + suv.x * horizontal + suv.y * vertical - origin;
+        vec3 smpl = ray_color_path(origin, dir1);
+        vec3 prev = texture2D(path_accum_tex, uv).rgb;
+        vec3 acc = mix(smpl, prev, path_history_weight);
+        gl_FragColor = vec4(acc, 1.0);
+        return;
+    }
+
     vec3 direction = lower_left_corner + uv.x * horizontal + uv.y * vertical - origin;
 
     vec3 color;
@@ -1813,7 +2068,7 @@ void main() {
     // --- Temporal Anti-Aliasing ---
     // Blends the current frame with the history buffer to smooth aliasing over time.
     // The history texture is updated by the CPU after each frame.
-    if (enable_taa && taa_mix_factor > 0.0) {
+    if (enable_taa && !enable_path_trace && taa_mix_factor > 0.0) {
         vec3 history = texture2D(history_buffer, uv).rgb;
         // Clamp history to neighborhood of current to avoid ghosting
         vec3 color_min = color * 0.85;
@@ -1924,6 +2179,11 @@ void setup_scene_data(
     } else if (scene_name == "fx_showcase") {
         setup_fx_showcase_scene(scene);
         std::cout << "✓ FX Showcase scene loaded" << std::endl;
+    } else if (scene_name == "feature_showcase") {
+        setup_feature_showcase_scene(scene);
+        std::cout << "✓ Feature Showcase scene loaded" << std::endl;
+        std::cout << "  Layout: procedurals (left), chrome/glass/DOF/TAA/emissive (center), metals + edge spec (right)" << std::endl;
+        std::cout << "  Try: I path trace · P PBR · F DOF · M motion blur · B bloom · G GI — rebuild with ENABLE_TAA / ENABLE_CHROMATIC_ABERRATION / ENABLE_DOF / ENABLE_MOTION_BLUR as needed." << std::endl;
     } else if (scene_name == "cornell_box") {
         setup_cornell_box_scene(scene);
         std::cout << "✓ Cornell Box scene loaded" << std::endl;
@@ -1940,6 +2200,7 @@ void setup_scene_data(
             data.center[1] = sphere->center.y;
             data.center[2] = sphere->center.z;
             data.radius = sphere->radius;
+            data.ior = 1.0f;
             data.color[0] = sphere->mat->albedo.x;
             data.color[1] = sphere->mat->albedo.y;
             data.color[2] = sphere->mat->albedo.z;
@@ -1960,13 +2221,26 @@ void setup_scene_data(
                 }
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
+                data.ior = 1.0f;
             } else if (auto glass = std::dynamic_pointer_cast<Dielectric>(sphere->mat)) {
                 data.material = 3; // Glass
                 data.roughness = 0.05f;  // Very smooth
                 data.metallic = 0.0f;    // Dielectric
-                std::cout << "Glass" << std::endl;
+                data.ior = glass->ir;
+                std::cout << "Glass (IOR " << glass->ir << ")" << std::endl;
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
+            } else if (auto emissive = std::dynamic_pointer_cast<Emissive>(sphere->mat)) {
+                data.material = 10;
+                data.color[0] = emissive->emit.x;
+                data.color[1] = emissive->emit.y;
+                data.color[2] = emissive->emit.z;
+                data.roughness = 1.0f;
+                data.metallic = 0.0f;
+                data.ior = 1.0f;
+                data.gradient_scale = 0.25f;
+                data.gradient_offset = 0.0f;
+                std::cout << "Emissive" << std::endl;
             } else if (auto lambertian = std::dynamic_pointer_cast<Lambertian>(sphere->mat)) {
                 std::cout << "Lambertian, checking texture..." << std::endl;
                 // Check if this is a procedural texture material
@@ -2006,12 +2280,14 @@ void setup_scene_data(
                     data.gradient_offset = 0.0f;  // Default
                     std::cout << "  -> Regular lambertian (unknown texture)" << std::endl;
                 }
+                data.ior = 1.0f;
             } else {
                 data.material = 0; // Default lambertian
                 data.roughness = 0.8f;   // Matte
                 data.metallic = 0.0f;    // Dielectric
                 data.gradient_scale = 0.25f;  // Default
                 data.gradient_offset = 0.0f;  // Default
+                data.ior = 1.0f;
                 std::cout << "Unknown material type" << std::endl;
             }
 
@@ -2108,11 +2384,18 @@ int main(int argc, char* argv[]) {
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
+    int win_w = 1280, win_h = 720;
+    SDL_DisplayMode dm;
+    if (SDL_GetDesktopDisplayMode(0, &dm) == 0 && dm.w > 0 && dm.h > 0) {
+        win_w = dm.w;
+        win_h = dm.h;
+    }
+
     SDL_Window* window = SDL_CreateWindow(
-        "GPU Ray Tracer - 640x360 (resize with keyboard 1-4)",
+        "GPU Ray Tracer (full window — resize supported)",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-        WIDTH, HEIGHT,
+        win_w, win_h,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN
     );
 
@@ -2143,6 +2426,8 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
+
+    refresh_framebuffer_size(window);
 
     // Check OpenGL version
     const GLubyte* version = glGetString(GL_VERSION);
@@ -2308,16 +2593,73 @@ int main(int argc, char* argv[]) {
     GLint camera_velocity_loc = glGetUniformLocation(program, "camera_velocity");
     GLint history_buffer_loc = glGetUniformLocation(program, "history_buffer");
 
+    GLint gpu_pass_loc = glGetUniformLocation(program, "gpu_pass");
+    GLint path_accum_tex_loc = glGetUniformLocation(program, "path_accum_tex");
+    GLint path_history_weight_loc = glGetUniformLocation(program, "path_history_weight");
+    GLint frame_noise_loc = glGetUniformLocation(program, "frame_noise");
+    GLint enable_path_trace_loc = glGetUniformLocation(program, "enable_path_trace");
+
     // Create history texture for TAA (ping-pong via glCopyTexImage2D)
     GLuint history_texture = 0;
+    GLuint path_fbo = 0;
+    GLuint path_tex[2] = {0, 0};
+    int path_ping = 0;
+    bool path_fbo_ok = false;
+
+    auto allocate_surface_textures = [&]() {
+        if (g_fb_width < 1 || g_fb_height < 1) return;
+        glBindTexture(GL_TEXTURE_2D, history_texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, g_fb_width, g_fb_height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        if (path_tex[0]) {
+            glDeleteTextures(2, path_tex);
+            path_tex[0] = path_tex[1] = 0;
+        }
+        if (path_fbo) {
+            glDeleteFramebuffers(1, &path_fbo);
+            path_fbo = 0;
+        }
+        path_fbo_ok = false;
+        path_ping = 0;
+
+        const GLenum candidates[] = { GL_RGBA32F_ARB, GL_RGBA16F_ARB };
+        for (GLenum internal : candidates) {
+            glGenTextures(2, path_tex);
+            for (int t = 0; t < 2; t++) {
+                glBindTexture(GL_TEXTURE_2D, path_tex[t]);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexImage2D(GL_TEXTURE_2D, 0, (GLint)internal, g_fb_width, g_fb_height, 0, GL_RGBA, GL_FLOAT, nullptr);
+            }
+            glGenFramebuffers(1, &path_fbo);
+            glBindFramebuffer(GL_FRAMEBUFFER, path_fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, path_tex[0], 0);
+            GLenum st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            if (st == GL_FRAMEBUFFER_COMPLETE) {
+                path_fbo_ok = true;
+                break;
+            }
+            glDeleteFramebuffers(1, &path_fbo);
+            glDeleteTextures(2, path_tex);
+            path_fbo = 0;
+            path_tex[0] = path_tex[1] = 0;
+        }
+        if (!path_fbo_ok) {
+            std::cerr << "Path tracing FBO (float RGBA) not supported; path mode disabled." << std::endl;
+        }
+    };
+
     glGenTextures(1, &history_texture);
-    glBindTexture(GL_TEXTURE_2D, history_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, WIDTH, HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    allocate_surface_textures();
     bool taa_history_ready = false;
 
     GLint tone_mapping_op_loc = glGetUniformLocation(program, "tone_mapping_op");
@@ -2334,6 +2676,7 @@ int main(int argc, char* argv[]) {
     GLint sp_color_loc[MAX_SPHERES],  sp_mat_loc[MAX_SPHERES];
     GLint sp_gscale_loc[MAX_SPHERES], sp_goffset_loc[MAX_SPHERES];
     GLint sp_rough_loc[MAX_SPHERES],  sp_metal_loc[MAX_SPHERES];
+    GLint sp_ior_loc[MAX_SPHERES];
     for (int i = 0; i < MAX_SPHERES; i++) {
         std::string idx = "[" + std::to_string(i) + "]";
         sp_center_loc[i]  = glGetUniformLocation(program, ("sphere_centers"       + idx).c_str());
@@ -2344,6 +2687,7 @@ int main(int argc, char* argv[]) {
         sp_goffset_loc[i] = glGetUniformLocation(program, ("sphere_gradient_offset"+idx).c_str());
         sp_rough_loc[i]   = glGetUniformLocation(program, ("sphere_roughness"     + idx).c_str());
         sp_metal_loc[i]   = glGetUniformLocation(program, ("sphere_metallic"      + idx).c_str());
+        sp_ior_loc[i]     = glGetUniformLocation(program, ("sphere_ior"           + idx).c_str());
     }
     GLint tr_v0_loc[MAX_TRIS], tr_v1_loc[MAX_TRIS], tr_v2_loc[MAX_TRIS];
     GLint tr_norm_loc[MAX_TRIS], tr_color_loc[MAX_TRIS], tr_mat_loc[MAX_TRIS];
@@ -2477,6 +2821,13 @@ int main(int argc, char* argv[]) {
     float contrast = 1.0f;                                // Contrast adjustment
     float saturation = 1.0f;                              // Saturation adjustment
 
+    bool enable_path_trace = false;
+    int path_accum_frames = 0;
+    float path_prev_cam[3] = {0.0f, 0.0f, 0.0f};
+    float path_prev_yaw = 0.0f;
+    float path_prev_pitch = 0.0f;
+    bool path_cam_init = false;
+
     // Setup scene data
     std::vector<SphereData> spheres;
     std::vector<TriangleData> triangles;
@@ -2504,6 +2855,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  G           - Toggle Global Illumination" << std::endl;
     std::cout << "  [ / ]       - Adjust GI samples (1-8)" << std::endl;
     std::cout << "  - / =       - Adjust GI intensity" << std::endl;
+    std::cout << "  Scenes: cornell_box | gpu_demo | pbr_showcase | dof_showcase | fx_showcase | feature_showcase (argv or GPU_SCENE)" << std::endl;
     std::cout << "  Shift+S     - Toggle Screen-Space Reflections" << std::endl;
     std::cout << "  E           - Toggle Environment Mapping" << std::endl;
     std::cout << "  , / .       - Adjust SSR samples" << std::endl;
@@ -2517,6 +2869,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  1 / 2       - Decrease/Increase Exposure" << std::endl;
     std::cout << "  3 / 4       - Decrease/Increase Contrast" << std::endl;
     std::cout << "  5 / 6       - Decrease/Increase Saturation" << std::endl;
+    std::cout << "  I           - Toggle progressive path tracing (float accumulation)" << std::endl;
     std::cout << "  H           - Help" << std::endl;
     std::cout << "  C           - Controls panel" << std::endl;
     std::cout << "  ESC         - Quit" << std::endl;
@@ -2524,6 +2877,8 @@ int main(int argc, char* argv[]) {
 
     // Camera controller (slower movement)
     CameraController camera;
+    refresh_framebuffer_size(window);
+    camera.set_aspect_from_framebuffer();
     float move_speed = 0.05f; // Slower speed
 
     // Phase 6: TAA Camera Tracking (after camera creation)
@@ -2544,8 +2899,9 @@ int main(int argc, char* argv[]) {
     SDL_SetWindowTitle(window, "GPU Ray Tracer - Compiling shader (one-time, ~5-10s)...");
     std::cout << "\nWarming up GPU shader (one-time compilation, ~5-10 seconds)..." << std::endl;
     {
+        glViewport(0, 0, g_fb_width, g_fb_height);
         glUseProgram(program);
-        glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
+        glUniform2f(resolution_loc, (float)g_fb_width, (float)g_fb_height);
         glUniform3f(camera_pos_loc, 0.0f, 2.0f, 15.0f);
         glUniform3f(camera_lookat_loc, 0.0f, 0.0f, 0.0f);
         glUniform3f(camera_vup_loc, 0.0f, 1.0f, 0.0f);
@@ -2605,6 +2961,13 @@ int main(int argc, char* argv[]) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, history_texture);
         glUniform1i(history_buffer_loc, 0);
+        glUniform1i(gpu_pass_loc, 0);
+        glUniform1i(enable_path_trace_loc, 0);
+        glUniform1f(path_history_weight_loc, 0.0f);
+        glUniform1f(frame_noise_loc, 0.0f);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, path_fbo_ok ? path_tex[0] : 0);
+        glUniform1i(path_accum_tex_loc, 1);
         glUniform1i(tone_mapping_op_loc, 0);
         glUniform1f(exposure_loc, 1.0f);
         glUniform1f(contrast_loc, 1.0f);
@@ -2618,6 +2981,7 @@ int main(int argc, char* argv[]) {
             glUniform1f(sp_goffset_loc[i],spheres[i].gradient_offset);
             glUniform1f(sp_rough_loc[i],  spheres[i].roughness);
             glUniform1f(sp_metal_loc[i],  spheres[i].metallic);
+            glUniform1f(sp_ior_loc[i],    spheres[i].ior);
         }
         for (size_t i = 0; i < triangles.size() && i < (size_t)MAX_TRIS; i++) {
             glUniform3f(tr_v0_loc[i],   triangles[i].v0[0],    triangles[i].v0[1],    triangles[i].v0[2]);
@@ -2652,6 +3016,15 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = false;
+            } else if (event.type == SDL_WINDOWEVENT) {
+                if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                    event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                    refresh_framebuffer_size(window);
+                    camera.set_aspect_from_framebuffer();
+                    allocate_surface_textures();
+                    path_accum_frames = 0;
+                    taa_history_ready = false;
+                }
             } else if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
                     running = false;
@@ -2670,6 +3043,19 @@ int main(int argc, char* argv[]) {
                 } else if (event.key.keysym.sym == SDLK_l) {
                     num_lights = (num_lights % 3) + 1;  // Cycle 1->2->3->1
                     std::cout << "Lights: " << num_lights << (num_lights == 1 ? " (Single)" : num_lights == 2 ? " (2-point)" : " (3-point)") << std::endl;
+                    need_render = true;
+                } else if (event.key.keysym.sym == SDLK_i) {
+                    if (!path_fbo_ok) {
+                        std::cout << "Progressive path tracing: unavailable (float framebuffer not supported)." << std::endl;
+                    } else {
+                        enable_path_trace = !enable_path_trace;
+                        path_accum_frames = 0;
+                        std::cout << "Progressive path tracing: " << (enable_path_trace ? "ON" : "OFF")
+                                  << " (hold still to converge)" << std::endl;
+                        if (enable_path_trace) {
+                            max_depth = std::max(max_depth, 6);
+                        }
+                    }
                     need_render = true;
                 } else if (event.key.keysym.sym == SDLK_g) {
                     enable_gi = !enable_gi;
@@ -2736,17 +3122,17 @@ int main(int argc, char* argv[]) {
                     enable_film_grain = !enable_film_grain;
                     std::cout << "Film Grain: " << (enable_film_grain ? "ON" : "OFF") << std::endl;
                     need_render = true;
-                } else if (event.key.keysym.sym == SDLK_c) {  // C key for Chromatic Aberration (Phase 5)
+                } else if (event.key.keysym.sym == SDLK_j) {  // J: chromatic aberration (C is controls panel)
                     enable_chromatic_aberration = !enable_chromatic_aberration;
                     std::cout << "Chromatic Aberration: " << (enable_chromatic_aberration ? "ON" : "OFF") << std::endl;
                     need_render = true;
-                } else if (event.key.keysym.sym == SDLK_LEFTBRACKET) {  // [ key for CA strength down
+                } else if (event.key.keysym.sym == SDLK_z) {  // Z: CA strength down ([ is used for GI samples)
                     if (chromatic_aberration_strength > 0.0f) {
                         chromatic_aberration_strength = std::max(0.0f, chromatic_aberration_strength - 0.1f);
                         std::cout << "Chromatic Aberration Strength: " << chromatic_aberration_strength << std::endl;
                         need_render = true;
                     }
-                } else if (event.key.keysym.sym == SDLK_RIGHTBRACKET) {  // ] key for CA strength up
+                } else if (event.key.keysym.sym == SDLK_x) {  // X: CA strength up
                     if (chromatic_aberration_strength < 2.0f) {
                         chromatic_aberration_strength = std::min(2.0f, chromatic_aberration_strength + 0.1f);
                         std::cout << "Chromatic Aberration Strength: " << chromatic_aberration_strength << std::endl;
@@ -2756,25 +3142,25 @@ int main(int argc, char* argv[]) {
                     enable_dof = !enable_dof;
                     std::cout << "Depth of Field: " << (enable_dof ? "ON" : "OFF") << std::endl;
                     need_render = true;
-                } else if (event.key.keysym.sym == SDLK_MINUS) {  // - key for DOF focus distance down
+                } else if (event.key.keysym.sym == SDLK_7) {  // 7: DOF focus down (- is GI intensity)
                     if (dof_focus_distance > 0.5f) {
                         dof_focus_distance = std::max(0.5f, dof_focus_distance - 0.5f);
                         std::cout << "DOF Focus Distance: " << dof_focus_distance << std::endl;
                         need_render = true;
                     }
-                } else if (event.key.keysym.sym == SDLK_EQUALS) {  // = key for DOF focus distance up
+                } else if (event.key.keysym.sym == SDLK_8) {  // 8: DOF focus up (= is GI intensity)
                     if (dof_focus_distance < 10.0f) {
                         dof_focus_distance = std::min(10.0f, dof_focus_distance + 0.5f);
                         std::cout << "DOF Focus Distance: " << dof_focus_distance << std::endl;
                         need_render = true;
                     }
-                } else if (event.key.keysym.sym == SDLK_COMMA) {  // , key for DOF aperture down
+                } else if (event.key.keysym.sym == SDLK_9) {  // 9: DOF aperture down (, is SSR samples)
                     if (dof_aperture > 0.01f) {
                         dof_aperture = std::max(0.01f, dof_aperture - 0.01f);
                         std::cout << "DOF Aperture: " << dof_aperture << std::endl;
                         need_render = true;
                     }
-                } else if (event.key.keysym.sym == SDLK_PERIOD) {  // . key for DOF aperture up
+                } else if (event.key.keysym.sym == SDLK_0) {  // 0: DOF aperture up (. is SSR samples)
                     if (dof_aperture < 0.5f) {
                         dof_aperture = std::min(0.5f, dof_aperture + 0.01f);
                         std::cout << "DOF Aperture: " << dof_aperture << std::endl;
@@ -2976,13 +3362,36 @@ int main(int argc, char* argv[]) {
 
         // Render
         if (need_render) {
+            refresh_framebuffer_size(window);
+            camera.set_aspect_from_framebuffer();
+
+            bool path_cam_moved = false;
+            if (path_cam_init) {
+                const float thr = 2e-4f;
+                if (fabsf(camera.position[0] - path_prev_cam[0]) > thr ||
+                    fabsf(camera.position[1] - path_prev_cam[1]) > thr ||
+                    fabsf(camera.position[2] - path_prev_cam[2]) > thr ||
+                    fabsf(camera.yaw - path_prev_yaw) > 0.002f ||
+                    fabsf(camera.pitch - path_prev_pitch) > 0.002f) {
+                    path_cam_moved = true;
+                }
+            }
+            path_cam_init = true;
+            if (path_cam_moved) {
+                path_accum_frames = 0;
+            }
+            float path_w = (path_accum_frames > 0)
+                ? (float)path_accum_frames / (float)(path_accum_frames + 1)
+                : 0.0f;
+
+            glViewport(0, 0, g_fb_width, g_fb_height);
             glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
             glUseProgram(program);
 
             // Set camera uniforms
-            glUniform2f(resolution_loc, (float)WIDTH, (float)HEIGHT);
+            glUniform2f(resolution_loc, (float)g_fb_width, (float)g_fb_height);
             glUniform3f(camera_pos_loc, camera.position[0], camera.position[1], camera.position[2]);
             glUniform3f(camera_lookat_loc, camera.lookat[0], camera.lookat[1], camera.lookat[2]);
             glUniform3f(camera_vup_loc, camera.vup[0], camera.vup[1], camera.vup[2]);
@@ -3084,6 +3493,11 @@ int main(int argc, char* argv[]) {
             glUniform1f(contrast_loc, contrast);
             glUniform1f(saturation_loc, saturation);
 
+            glUniform1f(frame_noise_loc, fmodf(time * 173.0f + (float)path_accum_frames * 0.031f, 919.0f));
+            glUniform1f(path_history_weight_loc, path_w);
+            const bool path_active = enable_path_trace && path_fbo_ok;
+            glUniform1i(enable_path_trace_loc, path_active ? 1 : 0);
+
             // Upload sphere uniforms using pre-cached locations
             for (size_t i = 0; i < spheres.size() && i < (size_t)MAX_SPHERES; i++) {
                 glUniform3f(sp_center_loc[i],  spheres[i].center[0], spheres[i].center[1], spheres[i].center[2]);
@@ -3094,6 +3508,7 @@ int main(int argc, char* argv[]) {
                 glUniform1f(sp_goffset_loc[i], spheres[i].gradient_offset);
                 glUniform1f(sp_rough_loc[i],   spheres[i].roughness);
                 glUniform1f(sp_metal_loc[i],   spheres[i].metallic);
+                glUniform1f(sp_ior_loc[i],     spheres[i].ior);
             }
 
             // Upload triangle uniforms using pre-cached locations
@@ -3112,9 +3527,45 @@ int main(int argc, char* argv[]) {
 
             // Render fullscreen quad
             glBindVertexArray(vao);
-            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            if (path_active) {
+                int read_i = path_ping;
+                int write_i = 1 - path_ping;
+                glUniform1i(gpu_pass_loc, 1);
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, path_tex[read_i]);
+                glUniform1i(path_accum_tex_loc, 1);
+                glBindFramebuffer(GL_FRAMEBUFFER, path_fbo);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, path_tex[write_i], 0);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-            // Render overlays (need to temporarily switch from OpenGL to SDL2 rendering)
+                path_ping = 1 - path_ping;
+                if (!path_cam_moved) {
+                    path_accum_frames++;
+                    if (path_accum_frames > 4096) {
+                        path_accum_frames = 4096;
+                    }
+                }
+
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glUniform1i(gpu_pass_loc, 2);
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, path_tex[path_ping]);
+                glUniform1i(path_accum_tex_loc, 1);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                glUniform1i(gpu_pass_loc, 0);
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            } else {
+                glUniform1i(gpu_pass_loc, 0);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            }
+
+            path_prev_cam[0] = camera.position[0];
+            path_prev_cam[1] = camera.position[1];
+            path_prev_cam[2] = camera.position[2];
+            path_prev_yaw = camera.yaw;
+            path_prev_pitch = camera.pitch;
+
             if (help_overlay.is_showing()) {
                 help_overlay.render(window);
             } else if (controls_panel.is_showing()) {
@@ -3126,8 +3577,9 @@ int main(int argc, char* argv[]) {
             // Capture this frame into the TAA history texture.
             // glCopyTexImage2D reads from the front buffer after swap.
             if (enable_taa) {
+                glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, history_texture);
-                glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, WIDTH, HEIGHT, 0);
+                glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, g_fb_width, g_fb_height, 0);
                 glBindTexture(GL_TEXTURE_2D, 0);
                 taa_history_ready = true;
             }
@@ -3198,6 +3650,12 @@ int main(int argc, char* argv[]) {
     std::cout << "\n=== Exiting ===" << std::endl;
 
     // Cleanup
+    if (path_fbo) {
+        glDeleteFramebuffers(1, &path_fbo);
+    }
+    if (path_tex[0]) {
+        glDeleteTextures(2, path_tex);
+    }
     glDeleteTextures(1, &history_texture);
     glDeleteProgram(program);
     glDeleteShader(vertex_shader);

@@ -153,7 +153,7 @@
 ### 📝 Documentation
 
 #### New Documentation Files
-- **CLAUDE.md**: Comprehensive project documentation
+- **LLM_CONTEXT.md** (formerly CLAUDE.md): Comprehensive project documentation
   - Architecture overview
   - Build system details
   - Interactive controls guide

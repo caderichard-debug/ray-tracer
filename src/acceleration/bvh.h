@@ -2,6 +2,7 @@
 #define BVH_H
 
 #include "../math/ray.h"
+#include "../math/frustum.h"
 #include "../math/vec3.h"
 #include "../primitives/sphere.h"
 #include "../primitives/primitive.h"
@@ -80,9 +81,11 @@ public:
     // Build BVH from primitives
     void build(const std::vector<std::shared_ptr<Sphere>>& spheres);
 
-    // Traverse BVH to find closest hit
+    // Traverse BVH to find closest hit. Optional view_frustum skips sphere tests outside the frustum
+    // (same convention as Scene::hit — use for primary rays only).
     bool hit(const Ray& r, float t_min, float t_max, HitRecord& rec,
-             const std::vector<std::shared_ptr<Sphere>>& spheres) const;
+             const std::vector<std::shared_ptr<Sphere>>& spheres,
+             const Frustum::Frustum* view_frustum = nullptr) const;
 
 private:
     std::shared_ptr<BVHNode> build_recursive(std::vector<int> indices, int depth);
@@ -90,7 +93,8 @@ private:
     bool hit_recursive(std::shared_ptr<BVHNode> node,
                      const Ray& r, float t_min, float t_max,
                      HitRecord& rec,
-                     const std::vector<std::shared_ptr<Sphere>>& spheres) const;
+                     const std::vector<std::shared_ptr<Sphere>>& spheres,
+                     const Frustum::Frustum* view_frustum) const;
 };
 
 #endif // BVH_H

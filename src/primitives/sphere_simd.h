@@ -69,17 +69,17 @@ public:
         __m256 t1 = _mm256_mul_ps(_mm256_add_ps(neg_b, sqrt_disc), _mm256_set1_ps(0.5f));
         __m256 t2 = _mm256_mul_ps(_mm256_sub_ps(neg_b, sqrt_disc), _mm256_set1_ps(0.5f));
 
-        // FIX: Use the correct root selection logic (match scalar version)
-        // Try t1 first (closer intersection), if not in range, try t2 (farther intersection)
-        // This is critical for correct sphere intersection!
+        // t1 = larger root (exit/far intersection): (-b + sqrt_disc) / 2
+        // t2 = smaller root (entry/near intersection): (-b - sqrt_disc) / 2
+        // Always try the smaller root (entry point) first, fall back to larger only if out of range.
 
-        // Check if t1 is in valid range [t_min, t_max]
-        __m256 t1_valid_low = _mm256_cmp_ps(t1, packet.t_min, _CMP_GE_OQ);
-        __m256 t1_valid_high = _mm256_cmp_ps(t1, packet.t_max, _CMP_LE_OQ);
-        __m256 t1_valid = _mm256_and_ps(t1_valid_low, t1_valid_high);
+        // Check if t2 (smaller/near root) is in valid range [t_min, t_max]
+        __m256 t2_valid_low = _mm256_cmp_ps(t2, packet.t_min, _CMP_GE_OQ);
+        __m256 t2_valid_high = _mm256_cmp_ps(t2, packet.t_max, _CMP_LE_OQ);
+        __m256 t2_valid = _mm256_and_ps(t2_valid_low, t2_valid_high);
 
-        // Select t1 if valid, otherwise t2 (we'll check validity after selection)
-        __m256 t_candidate = _mm256_blendv_ps(t2, t1, t1_valid);  // If t1_valid, use t1; else t2
+        // Use t2 (entry point) when valid, fall back to t1 (exit point) otherwise
+        __m256 t_candidate = _mm256_blendv_ps(t1, t2, t2_valid);  // If t2_valid, use t2; else t1
 
         // Check if the selected t is actually in valid range
         __m256 t_valid_low = _mm256_cmp_ps(t_candidate, packet.t_min, _CMP_GE_OQ);

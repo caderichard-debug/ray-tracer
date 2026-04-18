@@ -3,6 +3,7 @@
 
 #include "../math/vec3.h"
 #include "../math/ray.h"
+#include "../math/frustum.h"
 
 class Camera {
 public:
@@ -61,6 +62,16 @@ public:
     Ray get_ray(float s, float t) const {
         // For now, no depth of field (aperture = 0)
         return Ray(origin, lower_left_corner + s * horizontal + t * vertical - origin);
+    }
+
+    // Axis-aligned view frustum for primary-ray culling (vfov is degrees; near/far in world units).
+    Frustum::Frustum make_view_frustum(float near_plane, float far_plane) const {
+        Vec3 w = unit_vector(lookfrom - lookat);
+        Vec3 forward = -w;
+        Vec3 right = unit_vector(cross(vup, w));
+        Vec3 up = cross(w, right);
+        const float fovy_rad = vfov * static_cast<float>(M_PI) / 180.0f;
+        return Frustum::create_frustum(origin, forward, up, right, fovy_rad, aspect_ratio, near_plane, far_plane);
     }
 
 private:

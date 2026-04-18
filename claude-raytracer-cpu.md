@@ -245,7 +245,7 @@ Tests all combinations:
 2. Add feature flag to Makefile
 3. Implement in renderer.cpp with #ifdef guards
 4. Add benchmark case to make benchmark
-5. Document in README.md and CLAUDE.md
+5. Document in README.md and LLM_CONTEXT.md
 6. Test interactions with existing features
 
 ### Debugging Performance Issues

@@ -427,4 +427,4 @@ After any fix, verify:
 For questions about this feature, refer to:
 - Phase 3 plan: docs/phase3-implementation-plan.md
 - CPU agent context: claude-raytracer-cpu.md
-- Main documentation: CLAUDE.md
+- Main documentation: LLM_CONTEXT.md
