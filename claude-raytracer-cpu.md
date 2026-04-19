@@ -25,7 +25,7 @@ High-performance CPU ray tracer with AVX2 SIMD vectorization and OpenMP multi-th
 ### Public site (GitHub Pages / Vercel)
 - **Primary:** Next.js **project showcase** in `showcase/` (`npm run dev` / `npm run build`) — copy and IA are **ray-tracer-first**, not a personal portfolio shell. Deploy on **Vercel** with root `showcase/`, or on **GitHub Pages** via `.github/workflows/showcase-pages.yml` (static export, `basePath=/ray-tracer`). See `showcase/README.md`.
 - **Design export:** `showcase/public/Ray Tracer.html` — Claude Design handoff (sync from `poject-showcase/project/Ray Tracer.html`). **`/`** loads it in a full-viewport iframe; direct URL **`/Ray%20Tracer.html`** also works.
-- **Render.com:** repo-root `render.yaml` deploys `showcase/` as a Node web service; see `showcase/README.md`.
+- **Render.com:** repo-root `render.yaml` deploys `showcase/` as a Node web service (`npm ci && npm run build`); Tailwind/TS build deps live in **dependencies** so production `npm ci` still installs them. See `showcase/README.md`.
 - **Legacy:** static HTML still under `docs/` (`index.html` + siblings) if Pages is left on **branch `main` / folder `/docs`**; prefer migrating to the workflow above.
 
 ### Regression / batch

@@ -10,14 +10,11 @@
     "build": "next build",
     "build:static": "STATIC_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/ray-tracer NEXT_PUBLIC_SITE_URL=https://caderichard-debug.github.io/ray-tracer next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:clean": "rm -rf node_modules .next && npm ci && npm run build",
+    "build:prod-install": "NODE_ENV=production npm ci && npm run build"
   },
   "dependencies": {
-    "next": "^15.5.15",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
-  "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -25,6 +22,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^15.5.15",
+    "next": "^15.5.15",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -10,8 +10,7 @@ services:
     region: oregon
     plan: free
     rootDir: showcase
-    # Include devDependencies (TypeScript, ESLint, Tailwind) — Render sets NODE_ENV=production during install, which otherwise omits devDeps and breaks `next build`.
-    buildCommand: npm ci --include=dev && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /
     envVars:
