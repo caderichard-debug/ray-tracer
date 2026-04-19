@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Features — SIMD Ray Tracer</title>
+  <meta name="description" content="CPU interactive, batch, ASCII modes; progressive, adaptive, wavefront; analysis modes and post processing.">
+  <link rel="stylesheet" href="assets/css/showcase.css">
+</head>
+<body>
+  <div class="layout-footer-at-bottom">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <div class="brand"><a href="index.html">SIMD Ray Tracer</a></div>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">Home</a>
+          <a href="features.html" aria-current="page">Features</a>
+          <a href="build.html">Build &amp; run</a>
+          <a href="roadmap.html">Roadmap</a>
+          <a href="community.html">Community</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <h1>Features</h1>
+      <p>High-level overview of what ships today. The <strong>CPU interactive</strong> build is the primary surface; GPU and ASCII are included for completeness.</p>
+
+      <h2>CPU interactive (SDL2)</h2>
+      <ul>
+        <li><strong>Quality ladder</strong> from small preview resolutions up to 1920×1080-class presets with adjustable samples per pixel.</li>
+        <li><strong>Camera</strong>: WASD movement, mouse look when captured, arrow keys for vertical motion.</li>
+        <li><strong>Progressive, adaptive, and wavefront</strong> paths for trading latency vs throughput (toggles in the live panel).</li>
+        <li><strong>Analysis modes</strong>: cycle through normals, depth, albedo, and composite views for debugging and teaching.</li>
+        <li><strong>Post pipeline</strong>: denoise amount control and variance-guided blending on the RGB buffer.</li>
+        <li><strong>Live histogram</strong> of luminance (toggle with <strong>G</strong>) for exposure debugging.</li>
+        <li><strong>Window screenshots</strong> capture the render target after the scene draws and before UI overlays, so PNGs match what you see in the viewport.</li>
+        <li><strong>Translucent settings panel</strong> composited over the framebuffer for quick tweaks without leaving the scene.</li>
+        <li><strong>Camera hot reload</strong> from disk (F5) for rapid layout iteration.</li>
+      </ul>
+
+      <h2>Batch CPU</h2>
+      <ul>
+        <li>Offline PNG output with anti-aliasing up to 256 samples per pixel.</li>
+        <li>Command-line flags for resolution, depth, Morton ordering, and deterministic runs for testing.</li>
+      </ul>
+
+      <h2>ASCII terminal</h2>
+      <ul>
+        <li>Cross-platform terminal renderer with animated camera orbit presets—no GUI required.</li>
+      </ul>
+
+      <h2>GPU interactive</h2>
+      <aside class="banner-wip" role="note">
+        <strong>WIP.</strong> OpenGL-backed interactive mode is under active development; expect missing features vs CPU and avoid performance claims until benchmarks are reproducible on <code>main</code>.
+      </aside>
+
+      <p><a href="build.html">Build &amp; run</a> · <a href="index.html">Home</a></p>
+    </main>
+
+    <footer class="site-footer">
+      <p><a href="https://github.com/caderichard-debug/ray-tracer">Repository</a></p>
+    </footer>
+  </div>
+</body>
+</html>

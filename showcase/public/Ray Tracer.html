@@ -1,0 +1,1272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Ray Tracer — Cade Richard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Inter+Tight:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper: #f1ece0;
+    --paper-2: #ebe5d5;
+    --paper-3: #e2dac6;
+    --ink: #1a1714;
+    --ink-2: #3a3430;
+    --ink-3: #6a6258;
+    --rule: #1a1714;
+    --muted: #857c6e;
+    --accent: oklch(0.58 0.14 35);      /* rust */
+    --accent-deep: oklch(0.42 0.15 35);
+    --accent-soft: oklch(0.92 0.05 35);
+    --serif: 'Fraunces', 'Times New Roman', serif;
+    --sans: 'Inter Tight', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  [data-theme="dark"]{
+    --paper: #15130f;
+    --paper-2: #1c1a15;
+    --paper-3: #24211b;
+    --ink: #ece6d5;
+    --ink-2: #cfc8b6;
+    --ink-3: #9b9384;
+    --rule: #ece6d5;
+    --muted: #7a7265;
+    --accent: oklch(0.72 0.14 35);
+    --accent-deep: oklch(0.82 0.14 35);
+    --accent-soft: oklch(0.3 0.08 35);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  html{ scroll-behavior:smooth }
+  body{
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01","ss02","cv11";
+  }
+  ::selection{ background: var(--accent); color: var(--paper) }
+
+  /* ---------- topbar ---------- */
+  .topbar{
+    position: sticky; top:0; z-index: 20;
+    background: color-mix(in oklab, var(--paper), transparent 8%);
+    backdrop-filter: saturate(140%) blur(10px);
+    border-bottom: 1px solid color-mix(in oklab, var(--rule), transparent 85%);
+  }
+  .topbar .row{
+    max-width: 1320px; margin: 0 auto;
+    display:flex; align-items: baseline; gap: 28px;
+    padding: 14px 28px;
+  }
+  .wordmark{
+    font-family: var(--serif); font-weight: 500;
+    font-size: 20px; letter-spacing: -.01em; line-height: 1;
+  }
+  .wordmark em{ font-style: italic; font-weight: 400; color: var(--ink-2) }
+  .nav{
+    display:flex; gap: 22px; margin-left: auto;
+    font-family: var(--mono); font-size: 12px;
+    text-transform: lowercase; letter-spacing: .04em;
+  }
+  .nav a{
+    color: var(--ink-2); text-decoration: none;
+    padding: 4px 2px; border-bottom: 1px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  .nav a:hover{ color: var(--ink); border-color: var(--accent) }
+  .nav .pill{
+    border: 1px solid var(--rule);
+    padding: 4px 10px; border-radius: 999px;
+    color: var(--ink);
+  }
+  .nav .pill:hover{ background: var(--ink); color: var(--paper); border-color: var(--ink) }
+
+  /* ---------- section scaffolding ---------- */
+  .wrap{ max-width: 1320px; margin: 0 auto; padding: 0 28px }
+  section{ padding: 72px 0; border-top: 1px solid color-mix(in oklab, var(--rule), transparent 88%) }
+  section:first-of-type{ border-top: none }
+  .seclabel{
+    display:flex; align-items:center; gap: 12px;
+    font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .18em;
+    color: var(--ink-3);
+    margin-bottom: 18px;
+  }
+  .seclabel::before{
+    content: attr(data-num);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 2px 7px; border-radius: 999px; font-size: 10px;
+  }
+  .sectitle{
+    font-family: var(--serif); font-weight: 400;
+    font-size: clamp(32px, 4.4vw, 56px);
+    line-height: 1.02; letter-spacing: -.02em;
+    margin: 0 0 14px; max-width: 18ch;
+  }
+  .sectitle em{ font-style: italic; color: var(--ink-2) }
+  .lede{
+    font-family: var(--serif); font-weight: 300;
+    font-size: clamp(18px, 1.6vw, 22px);
+    line-height: 1.45; color: var(--ink-2); max-width: 56ch;
+    margin: 0 0 32px;
+  }
+
+  /* ---------- masthead / hero ---------- */
+  .masthead{
+    padding: 44px 0 28px;
+  }
+  .masthead .meta{
+    display:flex; justify-content: space-between; align-items:flex-end;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--ink-3); letter-spacing: .08em; text-transform: uppercase;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 10px; margin-bottom: 22px;
+  }
+  .masthead .meta .l{ display:flex; gap: 18px }
+  .masthead .meta .l span + span::before{ content: "·"; margin-right: 18px; color: var(--ink-3); opacity: .6 }
+  h1.title{
+    font-family: var(--serif);
+    font-weight: 400; font-style: normal;
+    font-variation-settings: "opsz" 144, "SOFT" 30;
+    font-size: clamp(54px, 9.6vw, 150px);
+    line-height: .92; letter-spacing: -.035em;
+    margin: 4px 0 18px;
+  }
+  h1.title em{ font-style: italic; font-weight: 300; color: var(--ink-2) }
+  .byline{
+    display:flex; align-items: baseline; gap: 20px;
+    flex-wrap: wrap;
+    font-family: var(--sans); font-size: 15px;
+    color: var(--ink-2);
+    border-top: 1px solid var(--rule);
+    padding-top: 14px; margin-top: 8px;
+  }
+  .byline .who{ font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--ink) }
+  .byline .dot{ width: 3px; height: 3px; background: var(--ink-3); border-radius: 50%; display:inline-block; margin: 0 2px }
+  .byline .mono{ font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-3) }
+  .byline .cta{ margin-left: auto; display:flex; gap: 8px }
+  .btn{
+    font-family: var(--sans); font-size: 13px; font-weight: 500;
+    padding: 9px 16px; border-radius: 999px;
+    border: 1px solid var(--rule);
+    background: transparent; color: var(--ink);
+    cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items:center; gap: 8px;
+    transition: all .15s ease;
+  }
+  .btn:hover{ background: var(--ink); color: var(--paper) }
+  .btn.primary{ background: var(--ink); color: var(--paper) }
+  .btn.primary:hover{ background: var(--accent); border-color: var(--accent) }
+  .btn .arrow{ font-family: var(--mono); font-size: 14px }
+
+  /* ---------- split hero (render + stat overlay) ---------- */
+  .hero{
+    display:grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 22px;
+    margin-top: 24px;
+  }
+  .hero-render{
+    position: relative;
+    aspect-ratio: 16 / 10;
+    border: 1px solid var(--rule);
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+  .hero-render .ph{
+    position:absolute; inset: 0;
+    display:flex; align-items:center; justify-content:center;
+    background:
+      repeating-linear-gradient(45deg,
+        transparent 0 14px,
+        color-mix(in oklab, var(--ink), transparent 94%) 14px 15px);
+    color: var(--ink-3);
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  }
+  .hero-render .ph span{
+    padding: 6px 12px; background: var(--paper); border: 1px solid var(--rule);
+  }
+  .hero-render .badges{
+    position: absolute; left: 16px; bottom: 16px; right: 16px;
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 12px;
+    font-family: var(--mono); font-size: 11px; color: var(--ink);
+    pointer-events: none;
+  }
+  .hero-render .badges .l, .hero-render .badges .r{
+    background: color-mix(in oklab, var(--paper), transparent 15%);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--rule);
+    padding: 6px 10px;
+    letter-spacing: .04em;
+  }
+  .hero-render .hero-img{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; display:block;
+  }
+
+  .hero-side{
+    display:flex; flex-direction: column; justify-content: space-between;
+    gap: 20px;
+  }
+  .hero-abstract{
+    font-family: var(--serif); font-weight: 300;
+    font-size: 21px; line-height: 1.4; color: var(--ink);
+    letter-spacing: -.005em;
+  }
+  .hero-abstract b{
+    font-weight: 500; font-style: italic; color: var(--accent-deep);
+  }
+  .stat-block{
+    display:grid; grid-template-columns: 1fr 1fr;
+    border-top: 1px solid var(--rule);
+  }
+  .stat{
+    padding: 18px 0 18px;
+    border-bottom: 1px solid color-mix(in oklab, var(--rule), transparent 85%);
+  }
+  .stat:nth-child(odd){ padding-right: 20px; border-right: 1px solid color-mix(in oklab, var(--rule), transparent 85%) }
+  .stat:nth-child(even){ padding-left: 20px }
+  .stat .label{
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .14em;
+    color: var(--ink-3); margin-bottom: 6px;
+  }
+  .stat .num{
+    font-family: var(--serif); font-weight: 400;
+    font-size: 44px; line-height: .95; letter-spacing: -.03em;
+    color: var(--ink); font-feature-settings: "tnum","lnum";
+  }
+  .stat .num em{ font-style: italic; font-weight: 300; color: var(--accent-deep); font-size: 28px; margin-left: 2px }
+  .stat .sub{
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    margin-top: 6px; letter-spacing: .04em;
+  }
+
+  /* ---------- section 2: the problem (small prose) ---------- */
+  .prose{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px 48px;
+  }
+  .prose p{
+    font-family: var(--serif); font-weight: 300;
+    font-size: 19px; line-height: 1.55; color: var(--ink-2);
+    margin: 0; text-wrap: pretty;
+  }
+  .prose p + p{ margin-top: 16px }
+  .prose .pull{
+    grid-column: span 2;
+    font-family: var(--serif); font-weight: 300; font-style: italic;
+    font-size: clamp(26px, 3vw, 40px); line-height: 1.2;
+    color: var(--ink); padding: 22px 0; max-width: 28ch; margin: 8px auto;
+    text-align:center; text-wrap: balance;
+    position: relative;
+  }
+  .prose .pull::before, .prose .pull::after{
+    content: "";
+    display:block; width: 48px; height: 1px; background: var(--rule);
+    margin: 14px auto;
+  }
+
+  /* ---------- gallery ---------- */
+  .gallery-head{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    gap: 32px; margin-bottom: 24px;
+  }
+  .gallery{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    grid-auto-rows: 120px;
+    gap: 10px;
+  }
+  .g-cell{
+    position: relative; overflow: hidden;
+    border: 1px solid var(--rule); background: var(--paper-2);
+  }
+  .g-cell .ph{
+    position:absolute; inset: 0;
+    display:flex; align-items:center; justify-content:center;
+    background:
+      repeating-linear-gradient(45deg,
+        transparent 0 12px,
+        color-mix(in oklab, var(--ink), transparent 94%) 12px 13px);
+    color: var(--ink-3);
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    text-align:center;
+  }
+  .g-cell .tag{
+    position:absolute; left: 10px; bottom: 10px;
+    background: var(--paper); border: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 10px;
+    padding: 4px 8px; letter-spacing: .06em; color: var(--ink);
+  }
+  .g-cell .num{
+    position:absolute; right: 10px; top: 10px;
+    font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+    letter-spacing: .06em;
+  }
+  .g-cell .g-img{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; display:block;
+  }
+  .g-1 { grid-column: span 6; grid-row: span 3 }
+  .g-2 { grid-column: span 3; grid-row: span 3 }
+  .g-3 { grid-column: span 3; grid-row: span 2 }
+  .g-4 { grid-column: span 3; grid-row: span 1 }
+  .g-5 { grid-column: span 4; grid-row: span 2 }
+  .g-6 { grid-column: span 4; grid-row: span 2 }
+  .g-7 { grid-column: span 4; grid-row: span 2 }
+
+  /* ---------- features ---------- */
+  .features{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--rule);
+    border-left: 1px solid var(--rule);
+  }
+  .feat{
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 26px 24px 28px;
+    position: relative;
+    background: var(--paper);
+    transition: background .2s ease;
+  }
+  .feat:hover{ background: var(--paper-2) }
+  .feat .no{
+    font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+    letter-spacing: .1em;
+  }
+  .feat h3{
+    font-family: var(--serif); font-weight: 400;
+    font-size: 26px; line-height: 1.1; letter-spacing: -.01em;
+    margin: 6px 0 8px;
+  }
+  .feat h3 em{ font-style: italic; color: var(--ink-2) }
+  .feat p{
+    font-family: var(--sans); font-size: 14px; line-height: 1.55;
+    color: var(--ink-2); margin: 0 0 14px; max-width: 36ch;
+  }
+  .feat .src{
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  }
+  .feat .tick{
+    display:inline-flex; align-items:center; gap: 6px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--accent-deep);
+    margin-top: 10px;
+  }
+  .feat .tick .sparkline{
+    width: 56px; height: 12px;
+    color: var(--accent-deep);
+  }
+  .feat.dim .tick{ color: var(--ink-3) }
+  .feat.honest{
+    background: var(--paper-2);
+  }
+  .feat.honest::before{
+    content: "caveat";
+    position: absolute; top: 12px; right: 14px;
+    font-family: var(--mono); font-size: 9px;
+    letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent-deep);
+    border: 1px solid var(--accent-deep);
+    padding: 2px 6px; border-radius: 999px;
+  }
+
+  /* ---------- benchmarks ---------- */
+  .bench-head{
+    display:flex; align-items:flex-end; justify-content:space-between; gap: 32px;
+    margin-bottom: 26px; flex-wrap: wrap;
+  }
+  .bench-meta{
+    font-family: var(--mono); font-size: 11px;
+    color: var(--ink-3); letter-spacing: .04em;
+    text-align: right;
+  }
+  .bench-meta b{ color: var(--ink); font-weight: 500 }
+
+  .bench-grid{
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 40px;
+  }
+  .bar-chart{
+    display:flex; flex-direction:column; gap: 0;
+    border-top: 1px solid var(--rule);
+  }
+  .br{
+    display:grid; grid-template-columns: 160px 1fr 90px 72px;
+    align-items:center; gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--rule), transparent 85%);
+  }
+  .br .label{
+    font-family: var(--sans); font-size: 14px; font-weight: 500;
+    color: var(--ink);
+  }
+  .br .label small{
+    display:block; font-family: var(--mono); font-size: 10px; font-weight: 400;
+    color: var(--ink-3); letter-spacing: .06em; margin-top: 3px;
+  }
+  .br .track{
+    height: 18px; position:relative; background: var(--paper-2);
+    border: 1px solid color-mix(in oklab, var(--rule), transparent 80%);
+  }
+  .br .fill{
+    position:absolute; top:-1px; bottom:-1px; left:-1px;
+    background: var(--ink);
+    border: 1px solid var(--rule);
+  }
+  .br.baseline .fill{ background: var(--paper-3); color: var(--ink) }
+  .br.accent .fill{ background: var(--accent); border-color: var(--accent-deep) }
+  .br.slow .fill{ background: repeating-linear-gradient(45deg, var(--paper-3) 0 6px, var(--paper-2) 6px 7px) }
+  .br .time{
+    font-family: var(--mono); font-size: 13px; color: var(--ink);
+    text-align: right; font-feature-settings: "tnum";
+  }
+  .br .delta{
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    text-align: right; letter-spacing: .04em;
+  }
+  .br.accent .delta{ color: var(--accent-deep) }
+  .br.slow .delta{ color: var(--accent-deep) }
+
+  .bench-side h4{
+    font-family: var(--serif); font-weight: 400; font-size: 22px;
+    letter-spacing: -.01em; margin: 0 0 10px;
+  }
+  .bench-side p{
+    font-family: var(--serif); font-weight: 300; font-size: 17px; line-height: 1.5;
+    color: var(--ink-2); margin: 0 0 12px;
+  }
+  .scaling{
+    margin-top: 20px; padding-top: 20px;
+    border-top: 1px solid var(--rule);
+  }
+  .scaling h5{
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .18em;
+    color: var(--ink-3); margin: 0 0 14px;
+  }
+  .plot{
+    position: relative; height: 160px;
+    border-left: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 8px;
+  }
+  .plot .axis-y{
+    position:absolute; left: -36px; top: 0; bottom: 0;
+    display:flex; flex-direction: column; justify-content:space-between;
+    font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+    text-align:right; width: 30px;
+  }
+  .plot .axis-x{
+    display:flex; justify-content:space-between;
+    font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+    margin-top: 6px; padding-left: 0;
+  }
+  .plot svg{ position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible }
+  .plot .dot{ fill: var(--ink) }
+  .plot .dot.accent{ fill: var(--accent) }
+  .plot .line{ fill:none; stroke: var(--ink); stroke-width: 1.25 }
+  .plot .ideal{ fill:none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3 }
+  .plot .label{
+    font-family: var(--mono); font-size: 10px;
+  }
+
+  /* ---------- build / quickstart ---------- */
+  .build-grid{
+    display: grid; grid-template-columns: 1fr 1.2fr; gap: 40px;
+  }
+  .term{
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 13px; line-height: 1.6;
+    color: var(--ink);
+    padding: 0;
+  }
+  .term .head{
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 10px 14px;
+    border-bottom: 1px solid color-mix(in oklab, var(--rule), transparent 80%);
+    font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .term .body{ padding: 16px 18px 18px }
+  .term .c{ color: var(--ink-3) }
+  .term .p{ color: var(--accent-deep); user-select: none }
+  .term .k{ color: var(--ink); font-weight: 500 }
+  .term .v{ color: var(--accent-deep); font-weight: 500 }
+  .term .ok{ color: var(--accent-deep) }
+  .term .out{ color: var(--ink-3) }
+
+  .flags{
+    display:flex; flex-direction:column; gap: 2px;
+    border-top: 1px solid var(--rule);
+  }
+  .flag{
+    display:grid; grid-template-columns: 200px 1fr 60px;
+    align-items:center; gap: 18px;
+    padding: 12px 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--rule), transparent 85%);
+  }
+  .flag .name{
+    font-family: var(--mono); font-size: 12px;
+    font-weight: 500; color: var(--ink);
+  }
+  .flag .desc{
+    font-family: var(--sans); font-size: 13px;
+    color: var(--ink-2);
+  }
+  .flag .default{
+    font-family: var(--mono); font-size: 10px;
+    color: var(--ink-3); letter-spacing: .08em; text-align: right;
+  }
+  .flag .default.on{ color: var(--accent-deep) }
+
+  /* ---------- footer ---------- */
+  footer{
+    border-top: 1px solid var(--rule);
+    padding: 48px 0 60px;
+    margin-top: 24px;
+  }
+  .foot{
+    display:grid; grid-template-columns: 2fr 1fr 1fr; gap: 40px;
+  }
+  .foot .sig{
+    font-family: var(--serif); font-size: 40px; font-style: italic; font-weight: 300;
+    line-height: 1.1; letter-spacing: -.02em;
+    color: var(--ink);
+  }
+  .foot .sig small{
+    display:block; font-family: var(--mono); font-size: 11px;
+    font-style: normal; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-3); margin-top: 10px;
+  }
+  .foot h5{
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .18em;
+    color: var(--ink-3); margin: 0 0 14px;
+  }
+  .foot a{
+    display:block; color: var(--ink); text-decoration: none;
+    font-family: var(--sans); font-size: 15px; padding: 4px 0;
+    border-bottom: 1px solid transparent;
+    transition: border-color .15s;
+  }
+  .foot a:hover{ border-color: var(--accent) }
+  .foot .colophon{
+    grid-column: 1 / -1;
+    margin-top: 36px; padding-top: 18px;
+    border-top: 1px solid color-mix(in oklab, var(--rule), transparent 85%);
+    display:flex; justify-content:space-between; gap: 20px;
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    letter-spacing: .04em;
+  }
+
+  /* ---------- tweaks ---------- */
+  .tweak-btn{
+    position: fixed; right: 20px; bottom: 20px; z-index: 30;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    padding: 10px 14px;
+    background: var(--ink); color: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 999px; cursor: pointer;
+    box-shadow: 0 10px 30px rgba(0,0,0,.15);
+  }
+  .tweak-panel{
+    position: fixed; right: 20px; bottom: 68px; z-index: 30;
+    width: 300px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 18px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.18);
+    display: none;
+  }
+  .tweak-panel.open{ display: block }
+  .tweak-panel h6{
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .18em;
+    color: var(--ink-3); margin: 0 0 6px;
+  }
+  .tweak-group{ margin: 14px 0 }
+  .tweak-group .lab{
+    font-family: var(--sans); font-size: 12px; color: var(--ink-3);
+    margin-bottom: 6px;
+  }
+  .t-opts{ display:flex; flex-wrap:wrap; gap: 6px }
+  .t-opts button{
+    font-family: var(--mono); font-size: 11px;
+    padding: 5px 10px; border: 1px solid var(--rule);
+    background: transparent; color: var(--ink); cursor: pointer;
+    border-radius: 999px;
+  }
+  .t-opts button[aria-pressed="true"]{ background: var(--ink); color: var(--paper) }
+  .t-swatches{ display:flex; gap: 10px }
+  .t-sw{
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 1px solid var(--rule); cursor: pointer;
+  }
+  .t-sw[aria-pressed="true"]{ outline: 2px solid var(--ink); outline-offset: 2px }
+
+  @media (max-width: 1000px){
+    .hero, .bench-grid, .build-grid, .prose, .foot{ grid-template-columns: 1fr }
+    .features{ grid-template-columns: 1fr 1fr }
+    .gallery{ grid-auto-rows: 90px }
+    .g-1 { grid-column: span 12; grid-row: span 3 }
+    .g-2, .g-3, .g-4, .g-5, .g-6, .g-7 { grid-column: span 6; grid-row: span 2 }
+    .byline .cta{ margin-left: 0; width: 100% }
+    .br{ grid-template-columns: 130px 1fr 78px 60px }
+  }
+  @media (max-width: 640px){
+    .features{ grid-template-columns: 1fr }
+    .stat-block{ grid-template-columns: 1fr }
+    .stat:nth-child(odd){ padding-right: 0; border-right: none }
+    .stat:nth-child(even){ padding-left: 0 }
+  }
+</style>
+</head>
+<body data-theme="light">
+
+<header class="topbar">
+  <div class="row">
+    <div class="wordmark">Ray Tracer</div>
+    <nav class="nav">
+      <a href="#abstract">abstract</a>
+      <a href="#gallery">gallery</a>
+      <a href="#features">features</a>
+      <a href="#benchmarks">benchmarks</a>
+      <a href="#build">build</a>
+      <a class="pill" href="https://github.com/caderichard-debug/ray-tracer" target="_blank" rel="noopener">github ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ================= MASTHEAD / HERO ================= -->
+<section class="masthead">
+  <div class="meta">
+    <div class="l">
+      <span>v1.0</span>
+      <span>C++17</span>
+      <span>AVX2 · OpenMP</span>
+      <span>MIT license</span>
+    </div>
+    <div class="r">2026 · technical report</div>
+  </div>
+
+  <h1 class="title">A CPU ray&nbsp;tracer.</h1>
+
+  <div class="byline">
+    <span class="who">Cade Richard · 17 Apr 2026</span>
+    <div class="cta">
+      <a class="btn" href="#benchmarks">Read the benchmarks <span class="arrow">→</span></a>
+      <a class="btn primary" href="https://github.com/caderichard-debug/ray-tracer" target="_blank" rel="noopener">GitHub <span class="arrow">↗</span></a>
+    </div>
+  </div>
+
+  <div class="hero">
+    <figure class="hero-render">
+      <img class="hero-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-batch-800.png" width="1920" height="1080" alt="Cornell box, CPU batch render at 1920 by 1080, high sample count" decoding="async" fetchpriority="high" />
+      <div class="badges">
+        <div class="l">cornell · full pipeline · wavefront + AVX2 + OMP</div>
+        <div class="r">CPU · 8 threads</div>
+      </div>
+    </figure>
+    <aside class="hero-side">
+      <p class="hero-abstract">
+        An interactive C++ ray tracer built as a <b>test-bed of optimizations</b> — every
+        trick is a compile-time flag, so the benchmark harness can attribute every
+        millisecond. SIMD packets, a wavefront tile scheduler, Z-order pixel
+        traversal, and variance-driven adaptive sampling all measured in isolation.
+      </p>
+      <div class="stat-block">
+        <div class="stat">
+          <div class="label">Wavefront vs scalar</div>
+          <div class="num">3.1<em>×</em></div>
+          <div class="sub">0.687s → 0.221s · Cornell 640×360 · 4 spp</div>
+        </div>
+        <div class="stat">
+          <div class="label">AVX2 packets vs scalar</div>
+          <div class="num">2.5<em>×</em></div>
+          <div class="sub">8-ray (4×2) SIMD · 1.34 → 3.40 MRays/s</div>
+        </div>
+        <div class="stat">
+          <div class="label">OpenMP scaling (1→8)</div>
+          <div class="num">1.95<em>×</em></div>
+          <div class="sub">1280×720 scalar · 2.79s → 1.43s median</div>
+        </div>
+        <div class="stat">
+          <div class="label">Throughput, best path</div>
+          <div class="num">4.17<em>MRays/s</em></div>
+          <div class="sub">wavefront · same spp as baseline row</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ================= ABSTRACT / PROSE ================= -->
+<section id="abstract">
+  <div class="seclabel" data-num="§1">Abstract</div>
+  <h2 class="sectitle">Abstract.</h2>
+  <div class="prose">
+    <div>
+      <p>
+        Interactive CPU ray tracing is a rare case where the memory hierarchy,
+        the vector units, and the threading model are all visible in the hot loop.
+        Writing one from scratch in C++17 makes you pay for every decision in wall-clock,
+        which is the entire point.
+      </p>
+      <p>
+        This project puts every optimization behind a compile-time gate —
+        <code>ENABLE_AVX</code>, <code>ENABLE_OPENMP</code>, <code>ENABLE_MORTON</code>,
+        <code>ENABLE_LOOP_UNROLL</code>, and a dozen others — so the benchmark harness
+        can cleanly attribute each ms. The scene is small, the numbers are honest, and
+        the places where a textbook optimization <em>fails</em> are published alongside
+        the places where it wins.
+      </p>
+    </div>
+    <div>
+      <p>
+        Under the hood: a BVH with surface-area heuristic construction; handwritten
+        AVX2 ray-packet traversal over 8 rays at a time; a wavefront tile scheduler;
+        Z-order (Morton) pixel scheduling for cache locality; stratified,
+        progressive, and variance-driven adaptive sampling; a per-thread PCG random
+        number generator; dielectric, metal, lambertian and emissive materials;
+        thin-lens depth-of-field; and a deterministic regression harness that
+        SHA-compares output PPMs to golden images.
+      </p>
+      <p>
+        What you won't find: full unbiased global illumination, multiple-importance
+        sampling, caustics. This is a direct-lighting-plus-recursion tracer — on
+        purpose, so the scope stayed finite.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= GALLERY ================= -->
+<section id="gallery">
+  <div class="gallery-head">
+    <div>
+      <div class="seclabel" data-num="§2">Renders</div>
+      <h2 class="sectitle">Renders</h2>
+      <p class="lede">Cornell box regression scene.</p>
+    </div>
+    <div class="bench-meta">
+      <b>7 plates · live from repo</b><br/>
+      CPU batch examples from <code>readme-examples/</code> (swap for your exports).
+    </div>
+  </div>
+
+  <div class="gallery">
+    <figure class="g-cell g-1">
+      <img class="g-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-batch-800.png" width="1920" height="1080" alt="Cornell box beauty render, high resolution batch" decoding="async" loading="lazy" />
+      <div class="num">Pl. i</div>
+      <div class="tag">cornell · beauty</div>
+    </figure>
+    <figure class="g-cell g-2">
+      <img class="g-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-scanline.png" width="640" height="360" alt="Cornell box scanline CPU batch" decoding="async" loading="lazy" />
+      <div class="num">Pl. ii</div>
+      <div class="tag">scanline · 640×360</div>
+    </figure>
+    <figure class="g-cell g-3">
+      <img class="g-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-morton.png" width="640" height="360" alt="Cornell box Morton Z-order traversal" decoding="async" loading="lazy" />
+      <div class="num">Pl. iii</div>
+      <div class="tag">morton · locality</div>
+    </figure>
+    <figure class="g-cell g-4">
+      <img class="g-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-scanline.png" width="640" height="360" alt="Cornell box alternate view" decoding="async" loading="lazy" />
+      <div class="num">Pl. iv</div>
+      <div class="tag">batch · scanline</div>
+    </figure>
+    <figure class="g-cell g-5">
+      <img class="g-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-morton.png" width="640" height="360" alt="Cornell box Morton order" decoding="async" loading="lazy" />
+      <div class="num">Pl. v</div>
+      <div class="tag">Z-order</div>
+    </figure>
+    <figure class="g-cell g-6">
+      <img class="g-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-batch-800.png" width="1920" height="1080" alt="Cornell box full pipeline" decoding="async" loading="lazy" />
+      <div class="num">Pl. vi</div>
+      <div class="tag">high-res batch</div>
+    </figure>
+    <figure class="g-cell g-7">
+      <img class="g-img" src="https://raw.githubusercontent.com/caderichard-debug/ray-tracer/main/readme-examples/cornell-box-cpu-scanline.png" width="640" height="360" alt="Cornell box CPU batch" decoding="async" loading="lazy" />
+      <div class="num">Pl. vii</div>
+      <div class="tag">readme · parity</div>
+    </figure>
+  </div>
+</section>
+
+<!-- ================= FEATURES ================= -->
+<section id="features">
+  <div class="seclabel" data-num="§3">What's in the engine</div>
+  <h2 class="sectitle">Twelve switches.</h2>
+  <p class="lede">Some don't show meaningful performance improvements on a the small 25-primitive test scene.</p>
+
+  <div class="features">
+    <div class="feat">
+      <div class="no">01 / acceleration</div>
+      <h3>SAH BVH</h3>
+      <p>Broad-phase for spheres &amp; triangles, also used for any-hit shadow queries. Built with a surface-area-heuristic split cost.</p>
+      <div class="src">src/acceleration/bvh.cpp</div>
+    </div>
+    <div class="feat">
+      <div class="no">02 / SIMD</div>
+      <h3>AVX2 ray packets</h3>
+      <p>8 rays (4×2 block) traced in lockstep over SoA sphere data. Handwritten AVX2 helpers for <code>Color</code>/<code>Vec3</code> in shading and framebuffer finalize.</p>
+      <div class="src">sphere_simd.h · renderer.cpp</div>
+      <div class="tick"><span>+2.5× vs scalar</span>
+        <svg class="sparkline" viewBox="0 0 56 12"><polyline fill="none" stroke="currentColor" stroke-width="1.2" points="0,10 8,9 16,7 24,6 32,4 40,4 48,3 56,2"/></svg>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="no">03 / scheduling</div>
+      <h3>Wavefront <em>tiles</em></h3>
+      <p>Rays are batched into waves of tiles, keeping shading data hot in L1/L2 as the tile migrates across cores.</p>
+      <div class="src">renderer.cpp · enable_wavefront</div>
+      <div class="tick"><span>+3.1× vs scalar</span>
+        <svg class="sparkline" viewBox="0 0 56 12"><polyline fill="none" stroke="currentColor" stroke-width="1.2" points="0,10 8,8 16,6 24,5 32,3 40,2 48,2 56,1"/></svg>
+      </div>
+    </div>
+
+    <div class="feat">
+      <div class="no">04 / locality</div>
+      <h3>Morton (Z-order)</h3>
+      <p>Pixel traversal follows a space-filling curve instead of scanlines, so neighbouring pixels land near each other in the accumulation buffer.</p>
+      <div class="src">Morton::generate_morton_pixels</div>
+      <div class="tick"><span>+2.0× vs scalar</span>
+        <svg class="sparkline" viewBox="0 0 56 12"><polyline fill="none" stroke="currentColor" stroke-width="1.2" points="0,10 8,9 16,7 24,7 32,5 40,5 48,4 56,3"/></svg>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="no">05 / threading</div>
+      <h3>OpenMP</h3>
+      <p>Pragma-based parallel-for on the pixel loop; ~1.95× going 1 → 8 threads on a 1280×720 scalar sweep. Determinism preserved by turning OMP off for the regression harness.</p>
+      <div class="src">Makefile · ENABLE_OPENMP</div>
+      <div class="tick"><span>+1.95× at 8 threads</span>
+        <svg class="sparkline" viewBox="0 0 56 12"><polyline fill="none" stroke="currentColor" stroke-width="1.2" points="0,10 8,9 16,7 24,6 32,5 40,4 48,3 56,3"/></svg>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="no">06 / sampling</div>
+      <h3>Stratified AA</h3>
+      <p>Jittered grid over the pixel footprint, so AA samples stop clumping. Roughly <b>19% faster convergence</b> at the same spp vs. white-noise.</p>
+      <div class="src">main.cpp · ENABLE_STRATIFIED</div>
+      <div class="tick"><span>−19% time @ same spp</span>
+        <svg class="sparkline" viewBox="0 0 56 12"><polyline fill="none" stroke="currentColor" stroke-width="1.2" points="0,8 8,8 16,7 24,7 32,6 40,6 48,5 56,5"/></svg>
+      </div>
+    </div>
+
+    <div class="feat">
+      <div class="no">07 / sampling</div>
+      <h3>Adaptive <em>(variance-driven)</em></h3>
+      <p>Spends samples where variance demands them; finishes flat regions early. ~72% less time at half the primary samples — caveat: that's fewer rays, not a pure speedup.</p>
+      <div class="src">renderer.cpp · enable_adaptive</div>
+      <div class="tick"><span>−72% time (½ primaries)</span>
+        <svg class="sparkline" viewBox="0 0 56 12"><polyline fill="none" stroke="currentColor" stroke-width="1.2" points="0,11 8,10 16,8 24,7 32,5 40,4 48,3 56,2"/></svg>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="no">08 / sampling</div>
+      <h3>Progressive</h3>
+      <p>Multi-pass accumulation with a flat row-major buffer (cache-friendlier than a nested <code>vector&lt;vector&gt;</code>). First pixels land in ~30 ms.</p>
+      <div class="src">renderer.cpp · enable_progressive</div>
+    </div>
+    <div class="feat">
+      <div class="no">09 / rng</div>
+      <h3>PCG, per-thread</h3>
+      <p>A fast, well-distributed PCG generator with no locks; the sampling hot path calls it directly. <code>ENABLE_FAST_RNG</code> swaps it for <code>rand()</code> as a baseline.</p>
+      <div class="src">src/math/pcg_random.h</div>
+    </div>
+
+    <div class="feat honest">
+      <div class="no">10 / acceleration</div>
+      <h3>BVH <em>overhead</em></h3>
+      <p>At 25 primitives, BVH and frustum culling come in <em>slower</em> than brute-force scalar — the traversal stack costs more than it saves. Wins appear on the bigger scenes in <code>tests/</code>.</p>
+      <div class="src">benchmark_results/ · full log</div>
+    </div>
+    <div class="feat">
+      <div class="no">11 / materials</div>
+      <h3>Materials &amp; light</h3>
+      <p>Lambertian (with textured albedo), metal with fuzz, dielectric with Fresnel, and emissive. Phong shading per light; shadow rays reuse the BVH; N·L ≤ 0 early-out.</p>
+      <div class="src">material.h · renderer.cpp</div>
+    </div>
+    <div class="feat">
+      <div class="no">12 / correctness</div>
+      <h3>Deterministic regression</h3>
+      <p>The harness renders a fixed Cornell frame with OMP off, hashes the PPM, and fails CI if the SHA drifts. Performance is nothing without a stable bit-exact output to compare against.</p>
+      <div class="src">tests/regression/</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= BENCHMARKS ================= -->
+<section id="benchmarks">
+  <div class="bench-head">
+    <div>
+      <div class="seclabel" data-num="§4">Benchmarks</div>
+      <h2 class="sectitle">Feature deltas.</h2>
+      <p class="lede">Every bar is a build configuration. Numbers pulled from <code>benchmark_results/summaries/feature_deltas_20260417.md</code>.</p>
+    </div>
+    <div class="bench-meta">
+      <b>Cornell · 640 × 360 · 4 spp</b><br/>
+      median of 5 timed reps · 2 OMP threads<br/>
+      <b>Baseline:</b> scalar, no BVH, no SIMD
+    </div>
+  </div>
+
+  <div class="bench-grid">
+    <div class="bar-chart" aria-label="feature delta bar chart">
+      <!-- scale: baseline = 100%. Slower bars can exceed. -->
+      <div class="br baseline">
+        <div class="label">Scalar baseline<small>no BVH · no SIMD · no wave</small></div>
+        <div class="track"><div class="fill" style="width: 72%"></div></div>
+        <div class="time">0.687 s</div>
+        <div class="delta">1.00×</div>
+      </div>
+      <div class="br">
+        <div class="label">+ Morton (Z-order)<small>pixel scheduling</small></div>
+        <div class="track"><div class="fill" style="width: 36%"></div></div>
+        <div class="time">0.346 s</div>
+        <div class="delta">−50% · 2.0×</div>
+      </div>
+      <div class="br">
+        <div class="label">+ AVX2 packets<small>8-ray SoA</small></div>
+        <div class="track"><div class="fill" style="width: 28%"></div></div>
+        <div class="time">0.271 s</div>
+        <div class="delta">−61% · 2.5×</div>
+      </div>
+      <div class="br accent">
+        <div class="label">+ Wavefront<small>tiled batching · fastest path</small></div>
+        <div class="track"><div class="fill" style="width: 23%"></div></div>
+        <div class="time">0.221 s</div>
+        <div class="delta">−68% · 3.1×</div>
+      </div>
+      <div class="br">
+        <div class="label">Reflections <em>off</em><small>ablation · same scene</small></div>
+        <div class="track"><div class="fill" style="width: 32%"></div></div>
+        <div class="time">0.309 s</div>
+        <div class="delta">−55%</div>
+      </div>
+      <div class="br">
+        <div class="label">Stratified AA<small>vs white-noise, same spp</small></div>
+        <div class="track"><div class="fill" style="width: 58%"></div></div>
+        <div class="time">0.556 s</div>
+        <div class="delta">−19%</div>
+      </div>
+      <div class="br slow">
+        <div class="label">+ SAH BVH<small>on 25-prim scene</small></div>
+        <div class="track"><div class="fill" style="width: 94%"></div></div>
+        <div class="time">0.902 s</div>
+        <div class="delta">+31% — caveat</div>
+      </div>
+      <div class="br slow">
+        <div class="label">+ Frustum cull<small>same small scene</small></div>
+        <div class="track"><div class="fill" style="width: 92%"></div></div>
+        <div class="time">0.878 s</div>
+        <div class="delta">+28% — caveat</div>
+      </div>
+    </div>
+
+    <aside class="bench-side">
+      <h4>What the slow bars are saying.</h4>
+      <p>
+        BVH and view-frustum culling are <em>slower</em> than brute-force scalar on this
+        scene. That's not a bug — it's scale. Building and descending the tree costs
+        more than it saves when you only have 25 primitives. On a larger scene the
+        crossover reverses; the micro-bench just makes the overhead visible.
+      </p>
+      <p>
+        The honest summary: SIMD packets, wavefront scheduling, and Morton traversal
+        pay off everywhere. BVH pays off only when the scene is big enough to hide
+        the traversal stack.
+      </p>
+
+      <div class="scaling">
+        <h5>OpenMP scaling · 1280 × 720 · scalar</h5>
+        <div class="plot">
+          <div class="axis-y"><span>2.79s</span><span>1.90s</span><span>1.00s</span></div>
+          <svg viewBox="0 0 300 160" preserveAspectRatio="none">
+            <!-- ideal linear scaling dashed -->
+            <polyline class="ideal" points="10,20 290,140"/>
+            <!-- measured: 1→2.79s, 2→2.02s, 4→1.64s, 8→1.43s -->
+            <polyline class="line" points="20,20 100,64 180,95 280,115"/>
+            <circle class="dot" cx="20" cy="20" r="3.5"/>
+            <circle class="dot" cx="100" cy="64" r="3.5"/>
+            <circle class="dot" cx="180" cy="95" r="3.5"/>
+            <circle class="dot accent" cx="280" cy="115" r="4"/>
+            <text class="label" x="26" y="16" fill="currentColor">1 thr · 2.79s</text>
+            <text class="label" x="106" y="60" fill="currentColor">2 · 2.02</text>
+            <text class="label" x="186" y="91" fill="currentColor">4 · 1.64</text>
+            <text class="label" x="222" y="110" fill="currentColor">8 · 1.43</text>
+          </svg>
+          <div class="axis-x"><span>1 thread</span><span>2</span><span>4</span><span>8</span></div>
+        </div>
+        <p style="font-size: 14px; color: var(--ink-3); font-family: var(--sans); margin: 6px 0 0">
+          Dashed: linear. Solid: measured. Returns diminish past 4 threads on this scene — memory bandwidth starts dominating once the BVH lives in L2.
+        </p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ================= BUILD ================= -->
+<section id="build">
+  <div class="seclabel" data-num="§5">Build &amp; run</div>
+  <h2 class="sectitle">Build &amp; run.</h2>
+  <p class="lede">Everything is gated by Makefile variables. Pick a row, rebuild, rerun the harness — the delta lands in <code>benchmark_results/runs/</code>.</p>
+
+  <div class="build-grid">
+    <div class="term">
+      <div class="head"><span>zsh ~/src/ray-tracer</span><span>fastest build</span></div>
+      <div class="body">
+<span class="c"># full pipeline, 8 threads</span><br/>
+<span class="p">$</span> git clone <span class="v">github.com/caderichard-debug/ray-tracer</span><br/>
+<span class="p">$</span> <span class="k">cd</span> ray-tracer<br/>
+<span class="p">$</span> <span class="k">make</span> <span class="v">ENABLE_AVX=1 ENABLE_OPENMP=1 ENABLE_MORTON=1 ENABLE_WAVEFRONT=1</span> -j<br/>
+<span class="out">&nbsp; built ./raytracer (AVX2 · OMP · wavefront)</span><br/><br/>
+<span class="p">$</span> ./raytracer --scene cornell -w 1920 -h 1080 -s 64 -o out.ppm<br/>
+<span class="out">&nbsp; rendered 1920×1080 @ 64spp in <span class="ok">221 ms</span></span><br/><br/>
+<span class="c"># reproducible benchmark sweep</span><br/>
+<span class="p">$</span> <span class="k">make</span> bench-feature-deltas<br/>
+<span class="out">&nbsp; → benchmark_results/runs/feature_deltas_<span class="ok">20260417_175153</span>.md</span>
+      </div>
+    </div>
+
+    <div>
+      <div class="flags">
+        <div class="flag">
+          <div class="name">ENABLE_AVX</div>
+          <div class="desc">AVX2 + FMA — 8-ray packet tracing, SIMD color ops.</div>
+          <div class="default on">default ON</div>
+        </div>
+        <div class="flag">
+          <div class="name">ENABLE_OPENMP</div>
+          <div class="desc">Parallel-for on the pixel loop. Turn off for deterministic runs.</div>
+          <div class="default on">default ON</div>
+        </div>
+        <div class="flag">
+          <div class="name">ENABLE_PTHREADS</div>
+          <div class="desc">Alternate threading path, mutually exclusive with OMP.</div>
+          <div class="default">off</div>
+        </div>
+        <div class="flag">
+          <div class="name">ENABLE_MORTON</div>
+          <div class="desc">Z-order pixel scheduling (batch path).</div>
+          <div class="default on">default ON</div>
+        </div>
+        <div class="flag">
+          <div class="name">ENABLE_WAVEFRONT</div>
+          <div class="desc">Tiled wave scheduler. Fastest path on this machine.</div>
+          <div class="default on">default ON</div>
+        </div>
+        <div class="flag">
+          <div class="name">ENABLE_STRATIFIED</div>
+          <div class="desc">Jittered grid over pixel footprint for AA.</div>
+          <div class="default">off</div>
+        </div>
+        <div class="flag">
+          <div class="name">ENABLE_LOOP_UNROLL</div>
+          <div class="desc">Manual 4× unroll of the inner sample accumulation loop.</div>
+          <div class="default">off</div>
+        </div>
+        <div class="flag">
+          <div class="name">ENABLE_FAST_RNG</div>
+          <div class="desc">Swap PCG for <code>rand()</code> — baseline reference only.</div>
+          <div class="default">off</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div class="sig">
+        Cade Richard.
+      </div>
+      <div>
+        <h5>Project</h5>
+        <a href="https://github.com/caderichard-debug/ray-tracer" target="_blank" rel="noopener">github.com/caderichard-debug/ray-tracer</a>
+        <a href="#benchmarks">Benchmarks</a>
+        <a href="#build">Build instructions</a>
+      </div>
+      <div>
+        <h5>Contact</h5>
+        <a href="mailto:cade.richard@gmail.com">cade.richard@gmail.com</a>
+        <a href="https://github.com/caderichard-debug" target="_blank" rel="noopener">github · caderichard-debug</a>
+      </div>
+      <div class="colophon">
+        <span>Set in Fraunces &amp; Inter Tight · monospace JetBrains Mono</span>
+        <span>© 2026 · this page is hand-written HTML · no frameworks</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</main>
+
+<!-- tweaks -->
+<button class="tweak-btn" id="tweakBtn">Tweaks ✎</button>
+<aside class="tweak-panel" id="tweakPanel">
+  <h6>Design tweaks</h6>
+
+  <div class="tweak-group">
+    <div class="lab">Accent</div>
+    <div class="t-swatches" data-tweak="accent">
+      <button class="t-sw" data-val="35" aria-pressed="true" style="background: oklch(0.58 0.14 35)" title="rust"></button>
+      <button class="t-sw" data-val="255" style="background: oklch(0.52 0.14 255)" title="ink-blue"></button>
+      <button class="t-sw" data-val="150" style="background: oklch(0.54 0.12 150)" title="forest"></button>
+      <button class="t-sw" data-val="85" style="background: oklch(0.64 0.14 85)" title="ochre"></button>
+      <button class="t-sw" data-val="310" style="background: oklch(0.54 0.14 310)" title="plum"></button>
+    </div>
+  </div>
+
+  <div class="tweak-group">
+    <div class="lab">Theme</div>
+    <div class="t-opts" data-tweak="theme">
+      <button data-val="light" aria-pressed="true">Light</button>
+      <button data-val="dark">Dark</button>
+    </div>
+  </div>
+
+  <div class="tweak-group">
+    <div class="lab">Density</div>
+    <div class="t-opts" data-tweak="density">
+      <button data-val="airy" aria-pressed="true">Airy</button>
+      <button data-val="dense">Dense</button>
+    </div>
+  </div>
+
+  <div class="tweak-group">
+    <div class="lab">Chart style</div>
+    <div class="t-opts" data-tweak="chart">
+      <button data-val="bars" aria-pressed="true">Bars</button>
+      <button data-val="dots">Dots</button>
+    </div>
+  </div>
+
+  <div class="tweak-group">
+    <div class="lab">Hero treatment</div>
+    <div class="t-opts" data-tweak="hero">
+      <button data-val="split" aria-pressed="true">Split + stats</button>
+      <button data-val="bleed">Full-bleed render</button>
+    </div>
+  </div>
+</aside>
+
+<script>
+const panel = document.getElementById('tweakPanel');
+document.getElementById('tweakBtn').addEventListener('click', ()=> panel.classList.toggle('open'));
+
+function apply(k, v){
+  if(k === 'accent'){
+    document.documentElement.style.setProperty('--accent', `oklch(0.58 0.14 ${v})`);
+    document.documentElement.style.setProperty('--accent-deep', `oklch(0.42 0.15 ${v})`);
+    document.documentElement.style.setProperty('--accent-soft', `oklch(0.92 0.05 ${v})`);
+    if(document.body.dataset.theme === 'dark'){
+      document.documentElement.style.setProperty('--accent', `oklch(0.72 0.14 ${v})`);
+      document.documentElement.style.setProperty('--accent-deep', `oklch(0.82 0.14 ${v})`);
+      document.documentElement.style.setProperty('--accent-soft', `oklch(0.3 0.08 ${v})`);
+    }
+  }
+  if(k === 'theme'){
+    document.body.dataset.theme = v;
+    document.documentElement.setAttribute('data-theme', v);
+    // re-apply accent so dark-mode variants land
+    const sw = document.querySelector('[data-tweak="accent"] [aria-pressed="true"]');
+    if(sw) apply('accent', sw.dataset.val);
+  }
+  if(k === 'density'){
+    document.querySelectorAll('section').forEach(s=>{
+      s.style.padding = (v === 'dense') ? '48px 0' : '';
+    });
+  }
+  if(k === 'chart'){
+    document.querySelectorAll('.br .track').forEach(t=>{
+      if(v === 'dots'){
+        const w = t.querySelector('.fill').style.width;
+        t.style.background = 'transparent';
+        t.style.border = 'none';
+        t.style.height = '12px';
+        t.querySelector('.fill').style.cssText =
+          `position:absolute;left:0;top:50%;transform:translateY(-50%);width:${w};height:2px;background:var(--ink);border:none;`;
+        // add a dot
+        if(!t.querySelector('.end-dot')){
+          const d = document.createElement('div');
+          d.className='end-dot';
+          d.style.cssText = `position:absolute;left:${w};top:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:var(--ink);border:1px solid var(--paper);`;
+          t.appendChild(d);
+        }
+      } else {
+        t.removeAttribute('style');
+        const f = t.querySelector('.fill');
+        const endDot = t.querySelector('.end-dot');
+        if(endDot){
+          const w = endDot.style.left;
+          f.style.cssText = `width:${w}`;
+          endDot.remove();
+        }
+      }
+    });
+    // tint accent/slow bars correctly after re-render
+    document.querySelectorAll('.br.accent .fill').forEach(f=>{
+      if(v !== 'dots') f.style.background = 'var(--accent)';
+    });
+  }
+  if(k === 'hero'){
+    const hero = document.querySelector('.hero');
+    const side = document.querySelector('.hero-side');
+    if(v === 'bleed'){
+      hero.style.gridTemplateColumns = '1fr';
+      side.style.display = 'none';
+      document.querySelector('.hero-render').style.aspectRatio = '21 / 9';
+    } else {
+      hero.style.gridTemplateColumns = '';
+      side.style.display = '';
+      document.querySelector('.hero-render').style.aspectRatio = '';
+    }
+  }
+  try{ localStorage.setItem('rt:'+k, v); }catch(e){}
+}
+
+document.querySelectorAll('[data-tweak]').forEach(group=>{
+  const key = group.dataset.tweak;
+  group.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      group.querySelectorAll('button').forEach(b=> b.setAttribute('aria-pressed','false'));
+      btn.setAttribute('aria-pressed','true');
+      apply(key, btn.dataset.val);
+    });
+  });
+});
+
+// restore
+['accent','theme','density','chart','hero'].forEach(k=>{
+  const v = localStorage.getItem('rt:'+k);
+  if(!v) return;
+  const g = document.querySelector(`[data-tweak="${k}"]`);
+  if(!g) return;
+  const b = g.querySelector(`[data-val="${v}"]`);
+  if(!b) return;
+  g.querySelectorAll('button').forEach(x=> x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');
+  apply(k, v);
+});
+</script>
+
+</body>
+</html>

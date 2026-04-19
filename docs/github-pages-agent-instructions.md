@@ -37,13 +37,21 @@ Non-goals for v1:
 2. Put the generated site under `docs/` (e.g., `docs/index.html` + `docs/assets/...`).
 3. Commit to `main` and verify Pages build logs.
 
+**Shipped in this repo:** `docs/.nojekyll` (plain static HTML, no Jekyll), `docs/index.html` + `features.html`, `build.html`, `roadmap.html`, `community.html`, `docs/assets/css/showcase.css`, and Cornell box PNGs under `docs/assets/gallery/` (copies of `readme-examples/` for self-contained deploy). The older Jekyll-oriented `docs/index.md` implementation guide remains; GitHub serves `index.html` at the site root when both exist.
+
 **Pros:** no extra branch. **Cons:** mixes site sources with repo docs unless you namespace carefully (e.g., `docs/site/`).
 
-### Option B — GitHub Actions → `gh-pages` branch (common for static generators)
+### Option B — GitHub Actions (recommended for the Next.js showcase)
 
-1. Add `.github/workflows/pages.yml` that builds a static site and deploys with `actions/upload-pages-artifact` + `actions/deploy-pages`.
-2. Configure repo Pages settings: **GitHub Actions** as source.
-3. Keep generated output **out of `main`** (recommended).
+1. Workflow **`.github/workflows/showcase-pages.yml`** builds `showcase/` with `STATIC_EXPORT=1`, `NEXT_PUBLIC_BASE_PATH=/ray-tracer`, and `NEXT_PUBLIC_SITE_URL=https://caderichard-debug.github.io/ray-tracer`, then deploys the `showcase/out` artifact via `actions/upload-pages-artifact` + `actions/deploy-pages`.
+2. Configure repo Pages settings: **GitHub Actions** as source (not `/docs` on `main`, unless you intentionally keep the legacy HTML).
+3. Source stays in `showcase/`; generated output never needs to be committed to `main`.
+
+**Pros:** modern site (filters, modal, SEO metadata), no duplicate PNGs in `docs/`. **Cons:** requires Node in CI and Pages permissions.
+
+### Option B2 — GitHub Actions → `gh-pages` branch (generic static generators)
+
+Same pattern as Option B but target a `gh-pages` branch if you prefer that model over the built-in GitHub Pages artifact flow.
 
 **Pros:** clean separation. **Cons:** more YAML + permissions setup.
 

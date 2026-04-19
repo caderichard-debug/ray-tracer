@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://caderichard-debug.github.io/ray-tracer/sitemap.xml

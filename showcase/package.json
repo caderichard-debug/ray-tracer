@@ -1,0 +1,31 @@
+{
+  "name": "showcase",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "build:static": "STATIC_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/ray-tracer NEXT_PUBLIC_SITE_URL=https://caderichard-debug.github.io/ray-tracer next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.5.15",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^15.5.15",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

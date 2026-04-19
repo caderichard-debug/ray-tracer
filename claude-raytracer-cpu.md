@@ -22,6 +22,12 @@ High-performance CPU ray tracer with AVX2 SIMD vectorization and OpenMP multi-th
 - ✅ Live luminance histogram overlay (G), camera hot-reload file (F5 / RT_HOT_RELOAD_POLL)
   - **Hot reload:** Edit `config/camera_hot_reload.txt` (copy from `config/camera_hot_reload.txt.example`) or set `RT_HOT_RELOAD_CAMERA` to a file path. Required keys: `eye` (or `lookfrom`) and `at` (or `lookat`); optional `up`/`vup`, `vfov`, `aperture`, `focus`/`dist_to_focus`. Press **F5** to reload from disk. Set **`RT_HOT_RELOAD_POLL`** (any value) to watch mtime and reload automatically about every 90 frames.
 
+### Public site (GitHub Pages / Vercel)
+- **Primary:** Next.js **project showcase** in `showcase/` (`npm run dev` / `npm run build`) — copy and IA are **ray-tracer-first**, not a personal portfolio shell. Deploy on **Vercel** with root `showcase/`, or on **GitHub Pages** via `.github/workflows/showcase-pages.yml` (static export, `basePath=/ray-tracer`). See `showcase/README.md`.
+- **Design export:** `showcase/public/Ray Tracer.html` — Claude Design handoff (sync from `poject-showcase/project/Ray Tracer.html`). **`/`** loads it in a full-viewport iframe; direct URL **`/Ray%20Tracer.html`** also works.
+- **Render.com:** repo-root `render.yaml` deploys `showcase/` as a Node web service; see `showcase/README.md`.
+- **Legacy:** static HTML still under `docs/` (`index.html` + siblings) if Pages is left on **branch `main` / folder `/docs`**; prefer migrating to the workflow above.
+
 ### Regression / batch
 - `make regression-test` (deterministic PPM SHA-256; see tests/regression/)
 - Batch: `--deterministic`, `--fixed-ppm`, `ENABLE_OPENMP=0` via Makefile for stable output

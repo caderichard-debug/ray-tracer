@@ -19,6 +19,7 @@ A high-performance **CPU-first** ray tracer in C++ (AVX2 + OpenMP) with an SDL2 
 - ✅ **ASCII Renderer**: Cross-platform terminal rendering
 - ✅ **Build System**: Unified Makefile with feature flags (`ENABLE_OPENMP=0/1` controls OpenMP linkage for deterministic batch)
 - ✅ **Documentation**: README + agent `claude-*.md` + this file; `docs/path-tracing-plan.md` for roadmap notes
+- ✅ **Showcase website**: Next.js + TypeScript + Tailwind in `showcase/`. **`/`** is a full-viewport iframe of **`showcase/public/Ray Tracer.html`** (Claude Design editorial handoff; sync from `poject-showcase/project/Ray Tracer.html`). Same file also at **`/Ray%20Tracer.html`**. Legacy React sections remain in `src/components/` for reference but are not mounted on home. **Render.com:** Blueprint `render.yaml` at repo root (`rootDir: showcase`); set `NEXT_PUBLIC_SITE_URL` after deploy. **Vercel:** set project root to `showcase/`. **GitHub Pages:** use `.github/workflows/showcase-pages.yml` (static export, `basePath=/ray-tracer`) with Pages source **GitHub Actions**. Legacy static HTML remains under `docs/` until you retire it. Handoff: `docs/github-pages-agent-instructions.md`, `showcase/README.md`
 
 ## Architecture Overview
 

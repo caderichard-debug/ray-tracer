@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIMD Ray Tracer — CPU-first path tracing playground</title>
+  <meta name="description" content="High-performance CPU ray tracer in C++ with AVX2, OpenMP, SDL2 interactive mode, batch rendering, and ASCII output.">
+  <link rel="stylesheet" href="assets/css/showcase.css">
+</head>
+<body>
+  <div class="layout-footer-at-bottom">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <div class="brand"><a href="index.html">SIMD Ray Tracer</a></div>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html" aria-current="page">Home</a>
+          <a href="features.html">Features</a>
+          <a href="build.html">Build &amp; run</a>
+          <a href="roadmap.html">Roadmap</a>
+          <a href="community.html">Community</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <h1>CPU-first SIMD ray tracer</h1>
+        <p class="tagline">A from-scratch C++ path built around AVX2 and OpenMP, with a real-time SDL2 interactive mode, high-quality batch output, and a retro ASCII renderer.</p>
+        <div class="cta-row">
+          <a class="btn btn--primary" href="build.html">Build &amp; run</a>
+          <a class="btn btn--ghost" href="https://github.com/caderichard-debug/ray-tracer">Source on GitHub</a>
+        </div>
+      </section>
+
+      <aside class="banner-wip" role="note">
+        <strong>GPU mode is work in progress.</strong> This project is documented and optimized around the CPU renderer; treat the OpenGL path as experimental until parity and benchmarks are stable.
+      </aside>
+
+      <h2>Cornell box (CPU batch)</h2>
+      <p>Phong shading, hard shadows, and reflections—same scene family as the interactive SDL view, rendered offline for comparison.</p>
+
+      <div class="gallery">
+        <figure>
+          <img src="assets/gallery/cornell-box-cpu-scanline.png" width="640" height="360" alt="Cornell box rendered with CPU batch scanline order at 640 by 360, 2 samples per pixel">
+          <figcaption>Scanline traversal · 640×360 · 2 spp</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gallery/cornell-box-cpu-morton.png" width="640" height="360" alt="Cornell box rendered with CPU batch Morton Z-order traversal at 640 by 360, 2 samples per pixel">
+          <figcaption>Morton Z-order · 640×360 · 2 spp</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gallery/cornell-box-cpu-batch-800.png" width="1920" height="1080" alt="Cornell box high-resolution CPU batch render at 1920 by 1080 with 256 samples per pixel and depth 10">
+          <figcaption>Higher-resolution batch · 1920×1080 · 256 spp</figcaption>
+        </figure>
+      </div>
+
+      <h2>Why this exists</h2>
+      <p>The codebase is a learning and performance lab: SIMD-friendly shading, optional progressive and adaptive sampling, wavefront tiling, post denoise controls in interactive mode, and a deterministic regression harness for batch output.</p>
+      <p><a href="features.html">Explore features</a> · <a href="https://github.com/caderichard-debug/ray-tracer/blob/main/README.md">Full README on GitHub</a></p>
+    </main>
+
+    <footer class="site-footer">
+      <p>Open source under the project license · <a href="https://github.com/caderichard-debug/ray-tracer">caderichard-debug/ray-tracer</a></p>
+    </footer>
+  </div>
+</body>
+</html>

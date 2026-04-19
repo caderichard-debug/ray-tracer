@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Build &amp; run — SIMD Ray Tracer</title>
+  <meta name="description" content="Install SDL2 and a C++ toolchain, then make interactive-cpu or batch-cpu. Regression test target.">
+  <link rel="stylesheet" href="assets/css/showcase.css">
+</head>
+<body>
+  <div class="layout-footer-at-bottom">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <div class="brand"><a href="index.html">SIMD Ray Tracer</a></div>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">Home</a>
+          <a href="features.html">Features</a>
+          <a href="build.html" aria-current="page">Build &amp; run</a>
+          <a href="roadmap.html">Roadmap</a>
+          <a href="community.html">Community</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <h1>Build &amp; run</h1>
+      <p>Minimal steps copied from the repository README. See <a href="https://github.com/caderichard-debug/ray-tracer/blob/main/README.md">README.md</a> for the full control reference and platform notes.</p>
+
+      <h2>Prerequisites</h2>
+      <h3>macOS (Homebrew)</h3>
+      <pre><code>brew install gcc sdl2 sdl2_ttf</code></pre>
+
+      <h3>Ubuntu / Debian</h3>
+      <pre><code>sudo apt update
+sudo apt install build-essential libsdl2-dev libsdl2-ttf-dev libomp-dev</code></pre>
+
+      <h3>Windows (MSYS2)</h3>
+      <pre><code>pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf</code></pre>
+
+      <h2>Build &amp; run targets</h2>
+      <pre><code># CPU batch (feature flags via Makefile)
+make batch-cpu
+make run
+
+# CPU interactive (recommended first run)
+make interactive-cpu
+make runi-cpu
+
+# ASCII terminal
+make ascii
+make runa</code></pre>
+      <p><code>make interactive</code> and <code>make runi</code> are aliases for the CPU interactive targets.</p>
+
+      <h2>Regression check</h2>
+      <p>Deterministic batch output is hashed against golden PPMS in <code>tests/regression/</code>:</p>
+      <pre><code>make regression-test</code></pre>
+
+      <h2>First launch tip</h2>
+      <p>When the interactive binary starts, press <strong>H</strong> for the on-screen help overlay covering movement, quality keys, analysis modes, and screenshot shortcuts.</p>
+
+      <p><a href="features.html">Features</a> · <a href="index.html">Home</a></p>
+    </main>
+
+    <footer class="site-footer">
+      <p><a href="https://github.com/caderichard-debug/ray-tracer">Repository</a></p>
+    </footer>
+  </div>
+</body>
+</html>

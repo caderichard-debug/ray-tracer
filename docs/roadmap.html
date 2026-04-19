@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roadmap — SIMD Ray Tracer</title>
+  <meta name="description" content="GPU work in progress, optional path tracing integrator, and stability goals.">
+  <link rel="stylesheet" href="assets/css/showcase.css">
+</head>
+<body>
+  <div class="layout-footer-at-bottom">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <div class="brand"><a href="index.html">SIMD Ray Tracer</a></div>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html">Home</a>
+          <a href="features.html">Features</a>
+          <a href="build.html">Build &amp; run</a>
+          <a href="roadmap.html" aria-current="page">Roadmap</a>
+          <a href="community.html">Community</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <h1>Roadmap</h1>
+      <p>Where effort is going next, in plain language. Nothing here is a release promise—check <code>main</code> and issues for ground truth.</p>
+
+      <h2>GPU renderer</h2>
+      <aside class="banner-wip" role="note">
+        <strong>WIP.</strong> Treat the OpenGL interactive path as experimental: build coverage, feature parity with CPU, and trustworthy benchmarks are still open problems.
+      </aside>
+      <p>“Done” for the GPU track likely means: reproducible builds in CI, a documented feature matrix vs CPU, and measured throughput numbers that anyone can re-run from clean checkout.</p>
+
+      <h2>Optional path tracing</h2>
+      <p>Design notes for a toggleable global illumination integrator—NEE for small light sets, Russian roulette, MIS hooks, HDR accumulation—live in the repository:</p>
+      <p><a href="https://github.com/caderichard-debug/ray-tracer/blob/main/docs/path-tracing-plan.md">docs/path-tracing-plan.md</a></p>
+
+      <h2>CPU quality &amp; tooling</h2>
+      <ul>
+        <li>Keep regression hashes meaningful as shading changes land.</li>
+        <li>Continue tightening interactive UX (analysis modes, denoise controls, diagnostics) without regressing hot paths.</li>
+      </ul>
+
+      <p><a href="community.html">Community</a> · <a href="index.html">Home</a></p>
+    </main>
+
+    <footer class="site-footer">
+      <p><a href="https://github.com/caderichard-debug/ray-tracer/issues">Issues</a></p>
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy the Next.js showcase (editorial home + static Ray Tracer.html).
+# After the first deploy, set NEXT_PUBLIC_SITE_URL in the dashboard to your
+# service URL (e.g. https://ray-tracer-showcase.onrender.com) for correct metadata.
+
+services:
+  - type: web
+    name: ray-tracer-showcase
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: showcase
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20.18.1"
+      - key: NODE_ENV
+        value: production
+      # Set in dashboard to your *.onrender.com URL (or custom domain) after creation:
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
