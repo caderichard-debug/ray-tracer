@@ -13,6 +13,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <thread>
@@ -325,9 +326,10 @@ private:
 
 public:
     HelpOverlay() : font(nullptr), title_font(nullptr), initialized(false) {
-        text_color = {20, 20, 20, 255};        // Dark text for light background
-        background_color = {200, 200, 200, 180}; // Light gray transparent
-        title_color = {200, 50, 50, 255};        // Dark red titles
+        // Match controls panel: dark translucent chrome + light text + cyan title
+        text_color = {210, 215, 225, 255};
+        background_color = {50, 55, 65, 230};
+        title_color = {100, 200, 255, 255};
     }
 
     bool init() {
@@ -349,13 +351,12 @@ public:
         };
 
         for (int i = 0; font_paths[i] != nullptr; ++i) {
-            font = TTF_OpenFont(font_paths[i], 13);  // Smaller font
+            font = TTF_OpenFont(font_paths[i], 14);  // Match controls panel body
             if (font) break;
         }
 
-        // Try same fonts for title (larger)
         for (int i = 0; font_paths[i] != nullptr; ++i) {
-            title_font = TTF_OpenFont(font_paths[i], 18);  // Smaller title font
+            title_font = TTF_OpenFont(font_paths[i], 16);  // Match controls panel title
             if (title_font) break;
         }
 
@@ -368,58 +369,80 @@ public:
         return true;
     }
 
+    bool has_overlay_fonts() const {
+        return initialized && font && title_font;
+    }
+    TTF_Font* overlay_body_font() const {
+        return font;
+    }
+    TTF_Font* overlay_title_font() const {
+        return title_font;
+    }
+
     void render(SDL_Renderer* renderer, int window_width, int window_height) {
         if (!initialized || !font || !title_font) return;
 
-        // Create smaller semi-transparent background
-        SDL_Rect overlay_rect = {
-            (window_width - 460) / 2,
-            (window_height - 340) / 2,
-            460,
-            340
-        };
-
-        SDL_Surface* surface = SDL_CreateRGBSurface(0, overlay_rect.w, overlay_rect.h, 32, 0, 0, 0, 0);
-        if (!surface) return;
-
-        // Fill background
-        SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 200, 200, 200, 180));
-
-        // Render title
         const char* title_text = "HELP";
-        SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
-        if (title_surface) {
-            SDL_Rect title_rect = {(460 - title_surface->w) / 2, 12, title_surface->w, title_surface->h};
-            SDL_BlitSurface(title_surface, nullptr, surface, &title_rect);
-            SDL_FreeSurface(title_surface);
-        }
-
-        // Render controls text (condensed)
         const char* controls_text[] = {
             "Click window to capture mouse for looking around",
             "MOVE: WASD + Arrows | LOOK: Mouse",
             "1-6: Quality | M: Analysis | SPACE: Pause",
-            "G: Luma histogram | F5: Reload camera file (RT_HOT_RELOAD_CAMERA)",
+            "G: Diagnostics (histogram + stats) | F5: Reload camera file (RT_HOT_RELOAD_CAMERA)",
             "S: Window screenshot (no UI) | C: Controls Panel | H: Help | ESC: Quit"
         };
+        const char* footer = "Press H to close";
 
-        int y_offset = 50;
+        auto text_pixel_width = [](TTF_Font* f, const char* s) -> int {
+            int w = 0, h = 0;
+            if (!s || TTF_SizeText(f, s, &w, &h) != 0)
+                return 0;
+            return w;
+        };
+
+        int max_line_w = text_pixel_width(title_font, title_text);
+        for (size_t i = 0; i < sizeof(controls_text) / sizeof(controls_text[0]); ++i) {
+            max_line_w = std::max(max_line_w, text_pixel_width(font, controls_text[i]));
+        }
+        max_line_w = std::max(max_line_w, text_pixel_width(font, footer));
+
+        const int horizontal_pad = 48;
+        const int help_w = std::max(100, std::min(window_width - 40, max_line_w + horizontal_pad));
+        const int help_h = 400;
+
+        SDL_Rect overlay_rect = {(window_width - help_w) / 2, (window_height - help_h) / 2, help_w, help_h};
+
+        SDL_Surface* surface =
+            SDL_CreateRGBSurfaceWithFormat(0, overlay_rect.w, overlay_rect.h, 32, SDL_PIXELFORMAT_RGBA8888);
+        if (!surface) return;
+
+        SDL_FillRect(surface, nullptr, SDL_MapRGBA(surface->format, 50, 55, 65, 230));
+        SDL_Rect help_sep = {10, 34, help_w - 20, 1};
+        SDL_FillRect(surface, &help_sep, SDL_MapRGBA(surface->format, 100, 100, 120, 200));
+
+        // Render title (left-aligned like settings)
+        SDL_Surface* title_surface = TTF_RenderText_Blended(title_font, title_text, title_color);
+        if (title_surface) {
+            SDL_Rect title_rect = {15, 10, title_surface->w, title_surface->h};
+            SDL_BlitSurface(title_surface, nullptr, surface, &title_rect);
+            SDL_FreeSurface(title_surface);
+        }
+
+        int y_offset = 48;
+        const int line_skip = 28;
         for (size_t i = 0; i < sizeof(controls_text) / sizeof(controls_text[0]); ++i) {
             SDL_Surface* text_surface = TTF_RenderText_Blended(font, controls_text[i], text_color);
 
             if (text_surface) {
-                SDL_Rect text_rect = {(460 - text_surface->w) / 2, y_offset, text_surface->w, text_surface->h};
+                SDL_Rect text_rect = {15, y_offset, text_surface->w, text_surface->h};
                 SDL_BlitSurface(text_surface, nullptr, surface, &text_rect);
                 SDL_FreeSurface(text_surface);
             }
-            y_offset += 40;  // More compact spacing
+            y_offset += line_skip;
         }
 
-        // Add footer
-        const char* footer = "Press H to close";
         SDL_Surface* footer_surface = TTF_RenderText_Blended(font, footer, text_color);
         if (footer_surface) {
-            SDL_Rect footer_rect = {(460 - footer_surface->w) / 2, 280, footer_surface->w, footer_surface->h};
+            SDL_Rect footer_rect = {15, help_h - footer_surface->h - 14, footer_surface->w, footer_surface->h};
             SDL_BlitSurface(footer_surface, nullptr, surface, &footer_rect);
             SDL_FreeSurface(footer_surface);
         }
@@ -584,6 +607,16 @@ public:
 
         initialized = true;
         return true;
+    }
+
+    bool has_overlay_fonts() const {
+        return initialized && font && title_font;
+    }
+    TTF_Font* overlay_body_font() const {
+        return font;
+    }
+    TTF_Font* overlay_title_font() const {
+        return title_font;
     }
 
     bool point_is_over_panel(int mouse_x, int mouse_y, int window_width, int window_height) const {
@@ -2002,33 +2035,287 @@ static void apply_rgb24_denoise_pipeline(std::vector<unsigned char>& rgb, int w,
     }
 }
 
-// Live luminance histogram (64 bins) — bottom-left overlay.
-static void render_luminance_histogram_overlay(SDL_Renderer* renderer, const uint32_t bins64[64], int window_width,
-                                               int window_height) {
+static void diagnostics_blit_line(SDL_Surface* dst, TTF_Font* f, const char* txt, SDL_Color c, int x, int y) {
+    if (!dst || !f || !txt) return;
+    SDL_Surface* s = TTF_RenderText_Blended(f, txt, c);
+    if (!s) return;
+    SDL_Rect r = {x, y, s->w, s->h};
+    SDL_BlitSurface(s, nullptr, dst, &r);
+    SDL_FreeSurface(s);
+}
+
+static constexpr int kCpuDiagProfileN = 96;
+
+static void diag_draw_hist_64(SDL_Surface* card, int x0, int y0, int plot_w, int plot_h, const uint32_t bins[64],
+                                Uint8 R, Uint8 G, Uint8 B) {
+    if (!card || plot_w < 4 || plot_h < 2) return;
     uint32_t mx = 1u;
     for (int i = 0; i < 64; ++i) {
-        mx = std::max(mx, bins64[i]);
+        mx = std::max(mx, bins[i]);
     }
-    const int pad = 10;
-    const int bar_total_w = 192;
-    const int h_max = 56;
-    const int base_x = pad;
-    const int base_y = window_height - pad - h_max;
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_Rect backdrop = {base_x - 4, base_y - 18, bar_total_w + 8, h_max + 26};
-    SDL_SetRenderDrawColor(renderer, 20, 20, 30, 160);
-    SDL_RenderFillRect(renderer, &backdrop);
+    SDL_Rect back = {x0 - 2, y0 - 1, plot_w + 4, plot_h + 2};
+    SDL_FillRect(card, &back, SDL_MapRGBA(card->format, 22, 25, 32, 210));
+    for (int i = 0; i < 64; ++i) {
+        const int bh = static_cast<int>((static_cast<uint64_t>(bins[i]) * static_cast<uint64_t>(plot_h)) /
+                                         static_cast<uint64_t>(mx));
+        const int bx = x0 + (i * plot_w) / 64;
+        const int bw = std::max(1, plot_w / 64 - 1);
+        SDL_Rect bar = {bx, y0 + plot_h - bh, bw, std::max(1, bh)};
+        SDL_FillRect(card, &bar, SDL_MapRGBA(card->format, R, G, B, 225));
+    }
+}
+
+static void diag_draw_sparkline(SDL_Surface* card, int x0, int y0, int plot_w, int plot_h, const float* v, int n,
+                                Uint8 R, Uint8 G, Uint8 B) {
+    if (!card || !v || n < 1 || plot_w < 4 || plot_h < 2) return;
+    float mn = v[0];
+    float mx = v[0];
+    for (int i = 1; i < n; ++i) {
+        mn = std::min(mn, v[i]);
+        mx = std::max(mx, v[i]);
+    }
+    if (mx <= mn + 1e-7f) {
+        mx = mn + 1e-3f;
+    }
+    SDL_Rect back = {x0 - 2, y0 - 1, plot_w + 4, plot_h + 2};
+    SDL_FillRect(card, &back, SDL_MapRGBA(card->format, 22, 25, 32, 210));
+    const int bar_w = std::max(1, plot_w / n);
+    for (int i = 0; i < n; ++i) {
+        const float t = (v[i] - mn) / (mx - mn);
+        const int bh = std::max(1, static_cast<int>(t * static_cast<float>(plot_h - 1)));
+        int bx = x0;
+        if (n > 1) {
+            bx = x0 + static_cast<int>((static_cast<long long>(i) * static_cast<long long>(plot_w - bar_w)) /
+                                       static_cast<long long>(n - 1));
+        }
+        bx = std::min(bx, x0 + plot_w - bar_w);
+        SDL_Rect bar = {bx, y0 + plot_h - bh, bar_w, bh};
+        SDL_FillRect(card, &bar, SDL_MapRGBA(card->format, R, G, B, 218));
+    }
+}
+
+static void diag_plot_line(SDL_Surface* card, int x0, int y0, int x1, int y1, Uint8 R, Uint8 G, Uint8 B) {
+    if (!card) return;
+    if (x0 == x1 && y0 == y1) {
+        SDL_Rect p = {x0, y0, 2, 2};
+        SDL_FillRect(card, &p, SDL_MapRGBA(card->format, R, G, B, 245));
+        return;
+    }
+    int dx = std::abs(x1 - x0);
+    int dy = std::abs(y1 - y0);
+    const int sx = (x0 < x1) ? 1 : -1;
+    const int sy = (y0 < y1) ? 1 : -1;
+    int err = dx - dy;
+    int x = x0;
+    int y = y0;
+    for (;;) {
+        SDL_Rect p = {x, y, 2, 2};
+        SDL_FillRect(card, &p, SDL_MapRGBA(card->format, R, G, B, 245));
+        if (x == x1 && y == y1) {
+            break;
+        }
+        const int e2 = 2 * err;
+        if (e2 > -dy) {
+            err -= dy;
+            x += sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            y += sy;
+        }
+    }
+}
+
+// Cumulative luminance distribution from histogram (0..1 vs bin). No extra framebuffer pass.
+static void diag_draw_luma_cdf(SDL_Surface* card, int x0, int y0, int plot_w, int plot_h, const uint32_t bins[64],
+                               uint64_t total) {
+    if (!card || plot_w < 8 || plot_h < 6 || total == 0ull) return;
+    SDL_Rect back = {x0 - 2, y0 - 1, plot_w + 4, plot_h + 2};
+    SDL_FillRect(card, &back, SDL_MapRGBA(card->format, 22, 25, 32, 210));
+    // Reference: 50% and 90% cumulative (exposure / rolloff at a glance)
+    const int y50 = y0 + plot_h - 2 - static_cast<int>(0.5f * static_cast<float>(plot_h - 4));
+    const int y90 = y0 + plot_h - 2 - static_cast<int>(0.9f * static_cast<float>(plot_h - 4));
+    SDL_Rect ref50 = {x0, y50, plot_w, 1};
+    SDL_Rect ref90 = {x0, y90, plot_w, 1};
+    SDL_FillRect(card, &ref50, SDL_MapRGBA(card->format, 80, 90, 110, 120));
+    SDL_FillRect(card, &ref90, SDL_MapRGBA(card->format, 80, 90, 110, 90));
+
+    uint64_t cum = 0ull;
+    int px[64];
+    int py[64];
+    for (int i = 0; i < 64; ++i) {
+        cum += bins[i];
+        const float f = static_cast<float>(static_cast<double>(cum) / static_cast<double>(total));
+        px[i] = x0 + (plot_w - 1) * i / 63;
+        py[i] = y0 + plot_h - 2 - static_cast<int>(f * static_cast<float>(plot_h - 4));
+    }
+    for (int i = 0; i < 63; ++i) {
+        diag_plot_line(card, px[i], py[i], px[i + 1], py[i + 1], 255, 220, 140);
+    }
+}
+
+// Bottom-left diagnostics card: stats + luma / RGB histograms + row/column mean-luma profiles.
+static void render_diagnostics_g_overlay(SDL_Renderer* renderer, TTF_Font* title_f, TTF_Font* body_f,
+                                         const uint32_t bins64[64], const uint32_t r64[64], const uint32_t g64[64],
+                                         const uint32_t b64[64], const float row_luma[kCpuDiagProfileN],
+                                         const float col_luma[kCpuDiagProfileN], int window_width, int window_height,
+                                         int img_w, int img_h, int samples_per_pixel, int max_depth, float fps,
+                                         double last_cpu_sec, const char* analysis_name, float mean_r, float mean_g,
+                                         float mean_b, float mean_l, float min_l, float max_l, const char* path_summary,
+                                         bool paused) {
+    uint32_t mx = 1u;
+    uint64_t total_px = 0ull;
+    for (int i = 0; i < 64; ++i) {
+        mx = std::max(mx, bins64[i]);
+        total_px += bins64[i];
+    }
+
+    const int bar_total_w = 220;
+    const int h_max = 52;
+    const int margin = 12;
+    const int text_left = 14;
+    const int line_h = 18;
+    const int title_y = 8;
+    const int body0_y = 32;
+    const int hist_top_pad = 6;
+    const int rgb_hist_h = 18;
+    const int rgb_gap = 3;
+    const int spark_plot_h = 22;
+    const int cdf_plot_h = 28;
+    const bool show_graph_labels = (title_f != nullptr && body_f != nullptr);
+    const int luma_caption_h = show_graph_labels ? 14 : 0;
+    // Clear gap so the luma label is not covered by hist_back (y0−2) or the top bars.
+    const int luma_caption_gap = show_graph_labels ? 8 : 0;
+    const int luma_caption_block = luma_caption_h + luma_caption_gap;
+    const int cdf_caption_h = show_graph_labels ? 14 : 0;
+    const int rgb_caption_h = show_graph_labels ? 14 : 0;
+    const int spark_caption_block =
+        show_graph_labels ? (14 + spark_plot_h + 8 + 14 + spark_plot_h) : (spark_plot_h + 10 + spark_plot_h);
+    const int top_and_luma_hist = 4 + luma_caption_block + h_max + 10;
+    const int cdf_block = cdf_caption_h + cdf_plot_h + 8;
+    const int rgb_block = rgb_caption_h + (rgb_hist_h * 3 + rgb_gap * 2) + 8;
+    const int graphs_block_h = top_and_luma_hist + cdf_block + rgb_block + spark_caption_block + 12;
+
+    char line0[160], line1[160], line2[160], line3[160], line4[160], line5[160], line6[192];
+    snprintf(line0, sizeof(line0), "%dx%d  |  %d spp  |  depth %d", img_w, img_h, samples_per_pixel, max_depth);
+    snprintf(line1, sizeof(line1), "%.1f FPS  |  last CPU frame %.3f s", fps, last_cpu_sec);
+    snprintf(line2, sizeof(line2), "Analysis: %s", analysis_name && analysis_name[0] ? analysis_name : "—");
+    snprintf(line3, sizeof(line3), "Luma  mean %.4f   min %.4f   max %.4f", mean_l, min_l, max_l);
+    snprintf(line4, sizeof(line4), "RGB mean  %.0f  %.0f  %.0f  (0-255)", mean_r, mean_g, mean_b);
+    snprintf(line5, sizeof(line5), "Histogram: %llu px (64 bins)  |  OMP %d threads",
+             static_cast<unsigned long long>(total_px), std::max(1, omp_get_max_threads()));
+    snprintf(line6, sizeof(line6), "Paths: %s  |  %s", path_summary && path_summary[0] ? path_summary : "—",
+             paused ? "PAUSED" : "live");
+
+    int max_tw = bar_total_w + text_left * 2;
+    if (title_f && body_f) {
+        auto tw = [&](TTF_Font* ff, const char* s) {
+            int w = 0, h = 0;
+            if (!s || TTF_SizeText(ff, s, &w, &h) != 0) return 0;
+            return w;
+        };
+        max_tw = std::max(max_tw, tw(title_f, "DIAGNOSTICS"));
+        max_tw = std::max(max_tw, tw(body_f, line0));
+        max_tw = std::max(max_tw, tw(body_f, line1));
+        max_tw = std::max(max_tw, tw(body_f, line2));
+        max_tw = std::max(max_tw, tw(body_f, line3));
+        max_tw = std::max(max_tw, tw(body_f, line4));
+        max_tw = std::max(max_tw, tw(body_f, line5));
+        max_tw = std::max(max_tw, tw(body_f, line6));
+        max_tw = std::max(max_tw, tw(body_f, "Luminance (64 bins)"));
+        max_tw = std::max(max_tw, tw(body_f, "Luma CDF (cumulative fraction)"));
+        max_tw = std::max(max_tw, tw(body_f, "RGB (64 bins / channel)"));
+        max_tw = std::max(max_tw, tw(body_f, "Mean luma vs row (Y)"));
+        max_tw = std::max(max_tw, tw(body_f, "Mean luma vs column (X)"));
+    }
+
+    const int card_w = std::max(100, std::min(window_width - 2 * margin, max_tw + text_left + 10));
+    const int text_block_h = body0_y + 7 * line_h + hist_top_pad;
+    const int card_h = text_block_h + graphs_block_h;
+    const int card_x = margin;
+    const int card_y = std::max(margin, window_height - card_h - margin);
+
+    SDL_Surface* card =
+        SDL_CreateRGBSurfaceWithFormat(0, card_w, card_h, 32, SDL_PIXELFORMAT_RGBA8888);
+    if (!card) return;
+
+    SDL_FillRect(card, nullptr, SDL_MapRGBA(card->format, 50, 55, 65, 230));
+    SDL_Rect sep = {10, 28, card_w - 20, 1};
+    SDL_FillRect(card, &sep, SDL_MapRGBA(card->format, 100, 100, 120, 200));
+
+    const SDL_Color title_c = {100, 200, 255, 255};
+    const SDL_Color body_c = {210, 215, 225, 255};
+    const SDL_Color accent_c = {255, 200, 100, 255};
+
+    if (title_f && body_f) {
+        diagnostics_blit_line(card, title_f, "DIAGNOSTICS", title_c, text_left, title_y);
+        diagnostics_blit_line(card, body_f, line0, body_c, text_left, body0_y);
+        diagnostics_blit_line(card, body_f, line1, accent_c, text_left, body0_y + line_h);
+        diagnostics_blit_line(card, body_f, line2, body_c, text_left, body0_y + 2 * line_h);
+        diagnostics_blit_line(card, body_f, line3, body_c, text_left, body0_y + 3 * line_h);
+        diagnostics_blit_line(card, body_f, line4, body_c, text_left, body0_y + 4 * line_h);
+        diagnostics_blit_line(card, body_f, line5, body_c, text_left, body0_y + 5 * line_h);
+        diagnostics_blit_line(card, body_f, line6, body_c, text_left, body0_y + 6 * line_h);
+    }
+
+    const int bx0 = text_left;
+    const int graph_y0 = text_block_h + 4;
+    if (show_graph_labels) {
+        diagnostics_blit_line(card, body_f, "Luminance (64 bins)", body_c, text_left, graph_y0);
+    }
+    const int hist_y0 = show_graph_labels ? (graph_y0 + luma_caption_block) : graph_y0;
+    SDL_Rect hist_back = {text_left - 4, hist_y0 - 2, bar_total_w + 8, h_max + 6};
+    SDL_FillRect(card, &hist_back, SDL_MapRGBA(card->format, 25, 28, 38, 200));
     for (int i = 0; i < 64; ++i) {
         const int bh = static_cast<int>((static_cast<uint64_t>(bins64[i]) * static_cast<uint64_t>(h_max)) /
                                          static_cast<uint64_t>(mx));
-        const int bx = base_x + (i * bar_total_w) / 64;
+        const int bx = bx0 + (i * bar_total_w) / 64;
         const int bw = std::max(1, bar_total_w / 64 - 1);
-        SDL_Rect bar = {bx, base_y + h_max - bh, bw, std::max(1, bh)};
+        SDL_Rect bar = {bx, hist_y0 + h_max - bh, bw, std::max(1, bh)};
         const int t = (i * 4) + 32;
-        SDL_SetRenderDrawColor(renderer, std::min(255, t + 40), std::min(255, 180 - i), 220, 230);
-        SDL_RenderFillRect(renderer, &bar);
+        SDL_FillRect(card, &bar,
+                     SDL_MapRGBA(card->format, std::min(255, t + 40), std::min(255, 180 - i), 220, 235));
     }
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+    int y = hist_y0 + h_max + 8;
+    if (show_graph_labels) {
+        diagnostics_blit_line(card, body_f, "Luma CDF (cumulative fraction)", body_c, text_left, y);
+        y += cdf_caption_h;
+    }
+    diag_draw_luma_cdf(card, bx0, y, bar_total_w, cdf_plot_h, bins64, total_px);
+    y += cdf_plot_h + 8;
+
+    if (show_graph_labels) {
+        diagnostics_blit_line(card, body_f, "RGB (64 bins / channel)", body_c, text_left, y);
+        y += rgb_caption_h;
+    }
+    diag_draw_hist_64(card, bx0, y, bar_total_w, rgb_hist_h, r64, 220, 95, 95);
+    y += rgb_hist_h + rgb_gap;
+    diag_draw_hist_64(card, bx0, y, bar_total_w, rgb_hist_h, g64, 90, 200, 110);
+    y += rgb_hist_h + rgb_gap;
+    diag_draw_hist_64(card, bx0, y, bar_total_w, rgb_hist_h, b64, 100, 140, 245);
+    y += rgb_hist_h + 8;
+
+    if (show_graph_labels) {
+        diagnostics_blit_line(card, body_f, "Mean luma vs row (Y)", body_c, text_left, y);
+        y += 14;
+    }
+    diag_draw_sparkline(card, bx0, y, bar_total_w, spark_plot_h, row_luma, kCpuDiagProfileN, 180, 220, 120);
+    y += spark_plot_h + 8;
+
+    if (show_graph_labels) {
+        diagnostics_blit_line(card, body_f, "Mean luma vs column (X)", body_c, text_left, y);
+        y += 14;
+    }
+    diag_draw_sparkline(card, bx0, y, bar_total_w, spark_plot_h, col_luma, kCpuDiagProfileN, 120, 190, 255);
+
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, card);
+    SDL_FreeSurface(card);
+    if (!tex) return;
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    SDL_Rect dest = {card_x, card_y, card_w, card_h};
+    SDL_RenderCopy(renderer, tex, nullptr, &dest);
+    SDL_DestroyTexture(tex);
 }
 
 static bool rt_profile_enabled() {
@@ -2854,7 +3141,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  1-6           - Change quality level\n";
     std::cout << "  C             - Toggle interactive controls panel\n";
     std::cout << "  H             - Toggle help overlay\n";
-    std::cout << "  G             - Toggle live luminance histogram\n";
+    std::cout << "  G             - Toggle diagnostics overlay (histogram + stats)\n";
     std::cout << "  F5            - Reload camera from config (or RT_HOT_RELOAD_CAMERA)\n";
     std::cout << "  R             - Toggle CPU/GPU renderer\n";
     std::cout << "  Space         - Pause rendering\n";
@@ -2883,7 +3170,7 @@ int main(int argc, char* argv[]) {
                         break;
                     case SDLK_g:
                         show_luma_histogram = !show_luma_histogram;
-                        std::cout << "Luminance histogram: " << (show_luma_histogram ? "ON" : "OFF") << std::endl;
+                        std::cout << "Diagnostics overlay: " << (show_luma_histogram ? "ON" : "OFF") << std::endl;
                         break;
                     case SDLK_F5: {
                         struct stat st;
@@ -3444,8 +3731,57 @@ int main(int argc, char* argv[]) {
 
         if (show_luma_histogram && !framebuffer.empty() && image_width > 0 && image_height > 0) {
             uint32_t hbins[64];
+            uint32_t r_bins[64], g_bins[64], b_bins[64];
+            float row_luma[kCpuDiagProfileN];
+            float col_luma[kCpuDiagProfileN];
             rgb24_post::histogram_luminance_64(framebuffer, image_width, image_height, hbins);
-            render_luminance_histogram_overlay(renderer, hbins, window_width, window_height);
+            rgb24_post::histogram_rgb_channels_64(framebuffer, image_width, image_height, r_bins, g_bins, b_bins);
+            rgb24_post::luminance_row_profile(framebuffer, image_width, image_height, kCpuDiagProfileN, row_luma);
+            rgb24_post::luminance_col_profile(framebuffer, image_width, image_height, kCpuDiagProfileN, col_luma);
+            float mr = 0.f, mg = 0.f, mb = 0.f, ml = 0.f, lmin = 0.f, lmax = 0.f;
+            rgb24_post::rgb24_mean_luminance_bounds(framebuffer, image_width, image_height, mr, mg, mb, ml, lmin, lmax);
+
+            TTF_Font* diag_title = nullptr;
+            TTF_Font* diag_body = nullptr;
+            if (controls_panel.has_overlay_fonts()) {
+                diag_title = controls_panel.overlay_title_font();
+                diag_body = controls_panel.overlay_body_font();
+            } else if (help_overlay.has_overlay_fonts()) {
+                diag_title = help_overlay.overlay_title_font();
+                diag_body = help_overlay.overlay_body_font();
+            }
+
+            char pathbuf[128];
+            int pb = 0;
+            if (ray_renderer.enable_progressive)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "Prog ");
+            if (ray_renderer.enable_adaptive)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "Adapt ");
+            if (ray_renderer.enable_simd_packets)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "SIMD ");
+            if (ray_renderer.enable_wavefront)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "WF ");
+            if (enable_morton)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "Morton ");
+            if (enable_stratified)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "Strat ");
+            if (ray_renderer.enable_bvh)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "BVH ");
+            if (enable_frustum)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "Frus ");
+            if (enable_denoiser)
+                pb += snprintf(pathbuf + pb, sizeof(pathbuf) - static_cast<size_t>(pb), "Denoise ");
+            while (pb > 0 && pathbuf[pb - 1] == ' ') {
+                pathbuf[--pb] = '\0';
+            }
+            if (pb == 0) {
+                snprintf(pathbuf, sizeof(pathbuf), "defaults");
+            }
+
+            render_diagnostics_g_overlay(renderer, diag_title, diag_body, hbins, r_bins, g_bins, b_bins, row_luma,
+                                       col_luma, window_width, window_height, image_width, image_height, preset.samples,
+                                       preset.max_depth, fps, render_time, analysis.get_mode_name(), mr, mg, mb, ml, lmin,
+                                       lmax, pathbuf, paused);
         }
 
         // Render controls panel if active

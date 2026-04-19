@@ -19,7 +19,7 @@ High-performance CPU ray tracer with AVX2 SIMD vectorization and OpenMP multi-th
 - ✅ Screenshot button UX: latched “pressed” (dark) styling from mouse-down on the button until global **left mouse up** (`screenshot_button_pressed` + `release_pressed_buttons()`)
 - ✅ Post denoiser amount slider (0-100%) in CPU controls panel
 - ✅ Improved denoiser quality path (separable bilateral, variance-guided blend, bilinear upscale)
-- ✅ Live luminance histogram overlay (G), camera hot-reload file (F5 / RT_HOT_RELOAD_POLL)
+- ✅ **G** diagnostics card: text stats plus **luma** 64-bin histogram (**labeled**), **luma CDF** line (cumulative fraction vs bin, with 50%/90% reference lines), **R/G/B** histograms, **mean luma vs row/column** sparklines (`rgb24_postprocess.h`). **H** help matches settings chrome. Camera hot-reload (F5 / RT_HOT_RELOAD_POLL)
   - **Hot reload:** Edit `config/camera_hot_reload.txt` (copy from `config/camera_hot_reload.txt.example`) or set `RT_HOT_RELOAD_CAMERA` to a file path. Required keys: `eye` (or `lookfrom`) and `at` (or `lookat`); optional `up`/`vup`, `vfov`, `aperture`, `focus`/`dist_to_focus`. Press **F5** to reload from disk. Set **`RT_HOT_RELOAD_POLL`** (any value) to watch mtime and reload automatically about every 90 frames.
 
 ### Public site (GitHub Pages / Vercel)

@@ -68,6 +68,24 @@ std::string generate_output_filename(const std::string& prefix = "output", const
     return ss.str();
 }
 
+namespace {
+
+// Human-readable duration for stderr (steady_clock deltas).
+std::string format_duration_hms(double seconds) {
+    if (seconds < 0.0)
+        seconds = 0.0;
+    const int minutes = static_cast<int>(seconds / 60.0);
+    const double rem = seconds - 60.0 * static_cast<double>(minutes);
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(3) << seconds << " s";
+    if (minutes > 0) {
+        os << " (" << minutes << "m " << std::setprecision(3) << rem << "s)";
+    }
+    return os.str();
+}
+
+}  // namespace
+
 int main(int argc, char* argv[]) {
     // Default settings
     const float aspect_ratio = 16.0f / 9.0f;
@@ -149,10 +167,6 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::seconds(2));  // Give time to read warning
     }
 
-    // Performance tracking
-    PerformanceTracker perf("Phase 2++: Multi-threaded Renderer (AA + PNG + OpenMP)", image_width, image_height,
-                           samples_per_pixel, max_depth);
-
     // Camera setup
     Point3 lookfrom(0, 2, 14);  // Move one unit closer to room center
     Point3 lookat(0, 2, 0);     // Looking at center height
@@ -195,6 +209,12 @@ int main(int argc, char* argv[]) {
     #ifdef _OPENMP
     std::cerr << "OpenMP threads: " << omp_get_max_threads() << std::endl;
     #endif
+
+    using render_clock = std::chrono::steady_clock;
+    const render_clock::time_point render_t0 = render_clock::now();
+    // Wall time from first ray work through image write (scene already built above).
+    PerformanceTracker perf("Phase 2++: Multi-threaded Renderer (AA + PNG + OpenMP)", image_width, image_height,
+                           samples_per_pixel, max_depth);
 
 #if ENABLE_MORTON
     const bool use_morton_render = true;
@@ -281,9 +301,16 @@ int main(int argc, char* argv[]) {
     }
     }
 
+    const render_clock::time_point render_t1 = render_clock::now();
+    const double ray_cast_seconds =
+        std::chrono::duration<double>(render_t1 - render_t0).count();
+
     std::cerr << "\n";
+    std::cerr << "--- Timing ---\n";
+    std::cerr << "Ray casting (framebuffer): " << format_duration_hms(ray_cast_seconds) << "\n";
 
     // Write PNG output using stb_image_write
+    const render_clock::time_point io_t0 = render_clock::now();
     stbi_write_png(png_filename.c_str(), image_width, image_height, 3,
                    framebuffer.data(), image_width * 3);
 
@@ -310,6 +337,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "  PNG: " << png_filename << "\n";
         std::cerr << "  PPM: " << ppm_filename << "\n";
     }
+
+    const render_clock::time_point io_t1 = render_clock::now();
+    const double io_seconds = std::chrono::duration<double>(io_t1 - io_t0).count();
+    std::cerr << "Image encode & disk write:  " << format_duration_hms(io_seconds) << "\n";
+    std::cerr << "Ray cast + I/O (wall):      " << format_duration_hms(ray_cast_seconds + io_seconds)
+              << "\n";
 
     // Calculate and print performance statistics
     perf.calculate_ray_count();

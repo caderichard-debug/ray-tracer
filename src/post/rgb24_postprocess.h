@@ -206,4 +206,124 @@ inline void histogram_luminance_64(const std::vector<unsigned char>& rgb, int w,
     }
 }
 
+// Mean RGB [0,255], mean luminance [0,1], and luminance min/max (parallel).
+inline void rgb24_mean_luminance_bounds(const std::vector<unsigned char>& rgb, int w, int h, float& mean_r,
+                                        float& mean_g, float& mean_b, float& mean_l, float& min_l, float& max_l) {
+    const size_t count = static_cast<size_t>(w) * static_cast<size_t>(h);
+    if (w <= 0 || h <= 0 || rgb.size() < count * 3u) {
+        mean_r = mean_g = mean_b = mean_l = min_l = max_l = 0.0f;
+        return;
+    }
+    double sr = 0.0, sg = 0.0, sb = 0.0, sl = 0.0;
+    float lmin = 1.0f;
+    float lmax = 0.0f;
+    #pragma omp parallel for reduction(+ : sr, sg, sb, sl) reduction(min : lmin) reduction(max : lmax) schedule(static)
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3u;
+            const unsigned char R = rgb[i];
+            const unsigned char G = rgb[i + 1];
+            const unsigned char B = rgb[i + 2];
+            sr += static_cast<double>(R);
+            sg += static_cast<double>(G);
+            sb += static_cast<double>(B);
+            const float lu = luminance_u8(R, G, B);
+            sl += static_cast<double>(lu);
+            lmin = std::min(lmin, lu);
+            lmax = std::max(lmax, lu);
+        }
+    }
+    const double inv = 1.0 / static_cast<double>(count);
+    mean_r = static_cast<float>(sr * inv);
+    mean_g = static_cast<float>(sg * inv);
+    mean_b = static_cast<float>(sb * inv);
+    mean_l = static_cast<float>(sl * inv);
+    min_l = lmin;
+    max_l = lmax;
+}
+
+// Samples along image height: mean luminance of selected rows (parallel). `n_out` typically 96.
+inline void luminance_row_profile(const std::vector<unsigned char>& rgb, int w, int h, int n_out, float* out) {
+    if (n_out <= 0) return;
+    if (w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 3u) {
+        for (int k = 0; k < n_out; ++k) out[k] = 0.0f;
+        return;
+    }
+    #pragma omp parallel for schedule(static)
+    for (int k = 0; k < n_out; ++k) {
+        const int row = (h == 1) ? 0 : static_cast<int>((static_cast<long long>(k) * (h - 1)) / std::max(1, n_out - 1));
+        double sum = 0.0;
+        const size_t row_off = static_cast<size_t>(row) * static_cast<size_t>(w) * 3u;
+        for (int x = 0; x < w; ++x) {
+            const size_t i = row_off + static_cast<size_t>(x) * 3u;
+            sum += luminance_u8(rgb[i], rgb[i + 1], rgb[i + 2]);
+        }
+        out[k] = static_cast<float>(sum * (1.0 / static_cast<double>(w)));
+    }
+}
+
+// Samples along image width: mean luminance of selected columns (parallel).
+inline void luminance_col_profile(const std::vector<unsigned char>& rgb, int w, int h, int n_out, float* out) {
+    if (n_out <= 0) return;
+    if (w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 3u) {
+        for (int k = 0; k < n_out; ++k) out[k] = 0.0f;
+        return;
+    }
+    #pragma omp parallel for schedule(static)
+    for (int k = 0; k < n_out; ++k) {
+        const int col = (w == 1) ? 0 : static_cast<int>((static_cast<long long>(k) * (w - 1)) / std::max(1, n_out - 1));
+        double sum = 0.0;
+        for (int y = 0; y < h; ++y) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(col)) * 3u;
+            sum += luminance_u8(rgb[i], rgb[i + 1], rgb[i + 2]);
+        }
+        out[k] = static_cast<float>(sum * (1.0 / static_cast<double>(h)));
+    }
+}
+
+// Three 64-bin histograms (channel value mapped 0..255 -> bin 0..63).
+inline void histogram_rgb_channels_64(const std::vector<unsigned char>& rgb, int w, int h, uint32_t r64[64],
+                                        uint32_t g64[64], uint32_t b64[64]) {
+    for (int i = 0; i < 64; ++i) {
+        r64[i] = g64[i] = b64[i] = 0;
+    }
+    if (w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 3u) {
+        return;
+    }
+    const int threads = std::max(1, omp_get_max_threads());
+    std::vector<uint32_t> local(static_cast<size_t>(threads) * 64u * 3u, 0u);
+    #pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        uint32_t* pr = local.data() + static_cast<size_t>(tid) * 64u * 3u;
+        uint32_t* pg = pr + 64u;
+        uint32_t* pb = pg + 64u;
+        #pragma omp for schedule(static)
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3u;
+                const int R = rgb[i];
+                const int G = rgb[i + 1];
+                const int B = rgb[i + 2];
+                const int br = static_cast<int>((static_cast<uint64_t>(R) * 63ull) / 255ull);
+                const int bg = static_cast<int>((static_cast<uint64_t>(G) * 63ull) / 255ull);
+                const int bb = static_cast<int>((static_cast<uint64_t>(B) * 63ull) / 255ull);
+                pr[static_cast<size_t>(std::clamp(br, 0, 63))]++;
+                pg[static_cast<size_t>(std::clamp(bg, 0, 63))]++;
+                pb[static_cast<size_t>(std::clamp(bb, 0, 63))]++;
+            }
+        }
+    }
+    for (int t = 0; t < threads; ++t) {
+        const uint32_t* sr = local.data() + static_cast<size_t>(t) * 64u * 3u;
+        const uint32_t* sg = sr + 64u;
+        const uint32_t* sb = sg + 64u;
+        for (int i = 0; i < 64; ++i) {
+            r64[i] += sr[i];
+            g64[i] += sg[i];
+            b64[i] += sb[i];
+        }
+    }
+}
+
 } // namespace rgb24_post

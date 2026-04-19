@@ -90,7 +90,8 @@ public:
         std::cerr << "Max Depth:        " << max_depth << "\n";
         std::cerr << "Total Rays:       " << std::fixed << std::setprecision(0)
                   << (double)total_rays << "\n";
-        std::cerr << "Render Time:      " << std::setprecision(3) << seconds << " seconds\n";
+        std::cerr << "Wall time:        " << std::setprecision(3) << seconds
+                  << " s (timer spans framebuffer fill + image write; throughput uses this)\n";
         std::cerr << "Throughput:       " << std::setprecision(2) << get_rays_per_second() / 1e6
                   << " MRays/sec\n";
         std::cerr << "Pixel Rate:       " << std::setprecision(0) << get_pixels_per_second()

@@ -29,7 +29,7 @@ A high-performance **CPU-first** ray tracer in C++ (AVX2 + OpenMP) with an SDL2 
 - Advanced optimization stack (SIMD + OpenMP + progressive/adaptive/wavefront paths)
 - Full settings panel with live controls (**translucent** RGBA panel composited over the render view)
 - Post denoise amount slider (0-100%) + separable bilateral / variance-guided blend (`src/post/rgb24_postprocess.h`)
-- Analysis modes (normals, depth, albedo) + live luminance histogram (**G**)
+- Analysis modes (normals, depth, albedo) + **G** diagnostics overlay (luma + RGB histograms, row/column mean-luma profiles, timing stats); **H** help matches settings panel chrome
 - Window screenshot (**S** / panel): `SDL_RenderReadPixels` **after** scene draw, **before** UI overlays; **RGB24** preferred else `SDL_ConvertPixels` → RGBA for correct colors; panel click queues capture **one frame later** so the pressed UI paints first
 - Camera hot reload: `config/camera_hot_reload.txt` or `RT_HOT_RELOAD_CAMERA`, **F5**; optional `RT_HOT_RELOAD_POLL`
 - **Agent context**: claude-raytracer-cpu.md
@@ -47,7 +47,7 @@ A high-performance **CPU-first** ray tracer in C++ (AVX2 + OpenMP) with an SDL2 
 
 ### Shared Components
 - **src/renderer/renderer.cpp**: Core ray tracing engine (CPU + ASCII)
-- **src/post/rgb24_postprocess.h**: CPU interactive post (histogram, denoise helpers)
+- **src/post/rgb24_postprocess.h**: CPU interactive post (luma/RGB histograms, row/column luma profiles, denoise helpers)
 - **src/scene/cornell_box.h**: Standard test scene (all modes)
 - **src/material/material.h**: Material definitions (shared)
 - **Makefile**: Unified build system with feature flags; **`make regression-test`** for deterministic PPM hash (`tests/regression/`)
