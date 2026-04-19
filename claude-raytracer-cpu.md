@@ -14,8 +14,9 @@ High-performance CPU ray tracer with AVX2 SIMD vectorization and OpenMP multi-th
 - ✅ Quality presets (6 levels: 320x180 to 1920x1080)
 - ✅ Camera controls (WASD + mouse)
 - ✅ Analysis modes (normals, depth, albedo)
-- ✅ Screenshot system (PNG): **S** / panel button save a **full render-target** grab via `SDL_RenderReadPixels` immediately after the scene texture is drawn (excludes histogram, controls panel, help). Uses **RGB24** when supported, otherwise reads with the backend format and **`SDL_ConvertPixels`** to **RGBA8888** before `stbi_write_png` (avoids ARGB/BGRA channel-order tinting).
+- ✅ Screenshot system (PNG): **S** / panel button save a **full render-target** grab via `SDL_RenderReadPixels` immediately after the scene texture is drawn (excludes histogram, controls panel, help). Uses **RGB24** when supported, otherwise reads with the backend format and **`SDL_ConvertPixels`** to **RGBA8888** before `stbi_write_png` (avoids ARGB/BGRA channel-order tinting). Panel screenshot queues capture **one frame later** so the pressed button can render before `stbi_write_png` work.
 - ✅ Settings panel with live controls (RGBA surface + `SDL_BLENDMODE_BLEND` on panel textures for translucency over the render view)
+- ✅ Screenshot button UX: latched “pressed” (dark) styling from mouse-down on the button until global **left mouse up** (`screenshot_button_pressed` + `release_pressed_buttons()`)
 - ✅ Post denoiser amount slider (0-100%) in CPU controls panel
 - ✅ Improved denoiser quality path (separable bilateral, variance-guided blend, bilinear upscale)
 - ✅ Live luminance histogram overlay (G), camera hot-reload file (F5 / RT_HOT_RELOAD_POLL)
@@ -54,7 +55,7 @@ High-performance CPU ray tracer with AVX2 SIMD vectorization and OpenMP multi-th
   - Advanced rendering modes: progressive, adaptive, wavefront
   - Settings panel with live feature toggles
   - Analysis modes: normals, depth, albedo visualization
-  - Screenshot capture (PNG)
+  - Window screenshot capture (PNG, no UI overlays) + translucent panel + hot reload (see bullets above)
 
 **Rendering Engine:**
 - **src/renderer/renderer.h** - Renderer class interface

@@ -1,41 +1,41 @@
 # SIMD Ray Tracer - Manager Agent Context
 
 ## Project Overview
-A high-performance ray tracer built from scratch in C++ with three distinct rendering modes: CPU interactive (advanced optimizations), GPU interactive (massive parallelism), and ASCII terminal (retro aesthetics). This manager context provides oversight for coordinating development across all three components.
+A high-performance **CPU-first** ray tracer in C++ (AVX2 + OpenMP) with an SDL2 interactive mode, batch/offline rendering, and an ASCII terminal mode. **GPU interactive** exists in the tree but is **work in progress (WIP)** and is not the primary product surface right now. This manager context coordinates CPU-focused development while keeping ASCII and GPU paths from drifting too far.
+
+**Primary repo:** `https://github.com/caderichard-debug/ray-tracer` (default branch `main`).
 
 ## Current Development Status
 
 ### Active Development Instances
-- **CPU Agent**: Working on CPU renderer optimizations and advanced features
-- **GPU Agent**: Working on GPU renderer with OpenGL compute shaders
-- **ASCII Agent**: Working on terminal-based rendering and aesthetics
-- **Documentation**: Keeping all documentation synchronized
+- **CPU Agent**: Primary owner — interactive UX, post-processing, regression harness, documentation
+- **GPU Agent**: Secondary — stabilize GPU interactive/batch paths; treat as **WIP** until parity/CI land
+- **ASCII Agent**: Terminal renderer polish and cross-platform behavior
+- **Documentation**: README is **CPU-first**; GPU sections are intentionally minimal/WIP
 
 ### Component Status
-- ✅ **CPU Renderer**: Fully functional with 23.2x optimization stack
-- ✅ **GPU Renderer**: Standalone GLSL 1.20 implementation (60-300x faster)
+- ✅ **CPU Renderer**: Primary — interactive + batch, optimization stack, denoise pipeline, regression test (`make regression-test`)
+- 🚧 **GPU Renderer**: **WIP** — OpenGL/GLSL path; do not assume feature parity or stable performance claims vs CPU
 - ✅ **ASCII Renderer**: Cross-platform terminal rendering
-- ✅ **Build System**: Unified Makefile with feature flags
-- ✅ **Documentation**: Comprehensive docs for all components
+- ✅ **Build System**: Unified Makefile with feature flags (`ENABLE_OPENMP=0/1` controls OpenMP linkage for deterministic batch)
+- ✅ **Documentation**: README + agent `claude-*.md` + this file; `docs/path-tracing-plan.md` for roadmap notes
 
 ## Architecture Overview
 
 ### Three Rendering Modes
 
 **CPU Interactive (main_cpu_interactive.cpp)**
-- Advanced optimization stack (23.2x speedup)
-- Progressive, adaptive, wavefront rendering modes
-- Full settings panel with live controls
-- Post denoise amount slider (0-100%) with improved detail retention
-- Analysis modes (normals, depth, albedo)
+- Advanced optimization stack (SIMD + OpenMP + progressive/adaptive/wavefront paths)
+- Full settings panel with live controls (**translucent** RGBA panel composited over the render view)
+- Post denoise amount slider (0-100%) + separable bilateral / variance-guided blend (`src/post/rgb24_postprocess.h`)
+- Analysis modes (normals, depth, albedo) + live luminance histogram (**G**)
+- Window screenshot (**S** / panel): `SDL_RenderReadPixels` **after** scene draw, **before** UI overlays; **RGB24** preferred else `SDL_ConvertPixels` → RGBA for correct colors; panel click queues capture **one frame later** so the pressed UI paints first
+- Camera hot reload: `config/camera_hot_reload.txt` or `RT_HOT_RELOAD_CAMERA`, **F5**; optional `RT_HOT_RELOAD_POLL`
 - **Agent context**: claude-raytracer-cpu.md
 
-**GPU Interactive (main_gpu_interactive.cpp)**
-- GLSL 1.20 standalone implementation
-- 60-300x speedup over CPU
-- Real-time performance focus
-- Different feature set (optimizing for throughput)
-- **Agent context**: claude-raytracer-gpu.md
+**GPU Interactive (main_gpu_interactive.cpp) — WIP**
+- Separate SDL + OpenGL path; not guaranteed to match CPU feature set
+- **Agent context**: claude-raytracer-gpu.md (read the WIP banner at the top)
 
 **ASCII Terminal (main_ascii.cpp)**
 - Pure terminal rendering (no GUI)
@@ -46,9 +46,10 @@ A high-performance ray tracer built from scratch in C++ with three distinct rend
 
 ### Shared Components
 - **src/renderer/renderer.cpp**: Core ray tracing engine (CPU + ASCII)
+- **src/post/rgb24_postprocess.h**: CPU interactive post (histogram, denoise helpers)
 - **src/scene/cornell_box.h**: Standard test scene (all modes)
 - **src/material/material.h**: Material definitions (shared)
-- **Makefile**: Unified build system with feature flags
+- **Makefile**: Unified build system with feature flags; **`make regression-test`** for deterministic PPM hash (`tests/regression/`)
 
 ## Build System Coordination
 
@@ -80,13 +81,16 @@ ENABLE_WAVEFRONT=1          # 1.358x
 
 **Build Targets:**
 ```bash
-# CPU rendering
+# CPU rendering (primary)
 make batch-cpu         # CPU batch with feature flags
 make interactive-cpu   # CPU interactive (SDL2)
 
-# GPU rendering
-make batch-gpu         # GPU batch
-make interactive-gpu   # GPU interactive (GLSL 1.20)
+# Regression / quality gates
+make regression-test   # Deterministic PPM SHA-256 vs golden (see tests/regression/README.md)
+
+# GPU rendering (WIP — may not be enabled in all environments)
+make batch-gpu         # GPU batch (if target exists)
+make interactive-gpu   # GPU interactive (if target exists)
 
 # ASCII rendering
 make ascii             # ASCII terminal
@@ -94,7 +98,7 @@ make runa              # Run ASCII terminal
 
 # Performance comparison
 make benchmark         # CPU feature combinations
-make benchmark-cpu-gpu  # CPU vs GPU comparison
+make benchmark-cpu-gpu # CPU vs GPU comparison (only meaningful once GPU path is stable)
 ```
 
 ## Performance Coordination
@@ -104,7 +108,7 @@ make benchmark-cpu-gpu  # CPU vs GPU comparison
 | Renderer | Baseline | Optimized | Speedup | Best Use Case |
 |----------|----------|-----------|---------|---------------|
 | **CPU** | 67.2s | 1.5s | 43.7x | Flexibility, features |
-| **GPU** | N/A | 0.25s | 160x+ | Raw throughput |
+| **GPU** | — | — | — | **WIP** — throughput path not primary |
 | **ASCII** | N/A | N/A | N/A | Aesthetics, education |
 
 ### Performance Stack Breakdown
@@ -115,11 +119,9 @@ make benchmark-cpu-gpu  # CPU vs GPU comparison
 - + OpenMP: 3.4s (19.8x)
 - + Optimizations: 1.5s (43.7x total)
 
-**GPU Performance:**
-- No CPU feature parity needed
-- Direct GPU implementation
-- 60-300x faster depending on GPU tier
-- Optimized for throughput over flexibility
+**GPU Performance (WIP):**
+- Do not publish GPU-vs-CPU marketing numbers from this file until the GPU path is stable and reproducible in CI
+- Treat GPU work as exploratory throughput until parity and test coverage catch up
 
 ## Agent Coordination Strategy
 
@@ -394,10 +396,10 @@ make benchmark-cpu-gpu  # Cross-mode comparison
 - Features: Progressive, adaptive, wavefront working
 - Usability: Smooth interactive experience
 
-**GPU Renderer:**
-- Performance: 60-300x speedup achieved
-- Compatibility: OpenGL 2.0+ working
-- Real-time: 60+ FPS at reasonable quality
+**GPU Renderer (WIP):**
+- Goal: stable OpenGL/GLSL interactive path + credible benchmarks vs CPU
+- Compatibility: OpenGL 2.0+ class hardware (exact requirements TBD while WIP)
+- Quality bar: match README “GPU is WIP” messaging until parity/CI exists
 
 **ASCII Renderer:**
 - Aesthetics: Recognizable 3D scenes
@@ -482,15 +484,13 @@ ray-tracer/
   - Progressive Rendering (3.164x speedup)
   - Adaptive Sampling (1.702x speedup)
   - Wavefront Rendering (1.358x speedup)
-- Settings panel with live adjustments
-- Analysis modes (normals, depth, albedo)
-- Screenshot capture
+- Translucent settings panel (RGBA surfaces + blended textures)
+- Analysis modes (normals, depth, albedo) + optional luminance histogram overlay
+- Window screenshots (no UI overlays) + hot-reload camera file (`F5`, optional `RT_HOT_RELOAD_POLL`)
 
-**GPU Interactive (main_gpu_interactive.cpp)**
-- Standalone GPU ray tracer (GLSL 1.20, OpenGL 2.0+)
-- No CPU feature parity - pure GPU implementation
-- Exact CPU Cornell Box scene replication
-- 60-300x faster than CPU (GPU-dependent)
+**GPU Interactive (main_gpu_interactive.cpp) — WIP**
+- Experimental throughput path; do not assume parity with CPU interactive features
+- Treat marketing-style speedup claims as **invalid until re-benchmarked on `main`**
 
 **ASCII Terminal (main_ascii.cpp)**
 - Pure terminal rendering (no GUI)
@@ -572,13 +572,9 @@ ray-tracer/
 - **Adaptive (1.702x)**: Variance-based sampling, uses half the samples
 - **Wavefront (1.358x)**: Tiled rendering for better cache coherence
 
-### GPU Performance
-- **Low-end GPUs**: 30-60 MRays/sec (30-75x faster than CPU)
-- **Mid-range GPUs**: 100-200 MRays/sec (100-250x faster)
-- **High-end GPUs**: 300-500 MRays/sec (300-600x faster)
-- Real-time 1080p at 60+ FPS
-- Best for interactive exploration
-- GLSL 1.20 compatible (OpenGL 2.0+)
+### GPU Performance (WIP)
+- Historical notes may exist elsewhere in this file; **do not treat them as current product claims**
+- Re-measure on target hardware once the GPU renderer is stable and reproducible
 
 ### CPU vs GPU Comparison
 
@@ -590,20 +586,16 @@ ray-tracer/
 - No GPU available
 - Need maximum flexibility
 
-**Use GPU when:**
-- Rendering final high-quality images
-- Real-time interactive exploration
-- High sample counts required
-- Benchmarking raw performance
-- GPU available and compatible
-- Need maximum throughput
+**Use GPU when (once no longer WIP):**
+- You explicitly want the GPU path and can tolerate feature gaps vs CPU interactive
+- You are helping stabilize shaders/builds across platforms
 
-**Performance Comparison (1920x1080, 16 samples):**
+**Performance comparison table (GPU row intentionally omitted while WIP):**
 | Renderer | Time | Speedup |
 |----------|------|---------|
 | CPU (Standard) | 40.0s | 1x |
 | CPU (Progressive) | 12.6s | 3.164x |
-| GPU | 0.25s | 160x |
+| GPU | — | — |
 
 ## Build System
 
@@ -612,12 +604,13 @@ ray-tracer/
 **Building:**
 ```bash
 make batch-cpu         # Build CPU batch ray tracer
-make batch-gpu         # Build GPU batch ray tracer
+make batch-gpu         # Build GPU batch ray tracer (WIP / may vary by platform)
 make interactive-cpu   # Build CPU interactive (SDL2)
 make interactive       # Alias for interactive-cpu
-make interactive-gpu   # Build GPU interactive (GLSL 1.20)
+make interactive-gpu   # Build GPU interactive (WIP / may vary by platform)
 make ascii             # Build ASCII terminal
 make all               # Build default (batch-cpu)
+make regression-test   # CPU deterministic regression (PPM hash)
 ```
 
 **Running:**

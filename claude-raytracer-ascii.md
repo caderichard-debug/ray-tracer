@@ -3,6 +3,8 @@
 ## Project Overview
 Retro-style ray tracer that renders 3D scenes entirely in ASCII art within the terminal. No GUI dependencies - pure text-based rendering with animated camera orbits. Focuses on aesthetic appeal and cross-platform compatibility rather than performance.
 
+**Repository context (2026-04):** The product surface is **CPU-first** (interactive + batch). ASCII remains a **supported secondary** mode for demos and education; GPU work is **WIP** (see `claude-raytracer-gpu.md`).
+
 ## Current Development Status
 
 ### Completed Features

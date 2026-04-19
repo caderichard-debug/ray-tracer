@@ -1,11 +1,15 @@
 # GPU Ray Tracer - Agent Context
 
+## Status (repository-wide, 2026-04)
+
+The **GPU interactive / GPU batch** paths are **work in progress (WIP)**. The public **README** and day-to-day development are **CPU-first**; treat GPU performance numbers and “completed” checklists below as **historical / target** until the GPU build is stable across platforms and covered by the same quality gates as CPU (`make regression-test` exists for CPU batch today).
+
 ## Project Overview
-Standalone GPU ray tracer using GLSL 1.20 (OpenGL 2.0+) for maximum compatibility. Provides 60-300x speedup over CPU through massive parallelism. Focuses on raw throughput rather than feature parity with CPU renderer.
+Standalone GPU ray tracer using GLSL 1.20 (OpenGL 2.0+) for maximum compatibility. When stable, it targets high throughput via massive parallelism, but **feature parity with the CPU renderer is not guaranteed**.
 
 ## Current Development Status
 
-### Completed Features
+### Completed Features (historical checklist — verify against `main` before relying on it)
 - ✅ GLSL 1.20 standalone GPU renderer (OpenGL 2.0+ compatible)
 - ✅ Fragment shader-based ray tracing per pixel
 - ✅ Cornell Box scene replication (exact CPU parity)
