@@ -35,7 +35,7 @@ Blueprint: **`render.yaml`** at the **Git repository root** that contains `showc
 
 The blueprint uses **`plan: free`** (idle spin-down, cold starts ~1 min). For always-on traffic, change to `starter` (or higher) in `render.yaml` or in the service **Settings**.
 
-Manual Web Service (no blueprint): **Root Directory** = `showcase`, **Build** = `npm ci && npm run build`, **Start** = `npm start`, **Node** = 20.x.
+Manual Web Service (no blueprint): **Root Directory** = `showcase`, **Build** = `npm ci --include=dev && npm run build`, **Start** = `npm start`, **Node** = 20.x. (Use `--include=dev` because Render sets `NODE_ENV=production` during install, which otherwise skips devDependencies and breaks `next build` / `next.config`.)
 
 ## Deploy on Vercel
 
