@@ -8,8 +8,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:static": "STATIC_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/ray-tracer NEXT_PUBLIC_SITE_URL=https://caderichard-debug.github.io/ray-tracer next build",
-    "start": "next start",
+    "build:static": "NEXT_PUBLIC_BASE_PATH=/ray-tracer NEXT_PUBLIC_SITE_URL=https://caderichard-debug.github.io/ray-tracer next build",
+    "start": "echo 'Static export only. Serve showcase/out on a static host.' && exit 1",
     "lint": "next lint",
     "build:clean": "rm -rf node_modules .next && npm ci && npm run build",
     "build:prod-install": "NODE_ENV=production npm ci && npm run build"

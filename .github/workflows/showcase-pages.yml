@@ -37,11 +37,7 @@ jobs:
 
       - name: Static export
         working-directory: showcase
-        env:
-          STATIC_EXPORT: "1"
-          NEXT_PUBLIC_BASE_PATH: /ray-tracer
-          NEXT_PUBLIC_SITE_URL: https://caderichard-debug.github.io/ray-tracer
-        run: npm run build
+        run: npm run build:static
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

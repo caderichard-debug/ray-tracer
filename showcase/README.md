@@ -24,26 +24,16 @@ With `next dev`: **`http://localhost:3000/Ray%20Tracer.html`**. With static expo
 
 The Next app at `/` is separate; this file is the editorial handoff page from design.
 
-## Deploy on Render.com
+## Static-only deployment model
 
-Blueprint: **`render.yaml`** at the **Git repository root** that contains `showcase/` (this tree uses **`ray-tracer/render.yaml`** when `ray-tracer` is the repo root). It defines a **Web Service** with `rootDir: showcase`, `npm ci && npm run build`, and `npm start`. If your remote root is one level up (parent folder also holds `poject-showcase/`, etc.), set **`rootDir: ray-tracer/showcase`** in `render.yaml` instead.
+This showcase is configured as a **static-export-only** Next.js app:
 
-1. Push `render.yaml` to GitHub (same repo as this tracer).
-2. In [Render Dashboard](https://dashboard.render.com) → **New** → **Blueprint** → connect the repo → apply the blueprint (or **New** → **Web Service** and set fields manually to match the YAML).
-3. After the first successful deploy, open the service → **Environment** → add **`NEXT_PUBLIC_SITE_URL`** = your service URL (e.g. `https://ray-tracer-showcase.onrender.com`). Redeploy so Open Graph / `metadataBase` and JSON-LD use the right origin.
-4. Do **not** set `STATIC_EXPORT` or `NEXT_PUBLIC_BASE_PATH` on Render unless you intentionally mirror the GitHub Pages layout; the app expects them unset for a normal `*.onrender.com` host.
+- `showcase/next.config.mjs` sets `output: "export"` unconditionally.
+- Build output is `showcase/out/`.
+- There is **no SSR runtime** and no backend/server requirement.
+- `npm start` is intentionally disabled for this package.
 
-The blueprint uses **`plan: free`** (idle spin-down, cold starts ~1 min). For always-on traffic, change to `starter` (or higher) in `render.yaml` or in the service **Settings**.
-
-Manual Web Service (no blueprint): **Root Directory** = `showcase`, **Build** = `npm ci && npm run build`, **Start** = `npm start`, **Node** = 20.x.
-
-Local CI-style check (production install, like Render): `npm run build:prod-install`. Full clean tree: `npm run build:clean`.
-
-## Deploy on Vercel
-
-1. Create a new Vercel project and set the **root directory** to `showcase`.
-2. Leave **Base Path** empty (default). Set `NEXT_PUBLIC_SITE_URL` to your Vercel URL (for example `https://ray-tracer-showcase.vercel.app`) in Project → Environment Variables.
-3. Build command: `npm run build`, output: Next default (`.next`).
+Local CI-style check: `npm run build:prod-install`. Full clean tree: `npm run build:clean`.
 
 ## Deploy on GitHub Pages (project site)
 
